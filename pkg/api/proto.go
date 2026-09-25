@@ -379,6 +379,7 @@ func (a API) ToProto() *apiv1.Api {
 		Capabilities: append([]string(nil), a.Capabilities...),
 		Tags:         append([]string(nil), a.Tags...),
 		Metadata:     copyMetadata(a.Metadata),
+		Transport:    string(a.Transport),
 		Source: &apiv1.ApiSource{
 			Kind:     a.Source.Kind,
 			Location: a.Source.Location,
@@ -432,6 +433,7 @@ func APIFromProto(message *apiv1.Api) (API, error) {
 		Capabilities: append([]string(nil), message.GetCapabilities()...),
 		Tags:         append([]string(nil), message.GetTags()...),
 		Metadata:     copyMetadata(message.GetMetadata()),
+		Transport:    Transport(message.GetTransport()),
 		Source: Source{
 			Kind:     message.GetSource().GetKind(),
 			Location: message.GetSource().GetLocation(),

@@ -162,6 +162,36 @@ surface by accident. A catalog without an invoker still describes and documents 
 operations: a described operation is not a callable one, and the server says which
 half is missing.
 
+### MCP as a format and a target
+
+The gateway is also a provider implementation, because MCP is a format the standard
+model can be read from and rendered into:
+
+- **Read a server.** `mcp.Describe(ctx, endpoint, options)` reads a live server's
+  own tool list into a description, the way a gRPC endpoint is read out of its
+  reflection. A third-party MCP server is registered in the catalog like anything
+  else, exposed by a declared capability, and called through an invoker.
+- **Read a manifest.** `mcp.DescribeDocument` reads a published manifest, so an API
+  published earlier — or carried in a configuration file — can be registered with no
+  server running.
+- **Publish a description.** `mcp.Render` produces tool definitions and
+  `mcp.Manifest` writes them as a document. This is the *same* translation the
+  gateway uses, so a tool published from a description and a tool served from it are
+  the same tool: same name, same arguments, same prose.
+- **Call a tool.** `mcp.Invoker` calls one, keeping a protocol session per endpoint
+  rather than reopening a conversation per call.
+
+A tool manifest states no authorization facts. Capabilities stay empty unless the
+server declared the `x-toolbox-capabilities` extension, so a third-party MCP server
+is not a fully exposed tool surface the moment it is registered — an operation
+nobody declared a capability for is described, not exposed. What a tool *does* say
+about its consequences is carried as side effects, from its annotations.
+
+The provider subsystem `subsystems/apimcp` serves all three contracts for a
+deployment that needs them addressable. Its serving face refuses, and says why:
+forwarding a tool call needs an invoker for the original API's transport, which the
+catalog selects.
+
 ### Choosing the source of the surface
 
 `toolbox mcp` builds its surface from reflection by default. `--mcp-source catalog`

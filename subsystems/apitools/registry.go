@@ -61,7 +61,7 @@ func (r registrar) DescribeAPI(ctx context.Context, request api.DescribeRequest)
 	if r.service == nil {
 		return api.DescribeResult{}, fmt.Errorf("no catalog is configured")
 	}
-	if len(request.Document) == 0 {
+	if len(request.Document) == 0 && strings.TrimSpace(request.BaseURL) == "" {
 		return api.DescribeResult{}, fmt.Errorf("a document or a base url is required")
 	}
 	described, providerID, warnings, formats, err := r.service.parse(

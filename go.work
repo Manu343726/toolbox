@@ -4,6 +4,7 @@ use (
 	.
 	./cmd/toolbox
 	./subsystems/agent
+	./subsystems/apimcp
 	./subsystems/apiopenapi
 	./subsystems/apigrpc
 	./subsystems/apitools

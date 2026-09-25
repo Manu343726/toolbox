@@ -21,6 +21,7 @@ import (
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	agent "github.com/Manu343726/toolbox/subsystems/agent"
 	apigrpc "github.com/Manu343726/toolbox/subsystems/apigrpc"
+	apimcp "github.com/Manu343726/toolbox/subsystems/apimcp"
 	apiopenapi "github.com/Manu343726/toolbox/subsystems/apiopenapi"
 	apitools "github.com/Manu343726/toolbox/subsystems/apitools"
 	documentation "github.com/Manu343726/toolbox/subsystems/documentation"
@@ -309,6 +310,7 @@ func buildHost() (*host.Host, *sharedCatalog, error) {
 		},
 		"apiopenapi":    func() (*subsystem.Server, error) { return apiopenapi.New(apiopenapi.Options{}) },
 		"apigrpc":       func() (*subsystem.Server, error) { return apigrpc.New(apigrpc.Options{}) },
+		"apimcp":        func() (*subsystem.Server, error) { return apimcp.New(apimcp.Options{}) },
 		"documentation": func() (*subsystem.Server, error) { return documentation.New(documentation.Options{}) },
 		"health":        func() (*subsystem.Server, error) { return health.New(health.Options{}) },
 		"knowledge":     func() (*subsystem.Server, error) { return knowledge.New(knowledge.Options{}) },

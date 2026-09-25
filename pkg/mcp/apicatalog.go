@@ -167,23 +167,6 @@ func apiFeatures(
 	return entries
 }
 
-// apiFeatureName is the qualified name one operation is exposed under. The API
-// and service are joined so two APIs that both have a "list" cannot collide, and
-// so a tool name derived from it stays readable.
-func apiFeatureName(described api.API, service string) string {
-	parts := make([]string, 0, 2)
-	if described.ID != "" {
-		parts = append(parts, described.ID)
-	}
-	if service != "" {
-		parts = append(parts, service)
-	}
-	if len(parts) == 0 {
-		return described.Name
-	}
-	return strings.Join(parts, ".")
-}
-
 func apiFeatureEntry(
 	described api.API,
 	service api.Service,
@@ -194,21 +177,17 @@ func apiFeatureEntry(
 	exposures map[string]api.Exposure,
 	initialExposure InitialExposure,
 ) *featureEntry {
-	qualified := apiFeatureName(described, operation.Service)
-	description := operation.Summary
-	if description == "" {
-		description = operation.Description
-	}
-	if description == "" {
-		description = fmt.Sprintf("Call %s.%s through the registered API.", described.ID, operation.Name)
-	}
-	capabilities := append([]string(nil), operation.Capabilities...)
-	if len(capabilities) == 0 {
-		capabilities = append(capabilities, service.Capabilities...)
-	}
-	if len(capabilities) == 0 {
-		capabilities = append(capabilities, described.Capabilities...)
-	}
+	// The tool definition is the shared translation, so a tool served here and a
+	// tool published from the same description are the same tool — same name, same
+	// prose, same schemas, same capabilities.
+	tool := feature{
+		described: described,
+		service:   service,
+		operation: operation,
+		qualified: apiFeatureName(described, operation.Service),
+		streaming: operation.Streaming,
+	}.definition()
+	qualified := tool.Qualified
 	// A description may declare no request or response shape at all, so both are
 	// read defensively rather than assumed.
 	inputRef, outputRef := "", ""
@@ -240,8 +219,8 @@ func apiFeatureEntry(
 			ID:              featureID(qualified, operation.Name),
 			Service:         qualified,
 			Method:          operation.Name,
-			ToolName:        generatedToolName(qualified, operation.Name),
-			Description:     description,
+			ToolName:        tool.Name,
+			Description:     tool.Description,
 			InputType:       inputRef,
 			OutputType:      outputRef,
 			ClientStreaming: operation.Streaming.Client,
@@ -249,52 +228,16 @@ func apiFeatureEntry(
 			Allowed:         allowed,
 			Exposed:         exposed,
 			Callable:        callable,
-			Capabilities:    capabilities,
+			Capabilities:    tool.Capabilities,
 		},
-		inputSchema:        operationArgumentsSchema(operation),
-		outputSchema:       nilSchemaWhenAbsent(operation.Response),
+		inputSchema:        tool.InputSchema,
+		outputSchema:       tool.OutputSchema,
 		serviceDescription: firstNonEmpty(service.Description, described.Description),
 	}
 	if invoker != nil {
 		entry.invoke = apiInvoker(invoker, described, operation, servers)
 	}
 	return entry
-}
-
-// operationArgumentsSchema builds the tool input schema: the operation's declared
-// parameters, plus a body when it takes a request value. A caller supplies values
-// by name, which is what an agent expects from a tool.
-func operationArgumentsSchema(operation api.Operation) map[string]any {
-	properties := make(map[string]any, len(operation.Parameters)+1)
-	required := make([]string, 0, len(operation.Parameters))
-	for _, parameter := range operation.Parameters {
-		entry := map[string]any{}
-		if parameter.Schema != nil {
-			entry = parameter.Schema.JSONSchema()
-		} else {
-			entry["type"] = "string"
-		}
-		if parameter.Description != "" {
-			entry["description"] = parameter.Description
-		}
-		properties[parameter.Name] = entry
-		if parameter.Required {
-			required = append(required, parameter.Name)
-		}
-	}
-	if operation.Request != nil && len(operation.Request.Properties) > 0 {
-		properties["body"] = operation.Request.JSONSchema()
-	}
-	schema := map[string]any{
-		"type":                 "object",
-		"properties":           properties,
-		"additionalProperties": false,
-	}
-	if len(required) > 0 {
-		sort.Strings(required)
-		schema["required"] = required
-	}
-	return schema
 }
 
 // apiInvoker returns the call path for one registered operation.
@@ -331,15 +274,6 @@ func apiInvoker(
 	}
 }
 
-// nilSchemaWhenAbsent reports an absent response shape as a permissive object,
-// because a tool with no declared response must still return something valid.
-func nilSchemaWhenAbsent(schema *api.Schema) map[string]any {
-	if schema == nil {
-		return map[string]any{"type": "object", "additionalProperties": true}
-	}
-	return schema.JSONSchema()
-}
-
 // normalizeArguments makes an empty or absent argument document explicit, so a
 // provider always receives a JSON object.
 func normalizeArguments(arguments json.RawMessage) json.RawMessage {
@@ -348,15 +282,6 @@ func normalizeArguments(arguments json.RawMessage) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	return arguments
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 // APICatalogView exposes a catalog as the JSON a caller sees, so a client can

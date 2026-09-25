@@ -341,13 +341,18 @@ func (s *Service) RenderApi(ctx context.Context, req *connect.Request[apitoolsv1
 	return connect.NewResponse(result), nil
 }
 
-// ParseApi routes a description document to a parser provider and returns the
-// description it produced, without storing it.
+// ParseApi routes a description to a parser provider and returns the description it
+// produced, without storing it.
+//
+// The description may be a document the caller holds or a live endpoint that
+// describes itself. A server that already serves its own contract is the common
+// case, and a catalog that could only read documents would force every caller to
+// obtain bytes the server had already published.
 func (s *Service) ParseApi(ctx context.Context, req *connect.Request[apitoolsv1.ParseApiRequest]) (*connect.Response[apitoolsv1.ParseApiResponse], error) {
 	if req == nil || req.Msg == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("parse request is required"))
 	}
-	document, err := documentBytes(req.Msg.GetDocument(), req.Msg.GetDocumentText())
+	document, err := descriptionBytes(req.Msg.GetDocument(), req.Msg.GetDocumentText(), req.Msg.GetBaseUrl())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
@@ -366,17 +371,21 @@ func (s *Service) ParseApi(ctx context.Context, req *connect.Request[apitoolsv1.
 	return connect.NewResponse(response), nil
 }
 
-// RegisterApi routes a description document to a parser provider and stores the
-// API it produced.
+// RegisterApi routes a description to a parser provider and stores the API it
+// produced. The description may be a document the caller holds or a live endpoint
+// that describes itself.
 func (s *Service) RegisterApi(ctx context.Context, req *connect.Request[apitoolsv1.RegisterApiRequest]) (*connect.Response[apitoolsv1.RegisterApiResponse], error) {
 	if req == nil || req.Msg == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("register request is required"))
 	}
-	document, err := documentBytes(req.Msg.GetDocument(), req.Msg.GetDocumentText())
+	document, err := descriptionBytes(req.Msg.GetDocument(), req.Msg.GetDocumentText(), req.Msg.GetBaseUrl())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	parsed, providerID, _, descriptors, err := s.parse(ctx, document, req.Msg.GetFormat(), req.Msg.GetFormatHint(), req.Msg.GetParserId(), nil, "", "", req.Msg.GetServerId())
+	parsed, providerID, _, descriptors, err := s.parse(
+		ctx, document, req.Msg.GetFormat(), req.Msg.GetFormatHint(), req.Msg.GetParserId(),
+		nil, req.Msg.GetBaseUrl(), req.Msg.GetApiId(), req.Msg.GetServerId(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -668,9 +677,6 @@ func (s *Service) parse(
 	apiID string,
 	serverID string,
 ) (api.API, string, []string, []api.FormatDescriptor, error) {
-	if len(document) == 0 {
-		return api.API{}, "", nil, nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("document is required"))
-	}
 	format = strings.TrimSpace(format)
 	if format == "" {
 		format = strings.TrimSpace(formatHint)
@@ -688,6 +694,11 @@ func (s *Service) parse(
 	client, err := s.directory.Parser(ctx, provider.ID)
 	if err != nil {
 		return api.API{}, "", nil, nil, catalogError(err)
+	}
+	if len(document) == 0 && strings.TrimSpace(baseURL) == "" {
+		return api.API{}, "", nil, nil, connect.NewError(
+			connect.CodeInvalidArgument, fmt.Errorf("a description document or a base url is required"),
+		)
 	}
 	request := &apiv1.ParseApiRequest{
 		Document:   document,
@@ -889,22 +900,33 @@ func providerError(err error) error {
 	return connect.NewError(connect.CodeInternal, err)
 }
 
-// documentBytes resolves the description document a request carries, whether it
-// arrived as bytes or as text, and refuses a request that supplies neither or
-// both.
-func documentBytes(binary []byte, text string) ([]byte, error) {
+// descriptionBytes resolves the description a request carries: a document as bytes
+// or as text, or a live endpoint that describes itself. It refuses a request that
+// supplies more than one form, and one that supplies none.
+func descriptionBytes(binary []byte, text, baseURL string) ([]byte, error) {
 	hasBytes := len(binary) > 0
 	text = strings.TrimSpace(text)
 	hasText := text != ""
+	hasEndpoint := strings.TrimSpace(baseURL) != ""
+	forms := 0
+	for _, present := range []bool{hasBytes, hasText, hasEndpoint} {
+		if present {
+			forms++
+		}
+	}
 	switch {
-	case hasBytes && hasText:
-		return nil, fmt.Errorf("supply either document or document_text, not both")
+	case forms > 1:
+		return nil, fmt.Errorf("supply a document or a base_url, not both")
 	case hasBytes:
 		return binary, nil
 	case hasText:
 		return []byte(text), nil
+	case hasEndpoint:
+		// A live endpoint is described through the parser that handles its
+		// contract, which reads the contract the server itself publishes.
+		return nil, nil
 	default:
-		return nil, fmt.Errorf("a description document is required")
+		return nil, fmt.Errorf("a description document or a base url is required")
 	}
 }
 

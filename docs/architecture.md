@@ -256,6 +256,12 @@ a reason. The MCP gateway can build its tool surface from that catalog, naming t
 same operations as the reflection path, so the source of the surface can be chosen
 per deployment.
 
+The Model Context Protocol is itself one of these formats, in the same package that
+serves it: a live MCP server is read through its own tool list, a published manifest
+is read as a document, and a description is rendered as a manifest. Reading a server
+states no capabilities, so a third-party MCP server's operations stay unexposable
+until a deployment declares what it authorizes.
+
 See [`decisions/0004-api-introspection-and-providers.md`](decisions/0004-api-introspection-and-providers.md)
 for the decision and its consequences.
 

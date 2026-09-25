@@ -41,7 +41,9 @@ Read these before making architectural changes:
 4. **Shared foundation code belongs in the root public packages.** Use
    `pkg/subsystem`, `pkg/core`, `pkg/discovery`, `pkg/docs`, `pkg/cli`,
    `pkg/mcp`, `pkg/cliapp`, `pkg/api`, `pkg/protocontract`, and `pkg/openapi`
-   instead of copying SDK behavior into subsystems.
+   instead of copying SDK behavior into subsystems. A format the framework
+   implements itself lives in a root package; its provider subsystem mounts that
+   package.
 
    Behaviour the framework needs in process belongs in a root package, not in a
    subsystem. A subsystem exists to make an implementation *addressable* over
@@ -83,6 +85,17 @@ Read these before making architectural changes:
    subsystem commands get their `mcp` subcommand through `pkg/cliapp`; the
    combined host composes its aggregated MCP through `pkg/host` and
    `pkg/mcp`. Do not hand-write RPC-specific MCP tools in a subsystem.
+
+11. **One translation, one implementation.** When two paths produce the same
+   artifact — a gateway serving tools and a publisher writing a manifest, for
+   instance — they share one function, and a test asserts they agree. Two
+   translations that agree by accident stop agreeing the first time one changes.
+
+12. **A transport-independent package reports what went wrong, not which code
+   it maps to.** Use `api.Errorf` and `api.WrapError` with an `api.ErrorKind`,
+   and let the transport layer map kinds to its own codes. A plain `fmt.Errorf`
+   in a provider collapses into "internal" and destroys the distinction between a
+   caller's mistake and a misconfigured deployment.
 
 ## OpenCode MCP sessions
 
@@ -167,6 +180,9 @@ SQLite files, or temporary artifacts to Git.
 - Use enums for fixed option sets, `repeated` for multi-value fields, and
   sub-messages to group related options. Do not use comma-separated option
   strings.
+- A description states a transport when the format knows it, in `Api.transport`. A
+  catalog uses that to choose an invoker, so leaving it unset forces a guess between
+  transports at the moment a call is made.
 - Use `int32`/`int64` for numeric values and timestamps where appropriate;
   reserve strings for genuinely textual or opaque identifiers.
 - Generate code with the subsystem Makefile. Generated Go is ignored by design.

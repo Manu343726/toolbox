@@ -34,16 +34,18 @@ capabilities it advertises, so a deployment can find it without the framework
 knowing it exists.
 
 A provider subsystem holds no behaviour. The work lives in a reusable root package —
-`pkg/protocontract` for protobuf contracts, `pkg/openapi` for OpenAPI documents —
-and the subsystem mounts it behind a contract so a catalog in another process can
-reach the same implementation. A host that runs both in one process uses the package
-directly and needs no provider subsystem at all.
+`pkg/protocontract` for protobuf contracts, `pkg/openapi` for OpenAPI documents, and
+`pkg/mcp` for the Model Context Protocol — and the subsystem mounts it behind a
+contract so a catalog in another process can reach the same implementation. A host
+that runs both in one process uses the package directly and needs no provider
+subsystem at all.
 
 | Subsystem      | Contracts served                                        | What it provides                                                                 |
 | -------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `apitools`     | `toolbox.apitools.v1.ApiToolsService`                    | Repository of servers, registered APIs, the format and transport index, and operation exposure; routes parsing, rendering, serving, and invocation to providers. Also usable in process as `api.Catalog`, `api.Registrar`, `api.Invoker`, and `api.ExposureSource` |
 | `apiopenapi`   | `toolbox.api.v1.ApiParserService`, `ApiAdapterService`, `ApiInvokerService` | Parses OpenAPI 3.x documents, renders descriptions into OpenAPI documents, serves an adapted surface with a Swagger UI and a downloadable schema, and invokes operations over HTTP |
 | `apigrpc`      | `toolbox.api.v1.ApiParserService`, `ApiInvokerService`   | Parses protobuf contracts from a FileDescriptorSet or from live reflection, and invokes methods over Connect, gRPC, or gRPC-Web |
+| `apimcp`       | `toolbox.api.v1.ApiParserService`, `ApiAdapterService`, `ApiInvokerService` | Reads a live MCP server's tool list, renders a description as an MCP tool manifest, and calls a tool |
 
 `apitools` is a feature subsystem and can be adopted on its own; the providers work
 without it, and a deployment can run providers in other processes. The provider

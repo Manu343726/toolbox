@@ -1001,3 +1001,55 @@ func normalizedProtoForTest(t *testing.T, id string) *apiv1.Api {
 	require.NoError(t, err)
 	return parsed.ToProto()
 }
+
+func TestServiceDescribesALiveEndpointRatherThanADocument(t *testing.T) {
+	// A server that already publishes its own contract is the common case: the
+	// parser that handles the format reads it from the server, and a caller never
+	// has to obtain bytes the server had already published.
+	provider := &fakeProvider{parse: func(request *apiv1.ParseApiRequest) (*apiv1.ParseApiResponse, error) {
+		assert.Empty(t, request.GetDocument(), "a live endpoint is described without a document")
+		assert.Equal(t, "https://petstore.test/mcp", request.GetBaseUrl())
+		source := testAPI("petstore")
+		described, err := source.Normalize()
+		if err != nil {
+			return nil, err
+		}
+		described.Source = api.Source{Kind: "mcp", Location: request.GetBaseUrl()}
+		return &apiv1.ParseApiResponse{Api: described.ToProto()}, nil
+	}}
+	provider.formats = []api.FormatDescriptor{{ID: testFormat, Name: "Test format"}}
+	service := NewService(newTestStore(t), staticDirectory(t, serveProvider(t, provider), api.ProviderParser))
+
+	described, err := service.ParseApi(context.Background(), connect.NewRequest(&apitoolsv1.ParseApiRequest{
+		Format:  string(testFormat),
+		BaseUrl: "https://petstore.test/mcp",
+		ApiId:   "petstore",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, "petstore", described.Msg.GetApi().GetId())
+	assert.Equal(t, "mcp", described.Msg.GetApi().GetSource().GetKind())
+
+	// The registration path reads the same way, which is what a deployment does
+	// when it points the catalog at a service it does not own.
+	_, _, err = service.store.RegisterServer(testServer("petstore-host"), false)
+	require.NoError(t, err)
+	registered, err := service.RegisterApi(context.Background(), connect.NewRequest(&apitoolsv1.RegisterApiRequest{
+		Format:    string(testFormat),
+		BaseUrl:   "https://petstore.test/mcp",
+		ApiId:     "petstore",
+		ServerId:  "petstore-host",
+		ExposeAll: true,
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, "petstore", registered.Msg.GetApi().GetId())
+	assert.Equal(t, []string{"petstore-host"}, registered.Msg.GetApi().GetServerIds(),
+		"a description read from a live endpoint is bound to the server that served it")
+}
+
+func TestServiceRefusesADescribeWithNoSource(t *testing.T) {
+	service := NewService(newTestStore(t), staticDirectory(t, serveProvider(t, &fakeProvider{}), api.ProviderParser))
+	_, err := service.ParseApi(context.Background(), connect.NewRequest(&apitoolsv1.ParseApiRequest{Format: string(testFormat)}))
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Contains(t, err.Error(), "document or a base url")
+}

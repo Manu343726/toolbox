@@ -290,3 +290,109 @@ func TestValidationErrorMatchesInvalid(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalid)
 }
+
+func TestSchemaFromJSONSchemaReadsTheKeywordsTheModelCarries(t *testing.T) {
+	read := SchemaFromJSONSchema(map[string]any{
+		"$ref":        "#/components/schemas/Pet",
+		"type":        "object",
+		"title":       "New pet",
+		"description": "what to create",
+		"format":      "custom",
+		"deprecated":  true,
+		"readOnly":    true,
+		"properties": map[string]any{
+			"weight": map[string]any{"type": "number", "minimum": float64(1), "maximum": float64(9)},
+			"name":   map[string]any{"type": "string", "minLength": float64(1), "maxLength": float64(40), "pattern": "^[a-z]+$"},
+			"tags":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"kind":   map[string]any{"type": "string", "enum": []any{"cat", "dog"}, "default": "cat"},
+			"owner":  map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			"free":   map[string]any{"type": "object", "additionalProperties": true},
+		},
+		"required": []any{"name"},
+	})
+	require.NotNil(t, read)
+	assert.Equal(t, "#/components/schemas/Pet", read.Ref)
+	assert.Equal(t, TypeObject, read.Type)
+	assert.Equal(t, "New pet", read.Title)
+	assert.Equal(t, "custom", read.Format)
+	assert.True(t, read.Deprecated)
+	assert.True(t, read.ReadOnly)
+	assert.Equal(t, []string{"name"}, read.Required)
+
+	// Properties are read in a stable order, so two reads of one document are
+	// equal and a digest over them means something.
+	require.Len(t, read.Properties, 6)
+	assert.Equal(t, "free", read.Properties[0].Name)
+	assert.Equal(t, "weight", read.Properties[5].Name)
+
+	byName := map[string]*Schema{}
+	required := map[string]bool{}
+	for _, property := range read.Properties {
+		byName[property.Name] = property.Schema
+		required[property.Name] = property.Required
+	}
+	require.NotNil(t, byName["name"])
+	assert.True(t, required["name"], "required is carried on the property, where a consumer reads it")
+	assert.Equal(t, int64(1), *byName["name"].MinLength)
+	assert.Equal(t, "^[a-z]+$", byName["name"].Pattern)
+	require.NotNil(t, byName["tags"].Items)
+	assert.Equal(t, TypeString, byName["tags"].Items.Type)
+	assert.Equal(t, []string{"cat", "dog"}, byName["kind"].Enum)
+	assert.Equal(t, "cat", byName["kind"].Default)
+	assert.Equal(t, 1.0, *byName["weight"].Minimum)
+	require.NotNil(t, byName["owner"].AdditionalProperties)
+	assert.True(t, byName["free"].AdditionalPropertiesAllowed)
+}
+
+func TestSchemaFromJSONSchemaReadsAlternatives(t *testing.T) {
+	read := SchemaFromJSONSchema(map[string]any{
+		"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "integer"}},
+		"anyOf": []any{map[string]any{"type": "null"}},
+	})
+	require.NotNil(t, read)
+	require.Len(t, read.OneOf, 2)
+	assert.Equal(t, TypeString, read.OneOf[0].Type)
+	assert.Equal(t, TypeInteger, read.OneOf[1].Type)
+	require.Len(t, read.AnyOf, 1)
+	assert.Equal(t, TypeNull, read.AnyOf[0].Type)
+}
+
+func TestSchemaFromJSONSchemaTakesTheFirstOfSeveralTypes(t *testing.T) {
+	// JSON Schema allows a list of types and the model has one value for the
+	// field, so the first is taken rather than inventing a union.
+	read := SchemaFromJSONSchema(map[string]any{"type": []any{"string", "null"}})
+	require.NotNil(t, read)
+	assert.Equal(t, TypeString, read.Type)
+}
+
+func TestSchemaFromJSONSchemaReadsAnAbsentDocument(t *testing.T) {
+	assert.Nil(t, SchemaFromJSONSchema(nil), "no document describes no shape")
+	assert.Nil(t, SchemaFromJSONSchema(map[string]any{}))
+}
+
+func TestSchemaFromJSONSchemaSurvivesUnreadableChildren(t *testing.T) {
+	// A child that is not an object must not fail the whole document: a manifest
+	// with one malformed entry still describes every other entry.
+	read := SchemaFromJSONSchema(map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"broken": "not a schema", "fine": map[string]any{"type": "string"}},
+	})
+	require.NotNil(t, read)
+	require.Len(t, read.Properties, 2)
+	assert.Nil(t, read.Properties[0].Schema)
+	require.NotNil(t, read.Properties[1].Schema)
+	assert.Equal(t, TypeString, read.Properties[1].Schema.Type)
+}
+
+func TestAPIRoundTripsItsTransportClaim(t *testing.T) {
+	described := sample()
+	described.Transport = "mcp"
+	normalized, err := described.Normalize()
+	require.NoError(t, err)
+	assert.Equal(t, Transport("mcp"), normalized.Transport)
+
+	restored, err := APIFromProto(normalized.ToProto())
+	require.NoError(t, err)
+	assert.Equal(t, Transport("mcp"), restored.Transport,
+		"a description's transport claim survives the wire, because a catalog needs it to pick an invoker")
+}

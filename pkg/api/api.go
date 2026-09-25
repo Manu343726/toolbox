@@ -268,6 +268,15 @@ type API struct {
 	Services []Service
 	// Metadata holds additional API attributes.
 	Metadata map[string]string
+	// Transport is the transport this API's operations are reached over, such as
+	// connectrpc, http, or mcp.
+	//
+	// It belongs to the description because the format knows it: a protocol that
+	// names its own transport is stating a fact about how its operations are
+	// called, not expressing a preference. A catalog registering the API uses it to
+	// choose an invoker, and a description that names none defers the choice to its
+	// caller.
+	Transport Transport
 }
 
 // DeclaredServer is a location declared by a description document.

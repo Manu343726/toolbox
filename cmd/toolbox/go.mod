@@ -7,6 +7,7 @@ require (
 	github.com/Manu343726/toolbox v0.0.0
 	github.com/Manu343726/toolbox/subsystems/agent v0.0.0
 	github.com/Manu343726/toolbox/subsystems/apigrpc v0.0.0
+	github.com/Manu343726/toolbox/subsystems/apimcp v0.0.0
 	github.com/Manu343726/toolbox/subsystems/apiopenapi v0.0.0
 	github.com/Manu343726/toolbox/subsystems/apitools v0.0.0
 	github.com/Manu343726/toolbox/subsystems/documentation v0.0.0
@@ -19,6 +20,7 @@ require (
 	github.com/Manu343726/toolbox/subsystems/skill v0.0.0
 	github.com/Manu343726/toolbox/subsystems/tool v0.0.0
 	github.com/Manu343726/toolbox/subsystems/workflow v0.0.0
+	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 )
@@ -27,7 +29,6 @@ require (
 	connectrpc.com/grpcreflect v1.3.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.6.1 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
@@ -41,6 +42,8 @@ require (
 )
 
 replace github.com/Manu343726/toolbox => ../..
+
+replace github.com/Manu343726/toolbox/subsystems/apimcp => ../../subsystems/apimcp
 
 replace github.com/Manu343726/toolbox/subsystems/apiopenapi => ../../subsystems/apiopenapi
 

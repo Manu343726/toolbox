@@ -409,9 +409,15 @@ message ParseApiResponse {
 message RegisterApiRequest {
   // Binary description document, such as a protobuf FileDescriptorSet.
   bytes document = 1;
-  // Text description document. Exactly one of document and document_text is
-  // supplied.
+  // Text description document. Exactly one of document, document_text, and
+  // base_url is supplied.
   string document_text = 8;
+  // Live endpoint that describes itself, such as a server serving a protobuf
+  // contract or a Model Context Protocol tool list. This is the common case: the
+  // description already exists, published by the server itself.
+  string base_url = 9;
+  // Identifier to assign to the parsed API. When empty, the parser derives one.
+  string api_id = 10;
   // Format identifier the document is written in.
   string format = 2;
   // Format hint used when the document does not declare its own format.

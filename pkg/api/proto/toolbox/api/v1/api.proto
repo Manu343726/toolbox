@@ -340,6 +340,11 @@ message Api {
   repeated ApiService services = 14;
   // Additional API attributes, ordered by key by consumers.
   map<string, string> metadata = 15;
+  // Transport this API's operations are reached over, such as connectrpc, http, or
+  // mcp. It is a description's own claim: a format that names a transport states it
+  // here, and a catalog registering the API uses it to pick an invoker. A
+  // description that names none leaves the choice to its caller.
+  string transport = 16;
 }
 
 // ApiServer is a network location that hosts one or more registered APIs.
