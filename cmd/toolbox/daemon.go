@@ -107,7 +107,7 @@ func runDaemon(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = h.Shutdown(context.Background()) }()
 
-	if err := registerStartedSubsystems(ctx, h); err != nil {
+	if err := registerStartedSubsystems(ctx, h, true); err != nil {
 		return err
 	}
 	// Everything the daemon started is registered before the gateway is built, so

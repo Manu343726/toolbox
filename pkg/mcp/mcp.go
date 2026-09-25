@@ -630,6 +630,38 @@ func normalizeFeatureID(id string) string {
 	return strings.TrimSpace(id)
 }
 
+// matchesService reports whether a stored service name is the one a caller named.
+//
+// A feature's service carries the API it was registered under, because several providers
+// serve the same contract on purpose and a bare contract name would not tell two of them
+// apart. That prefix is the framework's disambiguator, not the caller's: a caller holds
+// contract names from list_services and has no reason to know which API registered one. So
+// the bare fully-qualified name is accepted, and the qualified form is still accepted.
+//
+// A suffix match is only ever a match on a whole segment, so "Service" cannot match
+// "KnowledgeService" and a caller who names a service by the wrong half of a word is told
+// so rather than served somebody else's operations.
+func matchesService(stored, wanted string) bool {
+	stored = strings.TrimSpace(stored)
+	wanted = strings.TrimSpace(wanted)
+	if stored == "" || wanted == "" {
+		return false
+	}
+	if stored == wanted {
+		return true
+	}
+	return strings.HasSuffix(stored, "."+wanted)
+}
+
+// splitFeatureReference separates a service from a method in a "service/method" id.
+func splitFeatureReference(reference string) (service, method string) {
+	index := strings.LastIndex(reference, "/")
+	if index < 0 {
+		return "", strings.TrimSpace(reference)
+	}
+	return strings.TrimSpace(reference[:index]), strings.TrimSpace(reference[index+1:])
+}
+
 // generatedToolName reduces a service and a method to a tool name. A name claimed
 // by more than one operation is qualified with its owner; see toolNamer.
 func generatedToolName(serviceName, methodName string) string {

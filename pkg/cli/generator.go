@@ -263,6 +263,12 @@ func (g *Generator) methodsForSchema(schema *discovery.ServiceSchema) ([]*cobra.
 			// method's own --help is the one who needs to know before typing it, and the
 			// short form is only visible from the parent's command list.
 			methodCommand.Long = strings.TrimSpace(methodCommand.Long + "\n\n" + streaming)
+			// Marked so a caller that composes the tree can tell a method that will be
+			// refused from one that will be called, without matching on the message.
+			if methodCommand.Annotations == nil {
+				methodCommand.Annotations = map[string]string{}
+			}
+			methodCommand.Annotations["toolbox.streaming"] = "true"
 			methodCommand.RunE = func(cmd *cobra.Command, _ []string) error {
 				return fmt.Errorf("streaming method %s.%s is not supported by the unary CLI generator", schema.Name, method.Name)
 			}

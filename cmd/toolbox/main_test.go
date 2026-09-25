@@ -26,7 +26,7 @@ func TestAllModeRegistersEndpoints(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, h.Start(context.Background()))
 	defer func() { require.NoError(t, h.Shutdown(context.Background())) }()
-	require.NoError(t, registerStartedSubsystems(context.Background(), h))
+	require.NoError(t, registerStartedSubsystems(context.Background(), h, false))
 
 	registryServer := h.Servers()["registry"]
 	require.NotNil(t, registryServer)

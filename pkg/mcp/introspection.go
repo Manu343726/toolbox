@@ -169,13 +169,9 @@ func (s *Server) handleFeatureExposure(_ context.Context, request *sdkmcp.CallTo
 	if err != nil {
 		return toolError(err), nil
 	}
-	features := make([]Feature, 0)
+	features := filterFeaturesByService(s.Features(), serviceName)
 	allowed, exposed, hidden, denied := 0, 0, 0, 0
-	for _, feature := range s.Features() {
-		if serviceName != "" && feature.Service != serviceName {
-			continue
-		}
-		features = append(features, feature)
+	for _, feature := range features {
 		if !feature.Allowed {
 			denied++
 			continue
@@ -195,6 +191,25 @@ func (s *Server) handleFeatureExposure(_ context.Context, request *sdkmcp.CallTo
 		"denied":   denied,
 		"features": features,
 	}), nil
+}
+
+// filterFeaturesByService narrows a surface to one service, matching the service name the
+// way a feature reference is matched.
+//
+// It is a function rather than an inline condition so the filter and the reference resolver
+// cannot drift: they answer the same question — "is this the service you meant" — and two
+// implementations of it would agree right up to the day one of them changed.
+func filterFeaturesByService(features []Feature, serviceName string) []Feature {
+	if strings.TrimSpace(serviceName) == "" {
+		return features
+	}
+	filtered := make([]Feature, 0, len(features))
+	for _, feature := range features {
+		if matchesService(feature.Service, serviceName) {
+			filtered = append(filtered, feature)
+		}
+	}
+	return filtered
 }
 
 func (s *Server) handleCallRPC(ctx context.Context, request *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
@@ -263,7 +278,36 @@ func (s *Server) lookupFeature(reference string) (*featureEntry, error) {
 			return cloneFeatureEntry(entry), nil
 		}
 	}
-	return nil, fmt.Errorf("feature %q was not found", reference)
+	// A caller who named a contract rather than the API-qualified form is answered, and
+	// only if exactly one feature answers. Several providers serving one contract is the
+	// framework's design rather than an accident, so a bare contract name can match more
+	// than one — and a reference that silently resolved to the first would send a caller
+	// to an operation they did not ask for. The candidates are named instead.
+	service, method := splitFeatureReference(reference)
+	if service == "" {
+		return nil, fmt.Errorf("feature %q was not found", reference)
+	}
+	var matches []string
+	for _, id := range s.order {
+		entry := s.entries[id]
+		if !matchesService(entry.feature.Service, service) {
+			continue
+		}
+		if method != "" && !strings.EqualFold(entry.feature.Method, method) {
+			continue
+		}
+		matches = append(matches, id)
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("feature %q was not found", reference)
+	case 1:
+		return cloneFeatureEntry(s.entries[matches[0]]), nil
+	default:
+		return nil, fmt.Errorf(
+			"%q names %d features, so it does not identify one: %s",
+			reference, len(matches), strings.Join(matches, ", "))
+	}
 }
 
 func cloneFeatureEntry(entry *featureEntry) *featureEntry {

@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
@@ -91,6 +92,18 @@ func newRootCommand() *cobra.Command {
 	mcpFlags.StringSlice("service", nil, "Only expose these fully-qualified services; repeatable or comma-separated")
 	root.AddCommand(mcpCommand)
 
+	// The operation commands, generated from the contracts this binary links. Built
+	// eagerly and for the whole built-in set, because a help screen listing only some of a
+	// deployment's operations would be a help screen that lies. A --component selection
+	// narrows what a command runs, not what the tree offers.
+	//
+	// A failure here is a build of the binary being wrong rather than a condition a caller
+	// can act on, so it stops the process with the reason instead of producing a command
+	// tree with a hole in it.
+	if err := addOperationCommands(root); err != nil {
+		panic(fmt.Sprintf("generate operation commands: %v", err))
+	}
+
 	daemonCommand := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the core as a long-lived process other clients join",
@@ -166,7 +179,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer func() { _ = h.Shutdown(context.Background()) }()
-	if err := registerStartedSubsystems(cmd.Context(), h); err != nil {
+	if err := registerStartedSubsystems(cmd.Context(), h, false); err != nil {
 		return err
 	}
 	initialExposure := toolboxmcp.ExposeAllowedFeatures
@@ -328,7 +341,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = h.Shutdown(context.Background()) }()
 
 	if all {
-		if err := registerStartedSubsystems(cmd.Context(), h); err != nil {
+		if err := registerStartedSubsystems(cmd.Context(), h, false); err != nil {
 			return err
 		}
 	}
@@ -500,12 +513,27 @@ func hostEndpoints(h *host.Host) []core.Endpoint {
 	return endpoints
 }
 
-func registerStartedSubsystems(ctx context.Context, h *host.Host) error {
+// selfLease is how long a core's registration of its own subsystems stays valid.
+//
+// It is a lease rather than nothing on purpose: a lease is what makes a crashed peer's
+// registration disappear, so a core that is genuinely running has to keep renewing. A
+// registration that outlived its process would be a directory entry pointing at a port
+// nobody is listening on, and every client would resolve to it and fail on the call.
+const selfLease = 30 * time.Second
+
+// registerStartedSubsystems registers every started subsystem with the core's own registry.
+//
+// With keepRenewing set, the registrations are renewed until the context is cancelled. A
+// core that registered once and stopped renewing would remove itself from its own
+// directory after the lease, which is how a long-lived core ends up unable to resolve the
+// subsystems it is serving — the failure looks like a directory bug and is not one.
+func registerStartedSubsystems(ctx context.Context, h *host.Host, keepRenewing bool) error {
 	registryServer, ok := h.Servers()["registry"]
 	if !ok {
 		return nil
 	}
 	client := registryv1connect.NewRegistryServiceClient(http.DefaultClient, registryServer.Endpoint())
+	names := make([]string, 0, len(h.Servers()))
 	for _, descriptor := range h.Descriptors() {
 		registration := &registryv1.ServiceDescriptor{
 			SubsystemName:         descriptor.SubsystemName,
@@ -516,9 +544,45 @@ func registerStartedSubsystems(ctx context.Context, h *host.Host) error {
 			Dependencies:          append([]string(nil), descriptor.Dependencies...),
 			Description:           descriptor.Description,
 		}
-		if _, err := client.Register(ctx, connect.NewRequest(&registryv1.RegisterRequest{Descriptor_: registration, LeaseSeconds: 30})); err != nil {
+		if _, err := client.Register(ctx, connect.NewRequest(&registryv1.RegisterRequest{Descriptor_: registration, LeaseSeconds: int64(selfLease.Seconds())})); err != nil {
 			return fmt.Errorf("register subsystem %q: %w", descriptor.SubsystemName, err)
 		}
+		names = append(names, descriptor.SubsystemName)
+	}
+	if keepRenewing {
+		go renewRegistrations(ctx, client, names)
 	}
 	return nil
+}
+
+// renewRegistrations extends the lease on each registration until the context ends.
+//
+// A third of the lease, so two consecutive renewals can fail before the registration
+// lapses: a core that renews at exactly the lease interval would lapse on a single slow
+// round trip, and one that renews on a long interval would lapse on a brief network
+// partition even though it is running. A lapsed registration is re-registered by the
+// registry's own view only if something registers again, so the loop registers rather than
+// heartbeats — a heartbeat for a lapsed lease is not found.
+func renewRegistrations(ctx context.Context, client registryv1connect.RegistryServiceClient, names []string) {
+	ticker := time.NewTicker(selfLease / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, name := range names {
+				_, err := client.Heartbeat(ctx, connect.NewRequest(&registryv1.HeartbeatRequest{
+					SubsystemName: name,
+					LeaseSeconds:  int64(selfLease.Seconds()),
+				}))
+				if err != nil {
+					// Reported on stderr rather than returned: the core is still serving, and a
+					// renewal that failed is a fact an operator needs, not a reason to stop
+					// the process the operator started.
+					fmt.Fprintf(os.Stderr, "toolbox: renew the registration for %q: %v\n", name, err)
+				}
+			}
+		}
+	}
 }

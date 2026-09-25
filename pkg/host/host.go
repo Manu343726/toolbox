@@ -179,6 +179,88 @@ func (h *Host) Servers() map[string]*subsystem.Server {
 	return result
 }
 
+// Started reports whether the host has been started. A caller that composes a host and
+// then runs a command against it needs to know whether starting it again is a mistake or
+// what it expected.
+func (h *Host) Started() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.started
+}
+
+// ServiceNames returns the fully-qualified protobuf services the selected subsystems
+// declare, sorted and deduplicated.
+//
+// It composes each selected subsystem without starting it, because a factory builds a
+// server and a server binds its port only when it starts. So a caller can learn what a
+// deployment would serve — to build a command tree, say — without a port being held and
+// without a listener that has to be released.
+//
+// A factory that fails is reported rather than skipped: a subsystem this process cannot
+// compose is a subsystem whose operations cannot be offered, and a caller told about an
+// operation that will not run is worse off than one told the deployment is incomplete.
+func (h *Host) ServiceNames() ([]string, error) {
+	h.mu.Lock()
+	selected := append([]string(nil), h.selected...)
+	started := h.started
+	h.mu.Unlock()
+
+	if len(selected) == 0 {
+		if started {
+			// Already running: the started servers are the truth, and re-composing a
+			// factory to read a name from it would be redundant.
+			return startedServiceNames(h.Servers()), nil
+		}
+		h.mu.Lock()
+		for name := range h.factories {
+			selected = append(selected, name)
+		}
+		h.mu.Unlock()
+		sort.Strings(selected)
+	}
+
+	seen := map[string]bool{}
+	var names []string
+	for _, name := range selected {
+		h.mu.Lock()
+		factory, ok := h.factories[name]
+		h.mu.Unlock()
+		if !ok {
+			return nil, fmt.Errorf("subsystem %q is not registered", name)
+		}
+		server, err := factory()
+		if err != nil {
+			return nil, fmt.Errorf("compose subsystem %q: %w", name, err)
+		}
+		for _, service := range server.Services() {
+			if service.Name == "" || seen[service.Name] {
+				continue
+			}
+			seen[service.Name] = true
+			names = append(names, service.Name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// startedServiceNames collects the services of subsystems that are running.
+func startedServiceNames(servers map[string]*subsystem.Server) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, server := range servers {
+		for _, service := range server.Services() {
+			if service.Name == "" || seen[service.Name] {
+				continue
+			}
+			seen[service.Name] = true
+			names = append(names, service.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // Descriptors returns registration metadata for started subsystems.
 func (h *Host) Descriptors() []*subsystem.Descriptor {
 	servers := h.Servers()
