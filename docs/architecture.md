@@ -160,7 +160,8 @@ SDK behavior.
 | `pkg/cli`       | Cobra command generator driven by reflected methods and documentation            |
 | `pkg/cliapp`    | Shared standalone-command runner; adds the automatic `mcp` subcommand to every subsystem command |
 | `pkg/mcp`       | MCP gateway built from a reflected source: feature catalog, exposure state, policy gating, introspection tools, stdio and HTTP transports |
-| `pkg/host`      | Composes independently built subsystem factories in one process; aggregates their descriptors for the combined MCP |
+| `pkg/host`      | Composes independently built subsystem factories in one process; aggregates their descriptors for the combined MCP; derives the API provider set from started subsystems' capabilities |
+| `pkg/api`       | Standard, provider-neutral description of an API: `API`, `Service`, `Operation`, `Schema`, `Server`, plus indexed format and transport descriptors. Holds the framework's own extension contract (`pkg/api/proto/api.proto`), which parser, adapter, and invoker subsystems implement |
 
 A subsystem implements its own service and may import any of these packages. It
 must not import another feature subsystem.
@@ -193,7 +194,40 @@ The documentation service and CLI are separate concerns:
 
 Subsystem commands do not hand-write RPC-specific Cobra methods or flags.
 
-## 7. MCP gateway
+## 7. API introspection and providers
+
+The framework does not know any description language. `pkg/api` defines the
+standard description every format is parsed into and every format is rendered
+from, and a format or transport is an open identifier the framework never
+enumerates.
+
+Three contracts form the extension surface, each implemented by a subsystem:
+
+| Contract              | Direction                                    | Capability prefix  |
+| --------------------- | -------------------------------------------- | ------------------ |
+| `ApiParserService`    | description document → standard description   | `api.parse.<fmt>`  |
+| `ApiAdapterService`   | standard description → target representation  | `api.render.<tgt>` |
+| `ApiInvokerService`   | operation + server → live response            | `api.invoke.<tr>`  |
+
+An adapter reads only the standard description, so rendering a protobuf contract
+as an OpenAPI document is the same operation as the reverse. An adapter also
+serves: `RenderApi` returns the target's schema files, and `ServeApi` serves that
+target's surface while tunneling to the original server, which it receives
+alongside the description. The OpenAPI provider reserves paths for the target's
+Swagger UI and a downloadable schema, and refuses a base path that would collide
+with a path it generates.
+
+Providers are discovered from the capabilities a started subsystem declares, and
+resolved with `core.Bind` through the generated framework clients. The catalog
+subsystem — `subsystems/apitools` — stores servers, API descriptions, the indexed
+format and transport descriptors, and operation exposure, and routes parsing,
+rendering, serving, and invocation to whichever provider claims the work. It
+imports no provider subsystem; a deployment supplies a provider directory.
+
+See [`decisions/0004-api-introspection-and-providers.md`](decisions/0004-api-introspection-and-providers.md)
+for the decision and its consequences.
+
+## 8. MCP gateway
 
 The public `pkg/mcp` package turns a reflected ConnectRPC source into an MCP
 server. It uses protobuf reflection for schemas and dynamic unary invocation,
@@ -225,7 +259,7 @@ available when the initial feature surface is empty, allowing an agent to
 list, read documentation for, expose, and hide individual methods. See
 [`docs/mcp.md`](mcp.md) for the tool contract and deployment commands.
 
-## 8. Composition modes
+## 9. Composition modes
 
 These modes exist to serve the product requirement that a user adopts either the
 whole environment or only the capabilities they need. Each mode produces the
@@ -277,7 +311,7 @@ cross-subsystem traffic appears only when a definition explicitly references the
 new capability. This is why a subsystem may not import another subsystem: doing
 so would make the cost of leaving one out non-zero.
 
-## 9. Data ownership and persistence
+## 10. Data ownership and persistence
 
 Each subsystem owns its state and persistence. No feature should query another
 feature's database directly. Cross-subsystem state is exchanged through:
@@ -291,7 +325,7 @@ feature's database directly. Cross-subsystem state is exchanged through:
 The current reference stores are in-memory. Persistence interfaces and SQLite
 adapters are planned work.
 
-## 10. Extension model
+## 11. Extension model
 
 A third-party subsystem is compatible when it:
 
@@ -304,7 +338,7 @@ A third-party subsystem is compatible when it:
 Reflection alone is insufficient for agent exposure. A service must explicitly
 declare tool capabilities, side effects, permissions, and policy requirements.
 
-## 11. Architectural constraints
+## 12. Architectural constraints
 
 - No framework-wide aggregate feature proto.
 - No feature-to-feature implementation imports.
@@ -315,7 +349,7 @@ declare tool capabilities, side effects, permissions, and policy requirements.
   compatibility decision.
 - No generated artifacts in source control.
 
-## 12. Related documents
+## 13. Related documents
 
 - [Feature specification](feature-spec.md)
 - [Subsystem catalog](subsystems.md)

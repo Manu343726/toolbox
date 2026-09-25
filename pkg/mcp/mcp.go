@@ -22,10 +22,12 @@ import (
 	"strings"
 	"sync"
 
+	extension "github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/discovery"
 	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
@@ -114,12 +116,24 @@ type ServiceSummary struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
+// featureEntry is one exposable tool plus everything needed to call it. The
+// entry is deliberately provider-neutral: a reflected protobuf method and a
+// registered API operation produce the same shape, which is what lets one MCP
+// server serve both.
 type featureEntry struct {
-	feature       Feature
-	schema        *discovery.ServiceSchema
-	method        discovery.MethodSchema
+	feature Feature
+	// inputSchema and outputSchema are JSON Schemas, produced either from a
+	// reflected protobuf message or from a standard API description.
+	inputSchema  map[string]any
+	outputSchema map[string]any
+	// invoke performs the call and returns the response as JSON.
+	invoke func(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error)
+	// documentation is the extracted prose for this method, when the source
+	// carried any.
 	documentation *shareddocs.Method
-	serviceDoc    *shareddocs.Service
+	// serviceDescription is the service's documentation, when the source carried
+	// any.
+	serviceDescription string
 }
 
 // Server is a generated MCP server over one Source. Its exposure state is
@@ -158,15 +172,7 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 	if options.Policy == nil {
 		options.Policy = policyForSource(source, serviceNames)
 	}
-	server := &Server{
-		source:  source,
-		options: options,
-		entries: make(map[string]*featureEntry),
-		sdk: sdkmcp.NewServer(
-			&sdkmcp.Implementation{Name: options.Name, Version: options.Version},
-			&sdkmcp.ServerOptions{Instructions: options.Description},
-		),
-	}
+	server := newServer(options)
 	toolNames := make(map[string]string)
 	for _, serviceName := range serviceNames {
 		if !options.IncludeInfrastructure && isInfrastructure(serviceName) {
@@ -199,9 +205,12 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 					Callable:        !method.ClientStreaming && !method.ServerStreaming,
 					Capabilities:    append([]string(nil), metadata.Capabilities...),
 				},
-				schema:     schema,
-				method:     method,
-				serviceDoc: schema.Documentation,
+				inputSchema:  jsonSchemaForMessage(method.Input, documentationParameters(documentationMethod(schema.Documentation, method.Name))),
+				outputSchema: jsonSchemaForMessage(method.Output, nil),
+				invoke: func(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error) {
+					return invokeProto(ctx, source, serviceName, method.Name, method.Input, arguments)
+				},
+				serviceDescription: serviceDescription(schema.Documentation),
 			}
 			if methodDoc := documentationMethod(schema.Documentation, method.Name); methodDoc != nil {
 				entry.feature.Description = methodDoc.Description
@@ -210,29 +219,84 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 			if entry.feature.Description == "" {
 				entry.feature.Description = fmt.Sprintf("Call %s.%s through the Toolbox RPC gateway.", serviceName, method.Name)
 			}
-			if _, exists := server.entries[entry.feature.ID]; exists {
-				return nil, fmt.Errorf("duplicate reflected feature %q", entry.feature.ID)
-			}
-			if previous, exists := toolNames[entry.feature.ToolName]; exists {
-				return nil, fmt.Errorf("generated MCP tool name %q collides for %q and %q", entry.feature.ToolName, previous, entry.feature.ID)
-			}
-			toolNames[entry.feature.ToolName] = entry.feature.ID
-			server.entries[entry.feature.ID] = entry
-			server.order = append(server.order, entry.feature.ID)
-		}
-	}
-	sort.Strings(server.order)
-	server.addManagementTools()
-	if options.InitialExposure == ExposeAllowedFeatures {
-		for _, id := range server.order {
-			entry := server.entries[id]
-			if entry.feature.Allowed && entry.feature.Callable {
-				entry.feature.Exposed = true
-				server.addFeatureTool(entry)
+			if err := server.addEntry(entry, toolNames); err != nil {
+				return nil, err
 			}
 		}
 	}
+	server.finish()
 	return server, nil
+}
+
+// newServer creates a server with the always-on management surface. The
+// provider-neutral entries are added afterwards, so every MCP this package
+// generates behaves identically whichever description it came from.
+func newServer(options Options) *Server {
+	return &Server{
+		options: options,
+		entries: make(map[string]*featureEntry),
+		sdk: sdkmcp.NewServer(
+			&sdkmcp.Implementation{Name: options.Name, Version: options.Version},
+			&sdkmcp.ServerOptions{Instructions: options.Description},
+		),
+	}
+}
+
+// addEntry registers one feature, refusing a duplicate identifier or tool name
+// because a collision would make one of the two unreachable.
+func (s *Server) addEntry(entry *featureEntry, toolNames map[string]string) error {
+	if _, exists := s.entries[entry.feature.ID]; exists {
+		return fmt.Errorf("duplicate feature %q", entry.feature.ID)
+	}
+	if previous, exists := toolNames[entry.feature.ToolName]; exists {
+		return fmt.Errorf("generated MCP tool name %q collides for %q and %q", entry.feature.ToolName, previous, entry.feature.ID)
+	}
+	toolNames[entry.feature.ToolName] = entry.feature.ID
+	s.entries[entry.feature.ID] = entry
+	s.order = append(s.order, entry.feature.ID)
+	return nil
+}
+
+// finish sorts the feature order, installs the management tools, and applies the
+// initial exposure.
+func (s *Server) finish() {
+	sort.Strings(s.order)
+	s.addManagementTools()
+	if s.options.InitialExposure != ExposeAllowedFeatures {
+		return
+	}
+	for _, id := range s.order {
+		entry := s.entries[id]
+		if entry.feature.Allowed && entry.feature.Callable {
+			entry.feature.Exposed = true
+			s.addFeatureTool(entry)
+		}
+	}
+}
+
+// invokeProto performs one dynamic unary call and returns the response as JSON.
+func invokeProto(
+	ctx context.Context,
+	source Source,
+	serviceName, methodName string,
+	input protoreflect.MessageDescriptor,
+	arguments json.RawMessage,
+) (json.RawMessage, error) {
+	request := dynamicpb.NewMessage(input)
+	if len(bytes.TrimSpace(arguments)) > 0 && string(bytes.TrimSpace(arguments)) != "null" {
+		if err := (protojson.UnmarshalOptions{}).Unmarshal(arguments, request); err != nil {
+			return nil, fmt.Errorf("decode request for %s/%s: %w", serviceName, methodName, err)
+		}
+	}
+	response, err := source.Invoke(ctx, serviceName, methodName, request)
+	if err != nil {
+		return nil, fmt.Errorf("call %s/%s: %w", serviceName, methodName, err)
+	}
+	encoded, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("encode response for %s/%s: %w", serviceName, methodName, err)
+	}
+	return encoded, nil
 }
 
 func policyForSource(source Source, serviceNames []string) FeaturePolicy {
@@ -306,7 +370,7 @@ func (s *Server) Services() []ServiceSummary {
 		if !ok {
 			summary = &ServiceSummary{
 				Name:         entry.feature.Service,
-				Description:  serviceDescription(entry.serviceDoc),
+				Description:  entry.serviceDescription,
 				Capabilities: append([]string(nil), entry.feature.Capabilities...),
 			}
 			byName[entry.feature.Service] = summary
@@ -381,12 +445,11 @@ func (s *Server) setExposure(id string, exposed bool) error {
 }
 
 func (s *Server) addFeatureTool(entry *featureEntry) {
-	schema := jsonSchemaForMessage(entry.method.Input, documentationParameters(entry.documentation))
 	tool := &sdkmcp.Tool{
 		Name:         entry.feature.ToolName,
 		Description:  entry.feature.Description,
-		InputSchema:  schema,
-		OutputSchema: jsonSchemaForMessage(entry.method.Output, nil),
+		InputSchema:  entry.inputSchema,
+		OutputSchema: entry.outputSchema,
 	}
 	s.sdk.AddTool(tool, func(ctx context.Context, request *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 		return s.callFeature(ctx, entry.feature.ID, requestArguments(request))
@@ -426,24 +489,14 @@ func (s *Server) callFeature(ctx context.Context, id string, arguments json.RawM
 		s.mu.RUnlock()
 		return toolError(fmt.Errorf("feature %q is streaming; streaming MCP invocation is not implemented", id)), nil
 	}
-	method := entry.method
-	serviceName := entry.feature.Service
-	methodName := entry.feature.Method
+	invoke := entry.invoke
 	s.mu.RUnlock()
-
-	request := dynamicpb.NewMessage(method.Input)
-	if len(bytes.TrimSpace(arguments)) > 0 && string(bytes.TrimSpace(arguments)) != "null" {
-		if err := (protojson.UnmarshalOptions{}).Unmarshal(arguments, request); err != nil {
-			return toolError(fmt.Errorf("decode request for %s: %w", id, err)), nil
-		}
+	if invoke == nil {
+		return toolError(fmt.Errorf("feature %q has no invocation path in this deployment", id)), nil
 	}
-	response, err := s.source.Invoke(ctx, serviceName, methodName, request)
+	encoded, err := invoke(ctx, arguments)
 	if err != nil {
-		return toolError(fmt.Errorf("call %s: %w", id, err)), nil
-	}
-	encoded, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(response)
-	if err != nil {
-		return toolError(fmt.Errorf("encode response for %s: %w", id, err)), nil
+		return toolError(err), nil
 	}
 	return jsonToolResult(encoded), nil
 }
@@ -540,11 +593,31 @@ func capToolName(name string) string {
 	return name[:maxToolNameLength-len(suffix)-1] + "_" + suffix
 }
 
+// isInfrastructure reports whether a service belongs to the platform rather than
+// to a feature the user adopted.
+//
+// The framework's API extension contracts belong here for a specific reason: many
+// provider subsystems serve the same contract on purpose, because that contract
+// is how a format or a transport is contributed. They are how the catalog reaches
+// a provider, not something an agent should call directly, so they stay out of
+// the generated tool surface and do not conflict with one another.
 func isInfrastructure(name string) bool {
 	return discovery.IsReflectionService(name) ||
 		strings.HasSuffix(name, ".HealthService") ||
 		strings.HasSuffix(name, ".DocumentationService") ||
-		strings.HasSuffix(name, ".RegistryService")
+		strings.HasSuffix(name, ".RegistryService") ||
+		isExtensionContract(name)
+}
+
+// isExtensionContract reports whether a service name is one of the framework's
+// API introspection contracts.
+func isExtensionContract(name string) bool {
+	switch name {
+	case extension.ParserService, extension.AdapterService, extension.InvokerService:
+		return true
+	default:
+		return false
+	}
 }
 
 func serviceDescription(service *shareddocs.Service) string {

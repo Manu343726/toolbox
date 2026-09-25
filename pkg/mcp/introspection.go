@@ -113,8 +113,8 @@ func (s *Server) handleDescribeFeature(_ context.Context, request *sdkmcp.CallTo
 	return jsonValueResult(map[string]any{
 		"feature":       entry.feature,
 		"documentation": featureDocumentationView(entry),
-		"input_schema":  jsonSchemaForMessage(entry.method.Input, documentationParameters(entry.documentation)),
-		"output_schema": jsonSchemaForMessage(entry.method.Output, nil),
+		"input_schema":  entry.inputSchema,
+		"output_schema": entry.outputSchema,
 	}), nil
 }
 

@@ -15,6 +15,7 @@ Toolbox provides them once, as a foundation you build on:
 | **External tool calls**      | A governed way for an assistant to act on your systems, not just describe them |
 | **Multi-agent definition and coordination** | Define who does what, and let assistants hand work to each other under your rules |
 | **Workflow definition**      | The process written down as a versioned, reviewable plan rather than improvised each run |
+| **API integration**          | Point Toolbox at an existing API — OpenAPI or a service contract today, any format you add tomorrow — and use its operations as tools, published back in a format you did not write it in |
 
 Write your rules, skills, prompts and knowledge once. Every agent, workflow and
 model you add afterwards reuses them. And take all of it or just the part you
@@ -151,6 +152,10 @@ composition modes implement this.
 
 Next month, a second assistant does the same thing. It reuses every one of
 those assets. Nobody rewrote a rule.
+
+> An assistant is also given the APIs you already have. It looks one up, reads
+> what it can do, asks for the operations the job needs, and calls them. When the
+> job is done it lets them go again.
 
 ## Getting started
 

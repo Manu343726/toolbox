@@ -144,6 +144,20 @@ The combined host exposes one MCP over all selected built-in subsystems:
 subsystems; `--service` filters the fully-qualified service names inside the
 selected subsystems. `--minimal` starts with introspection tools only.
 
+## API catalogs
+
+A second path builds the same gateway from a catalog of registered API
+descriptions: `mcp.NewFromAPICatalog(ctx, catalog, invoker, options)`. A catalog
+is any `api.Catalog`, and an invoker is any `api.Invoker` — in a deployment
+those come from the API catalog subsystem, so the operations an agent gains by
+registering an API on the fly are exposed under the same rules as reflected
+methods: the same policy boundary, the same exposure lifecycle, the same
+management tools.
+
+With `--minimal`, or with a catalog that has no invoker yet, the operations are
+described and documented but not exposed: a described operation is not a callable
+one, and the server says which half is missing.
+
 ## OpenCode sessions
 
 The repository `opencode.json` wires two local MCP servers into every OpenCode

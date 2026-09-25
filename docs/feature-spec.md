@@ -6,6 +6,8 @@ Toolbox is the foundation for a fully AI-assisted working environment. It
 provides the four capabilities that environment requires, so users do not have
 to rebuild them for every agent, project, or model:
 
+0. **API integration** — every foundation above reaches real systems through
+   existing APIs, in any description format, published back in any target format.
 1. **Knowledge base and retrieval** — a shared, governed body of domain
    knowledge an agent can search and cite, instead of context pasted into every
    prompt.
@@ -278,6 +280,12 @@ support:
 | F-019 | Independent and aggregated MCP deployment | Implemented |
 | F-020 | Session-isolated MCP exposure over HTTP | Not implemented |
 | F-021 | Knowledge ingestion, embeddings, retrieval, and source ACLs | Not implemented |
+| F-025 | Standard API description with open format and transport identifiers | Implemented |
+| F-026 | Parser, adapter, and invoker provider contracts as independent subsystems | Implemented for OpenAPI and gRPC |
+| F-027 | API catalog with format and transport index | Implemented |
+| F-028 | On-demand exposure of individual API operations | Implemented |
+| F-029 | Target schema translation and adapted serving with documentation and schema download | Implemented for the OpenAPI target |
+| F-030 | User-contributed formats, targets, and transports | Implemented by contract; no third-party provider shipped yet |
 | F-022 | Multi-agent coordination contract and governed handoffs | Not implemented |
 | F-023 | Workflow execution with branching, approvals, and run records | Not implemented |
 | F-024 | Reuse of versioned assets across agents, workflows, and models | Partial: shared catalogs exist, no run-time reuse contract |

@@ -1,0 +1,622 @@
+syntax = "proto3";
+
+package toolbox.apitools.v1;
+
+import "toolbox/api/v1/api.proto";
+
+option go_package = "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1;apitoolsv1";
+
+// ApiToolsService is the repository of registered APIs and the servers that host
+// them, and the index of the description formats and transports this deployment
+// understands.
+//
+// It is the point where an agent gains API-based tools: a description document
+// is handed to a parser provider, the resulting API is registered, individual
+// operations are exposed on demand, and calls are routed to an adapter
+// provider.
+//
+// The service parses and invokes nothing itself. Parsing and invocation belong
+// to provider subsystems implementing the framework's parser and adapter
+// contracts, which it finds through the deployment's provider directory. Format
+// and transport identifiers are open: the service indexes the descriptors it is
+// given, so a format contributed by a user is discoverable like any other.
+service ApiToolsService {
+  // RegisterServer registers or replaces a server that hosts APIs.
+  rpc RegisterServer(RegisterServerRequest) returns (RegisterServerResponse);
+  // GetServer returns one registered server.
+  rpc GetServer(GetServerRequest) returns (GetServerResponse);
+  // ListServers returns registered servers matching the supplied filters.
+  rpc ListServers(ListServersRequest) returns (ListServersResponse);
+  // DeleteServer removes a server, unbinding the APIs it hosts when forced.
+  rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
+  // RegisterApiFormat indexes a description format descriptor, so discovery can
+  // answer which formats this deployment understands.
+  rpc RegisterApiFormat(RegisterApiFormatRequest) returns (RegisterApiFormatResponse);
+  // ListApiFormats returns the indexed format descriptors merged with the
+  // formats advertised by the available parser providers.
+  rpc ListApiFormats(ListApiFormatsRequest) returns (ListApiFormatsResponse);
+  // RegisterApiTransport indexes a transport descriptor.
+  rpc RegisterApiTransport(RegisterApiTransportRequest) returns (RegisterApiTransportResponse);
+  // ListApiTransports returns the indexed transport descriptors merged with the
+  // transports advertised by the available adapter providers.
+  rpc ListApiTransports(ListApiTransportsRequest) returns (ListApiTransportsResponse);
+  // ListProviders lists the parser and adapter subsystems available in this
+  // deployment.
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  // ParseApi interprets a description document through a parser provider
+  // without storing the result.
+  rpc ParseApi(ParseApiRequest) returns (ParseApiResponse);
+  // RenderApi renders a description into a target representation through an
+  // adapter provider, returning the target's schema files.
+  rpc RenderApi(RenderApiRequest) returns (RenderApiResponse);
+  // ServeApi asks an adapter provider to serve a registered API in a target
+  // format, tunneling to the API's server, and registers the served surface as a
+  // server of its own.
+  rpc ServeApi(ServeApiRequest) returns (ServeApiResponse);
+  // StopApi stops one adapted surface and removes the server it registered.
+  rpc StopApi(StopApiRequest) returns (StopApiResponse);
+  // RegisterApi interprets a description document through a parser provider and
+  // stores the resulting API.
+  rpc RegisterApi(RegisterApiRequest) returns (RegisterApiResponse);
+  // RegisterApiDescriptor stores an API that is already described, without
+  // involving a parser provider.
+  rpc RegisterApiDescriptor(RegisterApiDescriptorRequest) returns (RegisterApiDescriptorResponse);
+  // GetApi returns one registered API description.
+  rpc GetApi(GetApiRequest) returns (GetApiResponse);
+  // ListApis returns registered APIs matching the supplied filters.
+  rpc ListApis(ListApisRequest) returns (ListApisResponse);
+  // DeleteApi removes a registered API and its exposure state.
+  rpc DeleteApi(DeleteApiRequest) returns (DeleteApiResponse);
+  // DescribeOperation returns the parameters, schemas, security, and side
+  // effects of one operation.
+  rpc DescribeOperation(DescribeOperationRequest) returns (DescribeOperationResponse);
+  // ExposeOperation makes one allowed operation visible and callable.
+  rpc ExposeOperation(ExposeOperationRequest) returns (ExposeOperationResponse);
+  // HideOperation removes one operation from the exposed surface without
+  // removing it from the catalog.
+  rpc HideOperation(HideOperationRequest) returns (HideOperationResponse);
+  // OperationExposure reports the current footprint: allowed, exposed, hidden,
+  // and denied operations.
+  rpc OperationExposure(OperationExposureRequest) returns (OperationExposureResponse);
+  // CallOperation executes one exposed operation through an adapter provider.
+  rpc CallOperation(CallOperationRequest) returns (CallOperationResponse);
+}
+
+// RegisterServerRequest registers a server that hosts APIs.
+message RegisterServerRequest {
+  // Server to store. Its identifier must be unique within the catalog.
+  toolbox.api.v1.ApiServer server = 1;
+  // Reject the registration when the identifier is already in use.
+  bool fail_if_exists = 2;
+}
+
+// RegisterServerResponse acknowledges a server registration.
+message RegisterServerResponse {
+  // Stored server.
+  toolbox.api.v1.ApiServer server = 1;
+  // True when the registration replaced an existing one.
+  bool replaced = 2;
+  // Monotonic revision of the catalog, so a client can detect changes.
+  int64 revision = 3;
+}
+
+// GetServerRequest selects one registered server.
+message GetServerRequest {
+  // Server identifier.
+  string id = 1;
+}
+
+// GetServerResponse returns one registered server.
+message GetServerResponse {
+  // Registered server.
+  toolbox.api.v1.ApiServer server = 1;
+  // Identifiers of the APIs hosted by the server.
+  repeated string api_ids = 2;
+}
+
+// ListServersRequest filters registered servers.
+message ListServersRequest {
+  // Substring match against the server name and base URL.
+  string query = 1;
+  // Only return servers with this operational status.
+  toolbox.api.v1.ApiServerStatus status = 2;
+  // Only return servers hosting this API.
+  string api_id = 3;
+  // Only return servers declaring this format.
+  string format = 4;
+}
+
+// ListServersResponse returns registered servers ordered by identifier.
+message ListServersResponse {
+  // Matching servers.
+  repeated toolbox.api.v1.ApiServer servers = 1;
+}
+
+// DeleteServerRequest removes one registered server.
+message DeleteServerRequest {
+  // Server identifier.
+  string id = 1;
+  // Unbind the hosted APIs instead of rejecting the request.
+  bool force = 2;
+}
+
+// DeleteServerResponse acknowledges a server removal.
+message DeleteServerResponse {
+  // True when a server was removed.
+  bool removed = 1;
+  // Identifiers of the APIs that were unbound.
+  repeated string unbound_api_ids = 2;
+}
+
+// RegisterApiFormatRequest indexes a description format descriptor.
+message RegisterApiFormatRequest {
+  // Descriptor to index.
+  toolbox.api.v1.ApiFormatDescriptor format = 1;
+  // Reject the registration when the identifier is already indexed.
+  bool fail_if_exists = 2;
+}
+
+// RegisterApiFormatResponse acknowledges a format registration.
+message RegisterApiFormatResponse {
+  // Indexed descriptor.
+  toolbox.api.v1.ApiFormatDescriptor format = 1;
+  // True when the registration replaced an existing descriptor.
+  bool replaced = 2;
+}
+
+// ListApiFormatsRequest filters the indexed format descriptors.
+message ListApiFormatsRequest {
+  // Only return formats handled by a currently available parser provider.
+  bool only_available = 1;
+}
+
+// ApiFormatEntry is one indexed format with the providers that can handle it.
+message ApiFormatEntry {
+  // Descriptor of the format, when one is indexed.
+  toolbox.api.v1.ApiFormatDescriptor format = 1;
+  // Format identifier, always present even when no descriptor is indexed.
+  string id = 2;
+  // True when a parser provider in this deployment handles the format.
+  bool parser_available = 3;
+  // True when a descriptor is indexed for the format.
+  bool described = 4;
+  // Identifiers of the parser providers that handle the format.
+  repeated string parser_ids = 5;
+  // Number of registered APIs in this format.
+  int32 registered_apis = 6;
+}
+
+// ListApiFormatsResponse returns the indexed format index.
+message ListApiFormatsResponse {
+  // Format entries ordered by identifier.
+  repeated ApiFormatEntry formats = 1;
+}
+
+// RegisterApiTransportRequest indexes a transport descriptor.
+message RegisterApiTransportRequest {
+  // Descriptor to index.
+  toolbox.api.v1.ApiTransportDescriptor transport = 1;
+  // Reject the registration when the identifier is already indexed.
+  bool fail_if_exists = 2;
+}
+
+// RegisterApiTransportResponse acknowledges a transport registration.
+message RegisterApiTransportResponse {
+  // Indexed descriptor.
+  toolbox.api.v1.ApiTransportDescriptor transport = 1;
+  // True when the registration replaced an existing descriptor.
+  bool replaced = 2;
+}
+
+// ListApiTransportsRequest filters the indexed transport descriptors.
+message ListApiTransportsRequest {
+  // Only return transports usable by a currently available adapter provider.
+  bool only_available = 1;
+}
+
+// ApiTransportEntry is one indexed transport with the providers that use it.
+message ApiTransportEntry {
+  // Descriptor of the transport, when one is indexed.
+  toolbox.api.v1.ApiTransportDescriptor transport = 1;
+  // Transport identifier, always present even when no descriptor is indexed.
+  string id = 2;
+  // True when an adapter provider in this deployment can reach the transport.
+  bool adapter_available = 3;
+  // True when a descriptor is indexed for the transport.
+  bool described = 4;
+  // Identifiers of the adapter providers that use the transport.
+  repeated string adapter_ids = 5;
+  // Number of registered servers using the transport.
+  int32 registered_servers = 6;
+}
+
+// ListApiTransportsResponse returns the indexed transport index.
+message ListApiTransportsResponse {
+  // Transport entries ordered by identifier.
+  repeated ApiTransportEntry transports = 1;
+}
+
+// ListProvidersRequest filters the available extension points.
+message ListProvidersRequest {
+  // Only return providers playing this role, such as parser, adapter, or
+  // invoker.
+  string role = 1;
+  // Only return providers handling this description format.
+  string format = 2;
+  // Only return providers able to reach this transport.
+  string transport = 3;
+  // Only return providers able to render this representation.
+  string target = 4;
+}
+
+// ListProvidersResponse lists the extension points available in the deployment.
+message ListProvidersResponse {
+  // Available providers ordered by identifier.
+  repeated toolbox.api.v1.ApiProviderInfo providers = 1;
+  // True when a provider directory is configured.
+  bool directory_configured = 2;
+}
+
+// ServeApiRequest asks the catalog to serve a registered API in a target format
+// through an adapter provider. The provider is given the API's server as well as
+// its description, because the adapted surface forwards to that server.
+message ServeApiRequest {
+  // Identifier of the registered API to serve.
+  string api_id = 1;
+  // Representation to serve, such as openapi.
+  string target = 2;
+  // Server to serve the adapted surface on. Empty lets the provider choose.
+  string listen_address = 3;
+  // Path prefix for the adapted surface. Empty lets the provider choose one that
+  // cannot collide with the paths it generates.
+  string base_path = 4;
+  // Identifier of the adapter provider to use. When empty, the catalog selects
+  // the only provider that can serve the target.
+  string adapter_id = 5;
+  // Options for the serving.
+  map<string, string> options = 6;
+  // Identifier to give the registered served surface. Empty uses a derived one.
+  string served_server_id = 7;
+}
+
+// ServeApiResponse describes the served surface and the server registered for
+// it.
+message ServeApiResponse {
+  // Representation being served.
+  string target = 1;
+  // Identifier of the adapter provider that serves the surface.
+  string adapter_id = 2;
+  // Identifier the provider assigned to the surface.
+  string instance_id = 3;
+  // Server registered for the served surface.
+  toolbox.api.v1.ApiServer server = 4;
+  // Base URL the adapted surface answers on.
+  string endpoint = 5;
+  // Path prefix the adapted surface is mounted under.
+  string base_path = 6;
+  // Paths the adapted surface serves.
+  repeated string paths = 7;
+  // Dedicated path of the target's own documentation, such as an OpenAPI
+  // Swagger UI.
+  string documentation_endpoint = 8;
+  // Dedicated path the target's schema can be downloaded from.
+  string schema_endpoint = 9;
+  // Non-fatal findings reported by the provider.
+  repeated string warnings = 10;
+}
+
+// StopApiRequest stops one adapted surface.
+message StopApiRequest {
+  // Identifier returned by ServeApi.
+  string instance_id = 1;
+  // Identifier of the adapter provider that serves the surface. When empty, the
+  // catalog looks the instance up among the available providers.
+  string adapter_id = 2;
+  // Remove the server registered for the surface.
+  bool remove_server = 3;
+}
+
+// StopApiResponse acknowledges a stop.
+message StopApiResponse {
+  // True when a surface was stopped.
+  bool stopped = 1;
+  // True when the server registered for the surface was removed.
+  bool server_removed = 2;
+}
+
+// RenderApiRequest asks the catalog to render an API description into a target
+// representation through an adapter provider. The adapter reads the standard
+// description and does not care which format it was parsed from, so this is how a
+// gRPC contract is published as an OpenAPI document, and the reverse.
+message RenderApiRequest {
+  // API to render. When api_id is supplied instead, the registered description
+  // is rendered.
+  toolbox.api.v1.Api api = 1;
+  // Identifier of a registered API to render.
+  string api_id = 2;
+  // Representation to render into, such as openapi, protoset, or mcp.
+  string target = 3;
+  // Media type to prefer when the target supports more than one.
+  string media_type = 4;
+  // Options for the rendering. A provider ignores options it does not define.
+  map<string, string> options = 5;
+  // Identifier of the adapter provider to use. When empty, the catalog selects
+  // the only provider that can render the target, and reports an error when
+  // several match.
+  string adapter_id = 6;
+}
+
+// RenderApiResponse carries a rendered representation.
+message RenderApiResponse {
+  // Schema files of the target API, in a defined order. One of them is marked
+  // primary: the file a client that only understands one document should start
+  // from.
+  repeated toolbox.api.v1.ApiSchemaFile files = 1;
+  // Media type of the rendered document.
+  string media_type = 2;
+  // File extension conventionally used for the target.
+  string file_extension = 3;
+  // Non-fatal findings reported by the adapter.
+  repeated string warnings = 4;
+  // Identifier of the adapter provider that rendered the description.
+  string adapter_id = 5;
+  // Target descriptors the adapter recognizes, so the catalog can index the
+  // representations this deployment can produce.
+  repeated toolbox.api.v1.ApiFormatDescriptor targets = 6;
+}
+
+// ParseApiRequest asks the catalog to interpret a description document through a
+// parser provider without storing the result.
+message ParseApiRequest {
+  // Binary description document, such as a protobuf FileDescriptorSet.
+  bytes document = 1;
+  // Text description document. Exactly one of document and document_text is
+  // supplied, because the caller of this contract is usually an agent and
+  // encoding a readable document as base64 helps nobody.
+  string document_text = 9;
+  // Format identifier the document is written in.
+  string format = 2;
+  // Format hint used when the document does not declare its own format.
+  string format_hint = 3;
+  // Identifier of the parser provider to use. When empty, the catalog selects
+  // the only provider that handles the format, and reports an error when
+  // several providers match.
+  string parser_id = 4;
+  // Where the document came from, recorded in the parsed description.
+  toolbox.api.v1.ApiSource source = 5;
+  // Base URL the document declares, used when the document declares none.
+  string base_url = 6;
+  // Identifier to assign to the parsed API. When empty, the parser derives one.
+  string api_id = 7;
+  // Server identifier the parsed API is bound to.
+  string server_id = 8;
+}
+
+// ParseApiResponse returns a parsed API description without storing it.
+message ParseApiResponse {
+  // Parsed API description.
+  toolbox.api.v1.Api api = 1;
+  // Non-fatal findings reported by the parser.
+  repeated string warnings = 2;
+  // Identifier of the parser provider that interpreted the document.
+  string parser_id = 3;
+  // Format descriptors the parser recognizes, so the catalog can index them.
+  repeated toolbox.api.v1.ApiFormatDescriptor formats = 4;
+}
+
+// RegisterApiRequest interprets a description document and stores the result.
+// The document may be supplied as bytes or as text; see ParseApiRequest.
+message RegisterApiRequest {
+  // Binary description document, such as a protobuf FileDescriptorSet.
+  bytes document = 1;
+  // Text description document. Exactly one of document and document_text is
+  // supplied.
+  string document_text = 8;
+  // Format identifier the document is written in.
+  string format = 2;
+  // Format hint used when the document does not declare its own format.
+  string format_hint = 3;
+  // Identifier of the parser provider to use.
+  string parser_id = 4;
+  // Server identifier the API is bound to.
+  string server_id = 5;
+  // Reject the registration when the API identifier is already in use.
+  bool fail_if_exists = 6;
+  // Expose every operation the API declares after registration.
+  bool expose_all = 7;
+}
+
+// RegisterApiResponse acknowledges a parsed API registration.
+message RegisterApiResponse {
+  // Stored API description.
+  toolbox.api.v1.Api api = 1;
+  // True when the registration replaced an existing one.
+  bool replaced = 2;
+  // Compact view of the stored API.
+  toolbox.api.v1.ApiSummary summary = 3;
+  // Identifier of the parser provider that interpreted the document.
+  string parser_id = 4;
+  // Monotonic revision of the catalog.
+  int64 revision = 5;
+}
+
+// RegisterApiDescriptorRequest stores an already-described API.
+message RegisterApiDescriptorRequest {
+  // API description to store.
+  toolbox.api.v1.Api api = 1;
+  // Reject the registration when the API identifier is already in use.
+  bool fail_if_exists = 2;
+  // Expose every operation the API declares after registration.
+  bool expose_all = 3;
+}
+
+// RegisterApiDescriptorResponse acknowledges a descriptor registration.
+message RegisterApiDescriptorResponse {
+  // Stored API description.
+  toolbox.api.v1.Api api = 1;
+  // True when the registration replaced an existing one.
+  bool replaced = 2;
+  // Monotonic revision of the catalog.
+  int64 revision = 3;
+}
+
+// GetApiRequest selects one registered API.
+message GetApiRequest {
+  // API identifier.
+  string id = 1;
+}
+
+// GetApiResponse returns one registered API.
+message GetApiResponse {
+  // Registered API description.
+  toolbox.api.v1.Api api = 1;
+  // Identifiers of the servers hosting the API.
+  repeated string server_ids = 2;
+}
+
+// ListApisRequest filters registered APIs.
+message ListApisRequest {
+  // Substring match against the API name, title, and identifier.
+  string query = 1;
+  // Only return APIs described in this format.
+  string format = 2;
+  // Only return APIs hosted by this server.
+  string server_id = 3;
+  // Only return APIs declaring this capability.
+  string required_capability = 4;
+}
+
+// ListApisResponse returns registered APIs ordered by identifier.
+message ListApisResponse {
+  // Compact views of the matching APIs.
+  repeated toolbox.api.v1.ApiSummary apis = 1;
+}
+
+// DeleteApiRequest removes one registered API.
+message DeleteApiRequest {
+  // API identifier.
+  string id = 1;
+}
+
+// DeleteApiResponse acknowledges an API removal.
+message DeleteApiResponse {
+  // True when an API was removed.
+  bool removed = 1;
+  // Monotonic revision of the catalog.
+  int64 revision = 2;
+}
+
+// DescribeOperationRequest selects one operation of one API.
+message DescribeOperationRequest {
+  // API identifier.
+  string api_id = 1;
+  // Operation identifier.
+  string operation_id = 2;
+}
+
+// DescribeOperationResponse describes one operation and its exposure state.
+message DescribeOperationResponse {
+  // Operation description.
+  toolbox.api.v1.ApiOperation operation = 1;
+  // True when policy allows the operation to be exposed.
+  bool allowed = 2;
+  // True when the operation is currently exposed.
+  bool exposed = 3;
+  // True when the operation can be invoked, meaning it is unary and its API is
+  // bound to a server.
+  bool invokable = 4;
+}
+
+// ExposeOperationRequest exposes one operation.
+message ExposeOperationRequest {
+  // API identifier.
+  string api_id = 1;
+  // Operation identifier.
+  string operation_id = 2;
+}
+
+// ExposeOperationResponse acknowledges an exposure change.
+message ExposeOperationResponse {
+  // Operation identifier.
+  string operation_id = 1;
+  // True when the operation is exposed after the request.
+  bool exposed = 2;
+  // True when the exposure state changed.
+  bool changed = 3;
+}
+
+// HideOperationRequest hides one operation.
+message HideOperationRequest {
+  // API identifier.
+  string api_id = 1;
+  // Operation identifier.
+  string operation_id = 2;
+}
+
+// HideOperationResponse acknowledges an exposure change.
+message HideOperationResponse {
+  // Operation identifier.
+  string operation_id = 1;
+  // True when the operation is hidden after the request.
+  bool exposed = 2;
+  // True when the exposure state changed.
+  bool changed = 3;
+}
+
+// OperationExposureRequest reports the exposure footprint of the catalog.
+message OperationExposureRequest {
+  // Only report operations of this API.
+  string api_id = 1;
+  // Only report operations of this service.
+  string service = 2;
+}
+
+// OperationExposureResponse reports the exposure footprint.
+message OperationExposureResponse {
+  // Number of operations policy allows.
+  int32 allowed = 1;
+  // Number of operations currently exposed.
+  int32 exposed = 2;
+  // Number of allowed operations that are not exposed.
+  int32 hidden = 3;
+  // Number of operations policy denies.
+  int32 denied = 4;
+  // True when at least one invoker provider is available.
+  bool invokers_available = 5;
+}
+
+// CallOperationRequest executes one exposed operation.
+message CallOperationRequest {
+  // API identifier.
+  string api_id = 1;
+  // Operation identifier.
+  string operation_id = 2;
+  // Caller values as a JSON object. Keys matching declared parameters supply
+  // those parameters; a "body" key supplies the request value. Exactly one of
+  // arguments_json and arguments_text is supplied; the text form exists so an
+  // agent does not have to base64-encode a JSON object.
+  bytes arguments_json = 3;
+  // Caller values as a JSON object supplied as text.
+  string arguments_text = 9;
+  // Identifier of the invoker provider to use. When empty, the catalog selects
+  // the only invoker that reaches the API's transport.
+  string invoker_id = 4;
+  // Correlation identifier propagated to the invoker.
+  string request_id = 5;
+  // Trace identifier propagated to the adapter.
+  string trace_id = 6;
+}
+
+// CallOperationResponse returns the outcome of one invocation.
+message CallOperationResponse {
+  // Transport status code, or 0 when the transport has no status concept.
+  int32 status = 1;
+  // Media type of the body.
+  string content_type = 2;
+  // Response headers worth keeping.
+  map<string, string> headers = 3;
+  // Response value as JSON.
+  bytes body_json = 4;
+  // Identifier of the adapter provider that executed the call.
+  string adapter_id = 5;
+}

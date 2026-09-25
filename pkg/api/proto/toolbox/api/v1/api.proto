@@ -1,0 +1,652 @@
+syntax = "proto3";
+
+package toolbox.api.v1;
+
+option go_package = "github.com/Manu343726/toolbox/pkg/api/apiv1;apiv1";
+
+// This file is the framework's API introspection contract. It is the extension
+// point of the framework: a user integrates a new description language or a new
+// transport by implementing ApiParserService or ApiInvokerService in a
+// subsystem, not by changing anything here.
+//
+// The contract therefore treats API formats and transports as open, registered
+// descriptors rather than as a closed vocabulary. A catalog indexes the
+// descriptors it knows, so discovery answers "which formats can this deployment
+// parse?" for any format a user adds, including formats that did not exist when
+// this file was written. Only vocabularies the framework itself owns — JSON
+// value types and the lifecycle status of a registered server — are enums.
+
+// ApiServerStatus is the operational state of a registered server. It is owned
+// by the framework's registry vocabulary and is not extensible.
+enum ApiServerStatus {
+  // The state was not declared.
+  API_SERVER_STATUS_UNSPECIFIED = 0;
+  // The server accepts requests.
+  API_SERVER_STATUS_SERVING = 1;
+  // The server is unavailable.
+  API_SERVER_STATUS_NOT_SERVING = 2;
+  // Reachability has not been verified.
+  API_SERVER_STATUS_UNKNOWN = 3;
+}
+
+// ApiSchemaType is the JSON type of a value. It is defined by JSON itself and
+// is not extensible.
+enum ApiSchemaType {
+  // The type was not declared.
+  API_SCHEMA_TYPE_UNSPECIFIED = 0;
+  // A JSON object.
+  API_SCHEMA_TYPE_OBJECT = 1;
+  // A JSON array.
+  API_SCHEMA_TYPE_ARRAY = 2;
+  // A JSON string.
+  API_SCHEMA_TYPE_STRING = 3;
+  // A JSON number without a fractional part.
+  API_SCHEMA_TYPE_INTEGER = 4;
+  // A JSON number.
+  API_SCHEMA_TYPE_NUMBER = 5;
+  // A JSON boolean.
+  API_SCHEMA_TYPE_BOOLEAN = 6;
+  // JSON null.
+  API_SCHEMA_TYPE_NULL = 7;
+}
+
+// ApiFormatDescriptor describes one description format the framework can
+// parse. A format is defined by whoever implements a parser for it, so its
+// identifier is an open string and the catalog indexes the descriptors it
+// knows. The built-in OpenAPI and gRPC parsers are two such descriptors and are
+// not privileged by this contract.
+message ApiFormatDescriptor {
+  // Stable format identifier, such as openapi or grpc, unique within a catalog.
+  string id = 1;
+  // Human-readable format name.
+  string name = 2;
+  // Format version this descriptor describes.
+  string version = 3;
+  // What the format is and when to use it.
+  string description = 4;
+  // Media types a document of this format is served as.
+  repeated string media_types = 5;
+  // File extensions commonly used for this format.
+  repeated string file_extensions = 6;
+  // Version of the format specification this descriptor follows.
+  string specification_version = 7;
+  // Subsystem that contributed the descriptor.
+  string provider = 8;
+  // Additional attributes, ordered by key by consumers.
+  map<string, string> metadata = 9;
+}
+
+// ApiTransportDescriptor describes one transport used to reach a server. Like a
+// format, a transport is defined by whoever implements an adapter for it.
+message ApiTransportDescriptor {
+  // Stable transport identifier, such as http or connectrpc, unique within a
+  // catalog.
+  string id = 1;
+  // Human-readable transport name.
+  string name = 2;
+  // Transport version this descriptor describes.
+  string version = 3;
+  // What the transport is and when to use it.
+  string description = 4;
+  // URL schemes the transport uses, such as http or https.
+  repeated string schemes = 5;
+  // Whether the transport streams responses by default.
+  bool supports_streaming = 6;
+  // Subsystem that contributed the descriptor.
+  string provider = 7;
+  // Additional attributes, ordered by key by consumers.
+  map<string, string> metadata = 8;
+}
+
+// ApiSchema is a provider-neutral description of a value, shaped like JSON
+// Schema because that is the interchange format agent tooling already speaks.
+message ApiSchema {
+  // Reference to another schema, such as an OpenAPI component or a protobuf
+  // message name.
+  string ref = 1;
+  // JSON type of the value.
+  ApiSchemaType type = 2;
+  // Type refinement, such as int64, date-time, or uuid.
+  string format = 3;
+  // Short label for the value.
+  string title = 4;
+  // Explanation of the value.
+  string description = 5;
+  // The value should not be used for new work.
+  bool deprecated = 6;
+  // The value is returned but not accepted as input.
+  bool read_only = 7;
+  // Object members, in a stable order.
+  repeated ApiProperty properties = 8;
+  // Property names that must be present.
+  repeated string required = 9;
+  // Element schema of an array.
+  ApiSchema items = 10;
+  // Schema of unlisted object members.
+  ApiSchema additional_properties = 11;
+  // Unlisted object members are accepted without a declared schema.
+  bool additional_properties_allowed = 12;
+  // Allowed literal values.
+  repeated string enum_values = 13;
+  // Mutually exclusive alternatives.
+  repeated ApiSchema one_of = 14;
+  // Alternatives of which at least one applies.
+  repeated ApiSchema any_of = 15;
+  // Declared default value, encoded as JSON.
+  bytes default_json = 16;
+  // Lower numeric bound.
+  optional double minimum = 17;
+  // Upper numeric bound.
+  optional double maximum = 18;
+  // Lower string or array length bound.
+  optional int64 min_length = 19;
+  // Upper string or array length bound.
+  optional int64 max_length = 20;
+  // Regular expression constraining a string value.
+  string pattern = 21;
+}
+
+// ApiProperty is one named member of an object schema.
+message ApiProperty {
+  // Property name.
+  string name = 1;
+  // Property value shape.
+  ApiSchema schema = 2;
+  // The property must be present.
+  bool required = 3;
+}
+
+// ApiParameter is one declared input of an operation. Its location is an open
+// identifier, because a transport contributed by a user may carry values in
+// places this framework has never seen. The documented locations are path,
+// query, header, cookie, and body.
+message ApiParameter {
+  // Parameter name as the caller supplies it.
+  string name = 1;
+  // Where the value is carried.
+  string in = 2;
+  // Explanation of the parameter.
+  string description = 3;
+  // The operation cannot run without the value.
+  bool required = 4;
+  // The parameter should not be used for new work.
+  bool deprecated = 5;
+  // Parameter value shape.
+  ApiSchema schema = 6;
+}
+
+// ApiResponse is one documented response of an operation.
+message ApiResponse {
+  // HTTP status code, or "default" for a fallback response. Empty when the
+  // transport has no status codes.
+  string status = 1;
+  // Explanation of the response.
+  string description = 2;
+  // Response value shape.
+  ApiSchema schema = 3;
+}
+
+// ApiSecurityScheme describes how credentials are supplied to an API. The type
+// is an open identifier; the documented types are apiKey, http, oauth2,
+// openIdConnect, and mutualTLS.
+message ApiSecurityScheme {
+  // Scheme name referenced by security requirements.
+  string name = 1;
+  // Scheme type.
+  string type = 2;
+  // Where an API key is carried: header, query, or cookie.
+  string in = 3;
+  // Authorization scheme, such as bearer.
+  string scheme = 4;
+  // Explanation of the scheme.
+  string description = 5;
+  // Scopes the scheme defines.
+  repeated string scopes = 6;
+  // Name an API-key scheme is carried under: the header, query parameter, or
+  // cookie name. Empty for schemes that do not carry a named parameter.
+  string parameter_name = 7;
+}
+
+// ApiSecurityRequirement is one credential requirement.
+message ApiSecurityRequirement {
+  // Name of a declared security scheme.
+  string scheme = 1;
+  // Scopes required from that scheme.
+  repeated string scopes = 2;
+}
+
+// ApiStreaming states the streaming behavior of an operation.
+message ApiStreaming {
+  // The client streams requests.
+  bool client = 1;
+  // The server streams responses.
+  bool server = 2;
+}
+
+// ApiOperation is one callable operation of an API. It is the unit of exposure:
+// a tool, a permission, and an approval decision all name an operation.
+//
+// Side effects are open identifiers, not a closed vocabulary. An operation
+// that declares none is treated as unknown rather than safe, and a consumer
+// that does not recognize a declared effect must treat it as consequential.
+message ApiOperation {
+  // Stable identifier, unique across the catalog.
+  string id = 1;
+  // Identifier of the owning API.
+  string api_id = 2;
+  // Name of the owning service.
+  string service = 3;
+  // Operation name, unique within its service.
+  string name = 4;
+  // Transport method: an HTTP verb, or a protobuf method name.
+  string method = 5;
+  // Request path template. Empty when the transport has no paths.
+  string path = 6;
+  // One-line description of the operation.
+  string summary = 7;
+  // Full operation description.
+  string description = 8;
+  // Description-language tags for the operation.
+  repeated string tags = 9;
+  // Declared parameters.
+  repeated ApiParameter parameters = 10;
+  // Request value shape.
+  ApiSchema request = 11;
+  // Success response value shape.
+  ApiSchema response = 12;
+  // Documented responses, including error responses.
+  repeated ApiResponse responses = 13;
+  // Security requirements for this operation.
+  repeated ApiSecurityRequirement security = 14;
+  // Declared side effects, as open identifiers.
+  repeated string side_effects = 15;
+  // Explicit capabilities this operation grants.
+  repeated string capabilities = 16;
+  // The operation should not be used for new work.
+  bool deprecated = 17;
+  // Streaming behavior.
+  ApiStreaming streaming = 18;
+}
+
+// ApiService groups the operations of one API. In a gRPC contract a service is
+// a protobuf service; in an OpenAPI document it is a tag group; in a
+// user-defined format it is whatever that format calls a group.
+message ApiService {
+  // Stable identifier, unique within the API.
+  string id = 1;
+  // Service name, unique within the API.
+  string name = 2;
+  // Human-readable service name.
+  string title = 3;
+  // Human-readable service description.
+  string description = 4;
+  // Explicit capabilities this service grants.
+  repeated string capabilities = 5;
+  // Callable operations, in description order.
+  repeated ApiOperation operations = 6;
+}
+
+// ApiDeclaredServer is a location declared by a description document, before
+// any server is registered against the API.
+message ApiDeclaredServer {
+  // Declared base URL.
+  string url = 1;
+  // Explanation of when the location applies.
+  string description = 2;
+}
+
+// ApiSource records where a description came from. The kind is an open
+// identifier; the documented kinds are document, file, url, descriptor_set,
+// and reflection.
+message ApiSource {
+  // How the description was obtained.
+  string kind = 1;
+  // File path, URL, or endpoint the description came from.
+  string location = 2;
+  // Content digest, so a consumer can detect that a registered API changed.
+  string digest = 3;
+}
+
+// Api is the standard description of one API.
+message Api {
+  // Stable identifier, unique within a catalog.
+  string id = 1;
+  // Short API name.
+  string name = 2;
+  // API version, such as an OpenAPI info version.
+  string version = 3;
+  // Human-readable title.
+  string title = 4;
+  // Human-readable description.
+  string description = 5;
+  // Identifier of the description format this API was parsed from. It refers
+  // to an ApiFormatDescriptor the catalog indexes.
+  string format = 6;
+  // Where the description came from.
+  ApiSource source = 7;
+  // Registered servers that host this API.
+  repeated string server_ids = 8;
+  // Locations the description document itself declares.
+  repeated ApiDeclaredServer declared_servers = 9;
+  // Explicit capabilities this API grants.
+  repeated string capabilities = 10;
+  // API-wide security requirements.
+  repeated ApiSecurityRequirement security = 11;
+  // Declared credential schemes.
+  repeated ApiSecurityScheme security_schemes = 12;
+  // Description-language tags.
+  repeated string tags = 13;
+  // Service groups.
+  repeated ApiService services = 14;
+  // Additional API attributes, ordered by key by consumers.
+  map<string, string> metadata = 15;
+}
+
+// ApiServer is a network location that hosts one or more registered APIs.
+message ApiServer {
+  // Stable identifier, unique within a catalog.
+  string id = 1;
+  // Human-readable server name.
+  string name = 2;
+  // Root URL used to invoke the hosted APIs.
+  string base_url = 3;
+  // Identifier of the description format this server serves. It refers to an
+  // ApiFormatDescriptor the catalog indexes.
+  string format = 4;
+  // Identifier of the transport used to reach this server. It refers to an
+  // ApiTransportDescriptor the catalog indexes.
+  string transport = 5;
+  // Human-readable description.
+  string description = 6;
+  // Explicit capabilities this server grants.
+  repeated string capabilities = 7;
+  // Operational state of the server.
+  ApiServerStatus status = 8;
+  // Registration time as Unix nanoseconds since the epoch.
+  int64 registered_at_unix_nano = 9;
+  // Additional server attributes.
+  map<string, string> metadata = 10;
+}
+
+// ApiSummary is a compact listing view of one API.
+message ApiSummary {
+  // API identifier.
+  string id = 1;
+  // Short API name.
+  string name = 2;
+  // API version.
+  string version = 3;
+  // Human-readable title.
+  string title = 4;
+  // Description format identifier.
+  string format = 5;
+  // Servers hosting the API.
+  repeated string server_ids = 6;
+  // Number of services in the API.
+  int32 services = 7;
+  // Number of operations in the API.
+  int32 operations = 8;
+}
+
+// ApiProviderInfo describes one extension-point subsystem available in the
+// deployment. A provider is a subsystem implementing one of the framework's
+// three extension contracts, which a catalog resolves through the deployment's
+// provider directory and calls with a generated client.
+//
+// The three roles are independent and a subsystem may implement any number of
+// them:
+//
+//   parser  turns a description document into the standard API description
+//   adapter turns the standard API description into a target representation
+//   invoker executes an operation of a registered API against a live server
+//
+// An adapter is deliberately direction-agnostic: it reads the standard
+// description and does not care which format the description was parsed from, so
+// rendering a gRPC contract as an OpenAPI document and rendering an OpenAPI
+// document as a protobuf contract are the same operation.
+message ApiProviderInfo {
+  // Stable provider identifier, unique within the deployment.
+  string id = 1;
+  // Subsystem that hosts the provider.
+  string subsystem = 2;
+  // Role the provider plays, as an open identifier. The documented roles are
+  // parser, adapter, and invoker.
+  string role = 3;
+  // Description format identifiers the provider can parse.
+  repeated string formats = 4;
+  // Transport identifiers the provider can invoke over.
+  repeated string transports = 5;
+  // Representation identifiers the provider can render into, such as an OpenAPI
+  // document, a protobuf contract, or an MCP tool surface.
+  repeated string targets = 6;
+  // Endpoint the provider is reachable at.
+  string endpoint = 7;
+  // Fully-qualified service names the provider serves.
+  repeated string service_names = 8;
+  // Explicit capabilities the provider advertises.
+  repeated string capabilities = 9;
+  // Operational state of the provider.
+  ApiServerStatus status = 10;
+  // Implementation version of the provider subsystem.
+  string implementation_version = 11;
+}
+
+// ParseApiRequest asks a parser subsystem to interpret one description
+// document. The catalog sends the document to a parser rather than interpreting
+// it itself, so a new description language is integrated by adding a subsystem
+// instead of changing the framework.
+message ParseApiRequest {
+  // Description document bytes, in the format named by format.
+  bytes document = 1;
+  // Format identifier the document is written in. A parser that does not
+  // handle it returns INVALID_ARGUMENT.
+  string format = 2;
+  // Format hint used when the document does not declare its own format.
+  string format_hint = 3;
+  // Where the document came from, for provenance.
+  ApiSource source = 4;
+  // Base URL the document declares, used when the document declares none.
+  string base_url = 5;
+  // Identifier to assign to the parsed API. When empty, the parser derives a
+  // stable identifier from the document.
+  string api_id = 6;
+  // Server identifier the parsed API is bound to. When empty the API is
+  // registered unbound.
+  string server_id = 7;
+}
+
+// ParseApiResponse carries the standard description produced by a parser.
+message ParseApiResponse {
+  // Parsed API description.
+  Api api = 1;
+  // Non-fatal findings, such as operations the parser skipped.
+  repeated string warnings = 2;
+  // Format descriptors the parser recognizes, so a catalog can index the
+  // formats this deployment can parse.
+  repeated ApiFormatDescriptor formats = 3;
+}
+
+// InvokeApiRequest asks an adapter subsystem to execute one operation. Policy
+// and exposure are decided by the catalog before the request is sent.
+//
+// The request is self-describing: it carries the registered server, the
+// registered API, and the operation. An adapter therefore needs no shared
+// state and no knowledge of the parser that produced the description, which is
+// what lets an adapter be deployed independently of any parser.
+message InvokeApiRequest {
+  // Identifier of the registered server that hosts the operation.
+  string server_id = 1;
+  // Identifier of the registered API that owns the operation.
+  string api_id = 2;
+  // Identifier of the operation to invoke.
+  string operation_id = 3;
+  // Caller values as a JSON object. A key matching a declared parameter
+  // supplies that parameter; a "body" key supplies the request value. Keys
+  // matching neither are rejected.
+  bytes arguments_json = 4;
+  // Propagated correlation identifier.
+  string request_id = 5;
+  // Propagated trace identifier.
+  string trace_id = 6;
+  // Registered server the operation is invoked against.
+  ApiServer server = 7;
+  // Registered API that owns the operation.
+  Api api = 8;
+  // Operation to invoke, including its transport mapping and schemas.
+  ApiOperation operation = 9;
+}
+
+// InvokeApiResponse carries the outcome of one invocation.
+message InvokeApiResponse {
+  // Transport status code, or 0 when the transport has no status concept.
+  int32 status = 1;
+  // Media type of the body.
+  string content_type = 2;
+  // Response headers worth keeping.
+  map<string, string> headers = 3;
+  // Response value as JSON.
+  bytes body_json = 4;
+}
+
+// RenderApiRequest asks an adapter subsystem for the target API's schema files.
+// This is translation only: nothing is served and no call is proxied. Use
+// ServeApi when the adapted API has to answer requests.
+message RenderApiRequest {
+  // Description to translate.
+  Api api = 1;
+  // Representation to translate into, such as openapi, protoset, or mcp. An
+  // adapter that does not produce it returns INVALID_ARGUMENT.
+  string target = 2;
+  // Media type to prefer when the target supports more than one.
+  string media_type = 3;
+  // Options for the translation, as key/value pairs. An adapter ignores options
+  // it does not define rather than failing, so a caller can pass a superset.
+  map<string, string> options = 4;
+}
+
+// ApiSchemaFile is one schema file of a target API. A target may be described by
+// more than one file, and a caller that only understands a single document is
+// served the primary one first.
+message ApiSchemaFile {
+  // Path or name of the file within the target representation, such as
+  // openapi.json.
+  string name = 1;
+  // File contents, interpreted according to media_type.
+  bytes content = 2;
+  // Media type of the contents.
+  string media_type = 3;
+  // True when this is the file a client is expected to start from.
+  bool primary = 4;
+}
+
+// RenderApiResponse carries the target API's schema files.
+message RenderApiResponse {
+  // Schema files of the target API, in a defined order.
+  repeated ApiSchemaFile files = 1;
+  // Media type of the primary file.
+  string media_type = 2;
+  // File extension conventionally used for the target.
+  string file_extension = 3;
+  // Non-fatal findings, such as operations the target cannot represent.
+  repeated string warnings = 4;
+  // Target descriptors the adapter recognizes, so a catalog can index the
+  // representations this deployment can produce.
+  repeated ApiFormatDescriptor targets = 5;
+}
+
+// ServeApiRequest asks an adapter subsystem to serve an API in a target format.
+//
+// Serving an adapted API means two things at once: the adapted surface has to
+// answer requests, and those requests have to reach the original server. The
+// adapter therefore receives the original server as well as the description —
+// the description says what the surface looks like, and the server says where
+// the work actually happens.
+message ServeApiRequest {
+  // Description of the API to serve.
+  Api api = 1;
+  // Original server the adapted surface tunnels to. Required: an adapter that
+  // cannot reach the original server has nothing to tunnel to.
+  ApiServer server = 2;
+  // Representation to serve, such as openapi.
+  string target = 3;
+  // Address to listen on. Empty lets the adapter choose one, and the chosen
+  // address is returned.
+  string listen_address = 4;
+  // Path prefix the adapted surface is mounted under. Empty lets the adapter
+  // choose one that does not collide with the paths it generates or with the
+  // documentation endpoint it reserves.
+  string base_path = 5;
+  // Options for the serving, as key/value pairs.
+  map<string, string> options = 6;
+}
+
+// ServeApiResponse describes where an adapted API is being served.
+message ServeApiResponse {
+  // Representation being served.
+  string target = 1;
+  // Base URL the adapted surface answers on.
+  string endpoint = 2;
+  // Path prefix the adapted surface is mounted under.
+  string base_path = 3;
+  // Paths the adapted surface serves, in a defined order.
+  repeated string paths = 4;
+  // Dedicated path of the target's own documentation, such as an OpenAPI
+  // Swagger UI. It never collides with a path the adapter generates.
+  string documentation_endpoint = 5;
+  // Dedicated path of the target's raw schema document, when the target has one.
+  string schema_endpoint = 6;
+  // Non-fatal findings about the served surface.
+  repeated string warnings = 7;
+  // Identifier the deployment can use to stop this surface.
+  string instance_id = 8;
+}
+
+// StopApiRequest stops one adapted surface a previous ServeApi call started.
+message StopApiRequest {
+  // Identifier returned by ServeApi.
+  string instance_id = 1;
+}
+
+// StopApiResponse acknowledges a stop.
+message StopApiResponse {
+  // True when a served surface was stopped.
+  bool stopped = 1;
+}
+
+// ApiParserService is implemented by a parser subsystem. A parser subsystem
+// interprets one description language into the standard API model.
+// Implementing this service is all a user needs to integrate a new API format.
+service ApiParserService {
+  // ParseApi interprets one description document into the standard model.
+  rpc ParseApi(ParseApiRequest) returns (ParseApiResponse);
+}
+
+// ApiAdapterService is implemented by an adapter subsystem.
+//
+// An adapter does one job with two faces. It translates a standard API
+// description into a target representation — returning the target's schema files
+// — and it can serve that representation, tunneling requests to the original
+// server. It never sees which format the description was parsed from: rendering a
+// protobuf contract as an OpenAPI document and rendering an OpenAPI document as a
+// protobuf contract are the same operation.
+//
+// Implementing this service is all a user needs to publish an API in a format
+// they did not write the description in.
+service ApiAdapterService {
+  // RenderApi returns the target API's schema files for a description.
+  rpc RenderApi(RenderApiRequest) returns (RenderApiResponse);
+  // ServeApi serves an adapted API and tunnels it to the original server.
+  rpc ServeApi(ServeApiRequest) returns (ServeApiResponse);
+  // StopApi stops one adapted surface started by ServeApi.
+  rpc StopApi(StopApiRequest) returns (StopApiResponse);
+}
+
+// ApiInvokerService is implemented by an invoker subsystem. An invoker executes
+// the operations of a registered API against a live server. It is a separate
+// contract from ApiAdapterService: rendering a description into a target format
+// produces something to deploy or publish, while invoking an operation is what a
+// live call needs.
+service ApiInvokerService {
+  // InvokeApi executes one operation of a registered API.
+  rpc InvokeApi(InvokeApiRequest) returns (InvokeApiResponse);
+}

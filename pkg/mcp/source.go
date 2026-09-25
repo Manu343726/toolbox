@@ -85,6 +85,15 @@ func (s *EndpointSource) addEndpoint(endpoint ServiceEndpoint) error {
 			return fmt.Errorf("service endpoint %q contains an unnamed service", endpoint.Name)
 		}
 		if previous, exists := s.byService[service.Name]; exists {
+			// A feature service advertised twice is a genuine conflict: two
+			// subsystems claim the same contract, and a caller could not tell
+			// which one it reached. The framework's extension contracts are
+			// different: every provider serves them on purpose, and the catalog
+			// reaches a specific one by identifier, so the first registration
+			// stands for reflection purposes only.
+			if isExtensionContract(service.Name) {
+				continue
+			}
 			return fmt.Errorf("service %q is advertised by both %q and %q", service.Name, previous, endpoint.Name)
 		}
 		s.byService[service.Name] = endpoint.Name

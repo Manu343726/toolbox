@@ -6,6 +6,9 @@ require (
 	connectrpc.com/connect v1.20.0
 	github.com/Manu343726/toolbox v0.0.0
 	github.com/Manu343726/toolbox/subsystems/agent v0.0.0
+	github.com/Manu343726/toolbox/subsystems/apigrpc v0.0.0
+	github.com/Manu343726/toolbox/subsystems/apiopenapi v0.0.0
+	github.com/Manu343726/toolbox/subsystems/apitools v0.0.0
 	github.com/Manu343726/toolbox/subsystems/documentation v0.0.0
 	github.com/Manu343726/toolbox/subsystems/health v0.0.0
 	github.com/Manu343726/toolbox/subsystems/knowledge v0.0.0
@@ -39,6 +42,12 @@ require (
 
 replace github.com/Manu343726/toolbox => ../..
 
+replace github.com/Manu343726/toolbox/subsystems/apiopenapi => ../../subsystems/apiopenapi
+
+replace github.com/Manu343726/toolbox/subsystems/apigrpc => ../../subsystems/apigrpc
+
+replace github.com/Manu343726/toolbox/subsystems/apitools => ../../subsystems/apitools
+
 replace github.com/Manu343726/toolbox/subsystems/agent => ../../subsystems/agent
 
 replace github.com/Manu343726/toolbox/subsystems/documentation => ../../subsystems/documentation
@@ -60,3 +69,5 @@ replace github.com/Manu343726/toolbox/subsystems/skill => ../../subsystems/skill
 replace github.com/Manu343726/toolbox/subsystems/tool => ../../subsystems/tool
 
 replace github.com/Manu343726/toolbox/subsystems/workflow => ../../subsystems/workflow
+
+replace github.com/Manu343726/toolbox/subsystems/testecho => ../../subsystems/testecho

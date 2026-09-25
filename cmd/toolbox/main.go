@@ -13,10 +13,14 @@ import (
 	"syscall"
 
 	"connectrpc.com/connect"
+	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/Manu343726/toolbox/pkg/host"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	agent "github.com/Manu343726/toolbox/subsystems/agent"
+	apigrpc "github.com/Manu343726/toolbox/subsystems/apigrpc"
+	apiopenapi "github.com/Manu343726/toolbox/subsystems/apiopenapi"
+	apitools "github.com/Manu343726/toolbox/subsystems/apitools"
 	documentation "github.com/Manu343726/toolbox/subsystems/documentation"
 	health "github.com/Manu343726/toolbox/subsystems/health"
 	knowledge "github.com/Manu343726/toolbox/subsystems/knowledge"
@@ -214,8 +218,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 func buildHost() (*host.Host, error) {
 	h := host.New()
+	// The API catalog is given the host's own provider directory, so it finds the
+	// parsers, adapters, and invokers this process starts without importing a
+	// single provider subsystem.
+	providers := h.ProviderDirectory()
 	factories := map[string]subsystem.Factory{
 		"agent":         func() (*subsystem.Server, error) { return agent.New(agent.Options{}) },
+		"apitools":      func() (*subsystem.Server, error) { return apitools.New(apitools.Options{Directory: providers}) },
+		"apiopenapi":    func() (*subsystem.Server, error) { return apiopenapi.New(apiopenapi.Options{}) },
+		"apigrpc":       func() (*subsystem.Server, error) { return apigrpc.New(apigrpc.Options{}) },
 		"documentation": func() (*subsystem.Server, error) { return documentation.New(documentation.Options{}) },
 		"health":        func() (*subsystem.Server, error) { return health.New(health.Options{}) },
 		"knowledge":     func() (*subsystem.Server, error) { return knowledge.New(knowledge.Options{}) },
@@ -232,7 +243,29 @@ func buildHost() (*host.Host, error) {
 			return nil, err
 		}
 	}
+	h.OnStarted(func(context.Context, *subsystem.Descriptor) error {
+		// A subsystem's endpoint is only known once it has started, so the
+		// resolver the providers are bound through is installed here.
+		providers.SetResolver(core.NewStaticResolver(hostEndpoints(h)...))
+		return nil
+	})
 	return h, nil
+}
+
+// hostEndpoints describes the started subsystems as resolvable endpoints, so a
+// provider client is bound the same way any other service client is.
+func hostEndpoints(h *host.Host) []core.Endpoint {
+	descriptors := h.Descriptors()
+	endpoints := make([]core.Endpoint, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		endpoints = append(endpoints, core.Endpoint{
+			Name:         descriptor.SubsystemName,
+			URL:          descriptor.Endpoint,
+			ServiceNames: append([]string(nil), descriptor.ServiceNames...),
+			Capabilities: append([]string(nil), descriptor.Capabilities...),
+		})
+	}
+	return endpoints
 }
 
 func registerStartedSubsystems(ctx context.Context, h *host.Host) error {
