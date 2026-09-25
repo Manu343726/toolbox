@@ -25,6 +25,13 @@ make build
 
 The root workspace uses `go.work` and a top-level Makefile to build/test all subsystems and the combined host.
 
+## Documentation
+
+See [`docs/README.md`](docs/README.md) for the complete project documentation map,
+including the feature specification, architecture, subsystem catalog,
+development and testing guides, protocol conventions, current development status,
+roadmap, and architecture decisions.
+
 ## Public foundational packages
 
 - `pkg/subsystem` — transport/lifecycle SDK for serving ConnectRPC services and exposing gRPC reflection.
