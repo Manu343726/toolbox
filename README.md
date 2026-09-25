@@ -1,115 +1,128 @@
 # Toolbox
 
-**The AI agent workflow toolbox.**
+**The foundation for a fully AI-assisted working environment.**
 
-Toolbox gives AI agents a shared, governed set of capabilities — workflows,
-prompts, knowledge, skills, models, tools and policies — instead of a pile of
-hardcoded prompts and one-off tool wrappers.
+An assistant can only do real work if it knows your rules, can reach your tools,
+can hand work to other assistants, and can follow the process you defined. Those
+four things are hard, and most teams rebuild them for every agent, every
+project, and every model.
 
-An agent opens the toolbox, sees what it is allowed to use, pulls in what the
-job needs, and works inside explicit limits. Humans, scripts and agents use the
-same toolbox, so nothing an agent can do is a secret from the rest of your
-team.
+Toolbox provides them once, as a foundation you build on:
 
-## The problem
+| Foundation                   | What you get                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| **Knowledge base and retrieval** | A shared knowledge base an assistant can search and cite, instead of a per-agent pile of pasted documents |
+| **External tool calls**      | A governed way for an assistant to act on your systems, not just describe them |
+| **Multi-agent definition and coordination** | Define who does what, and let assistants hand work to each other under your rules |
+| **Workflow definition**      | The process written down as a versioned, reviewable plan rather than improvised each run |
 
-Most agent setups are assembled by hand:
+Write your rules, skills, prompts and knowledge once. Every agent, workflow and
+model you add afterwards reuses them.
 
-- every agent gets its own giant prompt, and the prompt is the only place its
-  behaviour is defined;
-- tools are scattered across repositories, duplicated per project, and drift
-  from the services that actually implement them;
-- nobody can answer "what is this agent allowed to do?" or "which agent used
-  that tool last Tuesday?";
-- adding a capability means touching every agent that might need it.
+## The goal
 
-The result is agents that are hard to reuse, hard to change, and hard to trust.
+To let people work in an environment where the assistant is a participant
+rather than a suggestion box:
 
-## What Toolbox gives you
+- it **knows** the domain — the rules, conventions and reference material your
+  team already wrote down;
+- it **acts** — through your tools, inside limits you set, with approval where
+  you want it;
+- it **coordinates** — several assistants dividing real work, each with a
+  defined role and reach;
+- it **follows** the process you defined, repeatably and reviewably.
 
-### One toolbox, many agents
+And to make that possible without rewriting the world each time. Today an
+assistant's behaviour lives in a prompt; the next assistant, the next project
+and the next model start from zero. Toolbox treats rules, skills, prompts,
+knowledge, tools and policies as shared, versioned assets — authored once,
+improved once, reused everywhere.
 
-Workflows, prompts, knowledge sources, skills, models, tools and policies live
-in the toolbox once. Any agent can use them. Adding a capability makes it
-available everywhere immediately, instead of to the agents you remember to
-update.
+## Without a foundation
 
-### Workflows as first-class, reviewable artifacts
+Building an AI-assisted workflow by hand usually means:
 
-A workflow is a named, versioned plan: which steps run, in what order, using
-which capabilities. Workflows are validated before they are used, reviewed like
-code, and reused across agents. Changing how work happens is a version bump, not
-a prompt rewrite.
+- a large prompt per assistant, which is the only place its behaviour is
+  defined and nobody can review it;
+- knowledge re-pasted into every prompt, drifting out of date immediately;
+- tools wired per project, so the same capability exists in five places and
+  behaves five ways;
+- no answer to "what is this assistant allowed to do?" or "why did it do
+  that?";
+- new assistants or new models starting over from nothing.
 
-### Agents defined by what they can reach
+The result is assistants that are hard to reuse, hard to change and hard to
+trust.
 
-An agent profile references the skills, knowledge, tools and policies it uses
-rather than embedding them in text. The same profile works with a different
-model, a different team, or a different environment, because the profile
-describes intent, not implementation.
+## The four foundations
 
-### Governance instead of trust
+### A knowledge base with retrieval
 
-Every capability declares what it does, and policies decide what each action
-requires: allowed, or allowed with approval. The toolbox refuses actions its
-policies do not permit, so limits are enforced by the system rather than
-requested in a prompt. You can always answer what an agent could have done.
+Your reference material lives in the toolbox, not in a prompt. Assistants
+search what they need and work from sources they can point to, so knowledge is
+curated once and shared by every assistant and workflow. Access to sources is
+governed like everything else, so a restricted document stays restricted.
 
-### Agents that ask for what they need
+*Removes:* re-pasting and re-curating context for every assistant.
 
-Agents start by seeing the toolbox's catalogue, not by loading every tool
-forever. They request the specific capabilities a task needs, and release them
-when the task is done. Context stays small, behaviour stays legible, and the
-footprint an agent used is inspectable.
+### Governed external tool calls
 
-### Model freedom
+An assistant that cannot act is a suggestion engine. Toolbox gives assistants a
+declared set of actions against your real systems — each one described, each one
+subject to policy, and the consequential ones able to require approval before
+they run. Capabilities are added once and become available to every assistant
+that is allowed to use them.
 
-Workflows and agent profiles are provider-neutral. Bring the model that fits
-the task — or the budget, or the region — without rewriting the work itself.
-Model access is a capability, not a hardcoded dependency.
+*Removes:* bespoke tool wiring per project, and the ambiguity of what an
+assistant is allowed to do.
 
-### Bring your own capabilities
+### Multi-agent definition and coordination
 
-The included capabilities are a starting point, not a ceiling. Add your own
-services, and the toolbox treats them the same way it treats the built-ins:
-discoverable, documented and governed.
+Real work needs more than one assistant: a researcher, an author, a reviewer, an
+operator. Toolbox lets you define each role, what it can reach, and how work
+moves between them — including handoffs, escalation for approval, and shared
+context that all of them work from. Adding a role is a new definition, not a new
+prompt for everyone.
 
-### One toolbox for humans and agents
+*Removes:* duplicated roles and hand-rolled message passing between assistants.
 
-The same definitions back the command line, your scripts and your agents.
-There is no agent-only surface that drifts, and no privileged path that only
-works for the framework.
+### Workflow definition
 
-### Works where your agents already are
+A workflow is the process written down: the steps, the order, the branching, the
+approvals, and which assistant or capability each step uses. It is versioned and
+reviewable like code, validated before it runs, and reused by every assistant
+that needs it. Changing how work happens becomes a reviewed change, not a
+rewrite of everyone's instructions.
 
-The toolbox plugs into the agent tools and IDEs your team already uses, through
-the Model Context Protocol that agent runtimes speak. No new agent client to
-adopt, no prompt conventions to teach.
+*Removes:* improvisation, and the silent drift of "how we do things" into
+whoever prompted last.
 
 ## What is in the toolbox
 
-| Capability      | What it is                                                            | What an agent does with it                              |
-| --------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
-| **Workflows**   | Versioned plans made of steps                                        | Look up a plan, validate it, follow it, improve it        |
-| **Agents**      | Versioned profiles that reference capabilities                       | Act as a configured role with a defined reach              |
-| **Skills**      | Reusable units of know-how bound to the capabilities they need        | Load a skill when the task matches it                     |
-| **Prompts**     | Parameterised templates                                               | Render a template instead of improvising wording          |
-| **Knowledge**   | Sources an agent is allowed to consult                               | Search only the sources it is entitled to                 |
-| **Models**      | The models available to the team                                     | Choose or be given a model for the step it is running     |
-| **Tools**       | Declared actions, each with its own requirements                     | Invoke an action, subject to that action's policy         |
-| **Policies**    | The rules that decide what needs approval                            | Check what a step requires before taking it               |
-| **Health**      | Whether each part of the toolbox is ready                            | Avoid relying on something that is not available         |
+| Building block | What it holds                                              | Why it matters                                                    |
+| -------------- | ---------------------------------------------------------- | ----------------------------------------------------------------- |
+| Workflows      | Versioned plans: steps, order, branching, approvals       | The process, written down and reviewable                           |
+| Agents         | Roles referencing the skills, knowledge, tools they may use | Who does what, defined once and reused                            |
+| Skills         | Reusable units of know-how bound to what they require      | Know-how that improves once for everyone                           |
+| Prompts        | Parameterised templates                                    | Consistent instructions without hand-editing each time             |
+| Knowledge      | The sources assistants may search                          | One current body of reference material                            |
+| Models         | The models available to the team                           | Work stays portable across providers and budgets                  |
+| Tools          | Declared actions, each with its own requirements            | What an assistant can actually do                                 |
+| Policies       | What is allowed, and what needs approval                   | Limits enforced by the system, not requested in a prompt          |
+| Health         | Whether each part is ready                                 | Assistants and people do not rely on something unavailable        |
 
-Every item is versioned, so behaviour is reproducible and changes are visible.
+## A day in the environment
 
-## A day with the toolbox
+> Someone asks for the weekly report. An assistant loads the report workflow,
+> which names the prompt template, the knowledge sources, and the review step.
+> The assistant searches the sources, drafts with the template, and reaches the
+> publish step — which requires approval, so it hands off to a reviewer instead
+> of sending anything itself. The workflow records which versions of the
+> template, sources and policy it used, so the result can be explained and
+> repeated.
 
-> An agent is asked to prepare the weekly report. It finds the report workflow,
-> loads the prompt template it names, searches the knowledge sources it is
-> allowed to consult, and reaches the publish step. The publish step requires
-> approval, so the agent prepares the draft and requests sign-off instead of
-> sending anything itself. The whole exchange is recorded against the
-> workflow version it used.
+Next month, a second assistant does the same thing. It reuses every one of
+those assets. Nobody rewrote a rule.
 
 ## Getting started
 
@@ -119,53 +132,58 @@ Build the toolbox:
 make build
 ```
 
-Run everything it contains:
+Run it:
 
 ```sh
 ./bin/toolbox --all
 ```
 
-Hand it to your agents:
+Connect an assistant to it. Any agent runtime that speaks the Model Context
+Protocol can use the toolbox directly:
 
 ```sh
 ./bin/toolbox mcp --all
 ```
 
-Any MCP-capable agent runtime can then connect to that command and use the
-toolbox. To give an agent a smaller, quieter toolbox, start it with
-`--minimal` and let it request capabilities as it needs them.
+Start with a smaller surface when you want the assistant to request what it
+needs as it goes:
 
-From there, the fastest way to understand the product is to read
-[`docs/feature-spec.md`](docs/feature-spec.md) and then look at the workflows,
-agents and prompts it describes.
+```sh
+./bin/toolbox mcp --all --minimal
+```
+
+Then read [`docs/feature-spec.md`](docs/feature-spec.md) — it describes what
+each part of the product must do, and where the current implementation stands
+against it.
 
 ## Who it is for
 
-- **AI and platform engineers** standardising how agents get tools, and how
-  those tools are governed.
+- **Platform and AI engineers** building an assistant that can do the work
+  rather than describe it.
 - **Agent developers** who want reusable, versioned behaviour instead of
-  prompt-by-prompt hand-tuning.
-- **Teams** that need to answer, at any moment, what an agent is capable of and
-  what it actually did.
+  prompt-by-prompt tuning.
+- **Teams** that need to know, at any moment, what an assistant can do and what
+  it actually did.
 
 ## Status
 
-Early and actively developed. The framework works end to end today and the
-included capabilities are working reference implementations rather than
-finished products — the current state is written up in
-[`docs/status.md`](docs/status.md) and the plan in
+Early and actively developed. The foundation works end to end today; the
+included knowledge, tool, agent and workflow capabilities are working reference
+implementations rather than finished products. The current state is written up
+in [`docs/status.md`](docs/status.md) and the plan in
 [`docs/todos.md`](docs/todos.md).
 
 ## Documentation
 
-[`docs/README.md`](docs/README.md) is the map. Product and design reading
-first:
+[`docs/README.md`](docs/README.md) is the map.
 
-- [Feature specification](docs/feature-spec.md) — what the product is and what it must do
+Product and design:
+
+- [Feature specification](docs/feature-spec.md) — what the product is and what each part must do
 - [Subsystem catalog](docs/subsystems.md) — every capability and its contract
 - [Current status](docs/status.md) and [roadmap](docs/todos.md)
 
-Engineering detail lives here:
+Engineering detail:
 
 - [Architecture](docs/architecture.md) — boundaries, runtime layers, composition, constraints
 - [MCP gateway](docs/mcp.md) — agent tooling, exposure control, client setup

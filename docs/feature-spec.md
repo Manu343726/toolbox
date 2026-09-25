@@ -2,9 +2,23 @@
 
 ## 1. Product definition
 
-Toolbox is a provider-neutral framework for building AI-assisted workflows.
-It lets a user compose domain rules, knowledge, prompts, skills, agents, models,
-and tools into a working environment without binding the workflow to one model
+Toolbox is the foundation for a fully AI-assisted working environment. It
+provides the four capabilities that environment requires, so users do not have
+to rebuild them for every agent, project, or model:
+
+1. **Knowledge base and retrieval** — a shared, governed body of domain
+   knowledge an agent can search and cite, instead of context pasted into every
+   prompt.
+2. **External tool calls** — a declared, policy-governed way for an agent to act
+   on real systems, with approval boundaries for consequential actions.
+3. **Multi-agent definition and coordination** — versioned agent roles with
+   declared reach, and explicit coordination and handoff between them.
+4. **Workflow definition** — the process expressed as a versioned, validated,
+   reviewable plan rather than improvised per run.
+
+Domain rules, skills, prompts, knowledge references, policies, and capability
+declarations are authored once as versioned assets and reused by every agent,
+workflow, and model. Toolbox is provider-neutral: work is not bound to one model
 provider or one deployment topology.
 
 The framework is useful when work must be repeatable, governed by domain rules,
@@ -20,14 +34,19 @@ and executed by more than one agent or service. Target users include:
 
 ### Primary goals
 
-1. Make workflows composable from independent services.
-2. Keep domain rules explicit, versioned, and enforceable outside prompts.
-3. Make service contracts provider-neutral and independently deployable.
-4. Allow built-in and third-party services to participate through the same
+1. Provide the four foundations of a fully AI-assisted environment — knowledge
+   retrieval, external tool calls, multi-agent coordination, and workflow
+   definition — as reusable, versioned assets.
+2. Ensure rules, skills, prompts, and knowledge are authored once and reused, so
+   adding an agent, a workflow, or a new model does not require rewriting them.
+3. Make workflows composable from independent services.
+4. Keep domain rules explicit, versioned, and enforceable outside prompts.
+5. Make service contracts provider-neutral and independently deployable.
+6. Allow built-in and third-party services to participate through the same
    ConnectRPC/reflection/registry model.
-5. Provide a portable environment containing definitions, skills, prompts,
+7. Provide a portable environment containing definitions, skills, prompts,
    knowledge references, policies, and capability declarations.
-6. Make the runtime observable, testable, and replaceable at subsystem
+8. Make the runtime observable, testable, and replaceable at subsystem
    boundaries.
 
 ### Non-goals for the foundation
@@ -112,6 +131,24 @@ An agent profile declares:
 
 The profile does not select a provider-specific model implementation. Model
 selection belongs to the model service and run configuration.
+
+### Multi-agent coordination
+
+A team of agents is defined by the relationships between their profiles, not by
+prompt text. Coordination declares:
+
+- which agent roles may hand work to which other roles;
+- the artifact or message a handoff carries;
+- which knowledge, skills, and tool capabilities transfer with the handoff and
+  which stay private to the originating agent;
+- escalation targets for approval, failure, and ambiguity;
+- the workflow node where coordination is permitted to occur.
+
+A handoff is a governed transition: the receiving agent's declared reach and the
+active policy snapshot are evaluated before it proceeds. Coordination is
+recorded in the run trail with the profile and workflow versions that produced
+it. Ad-hoc agent-to-agent messaging outside a declared handoff is not part of
+the model.
 
 ### Skill
 
@@ -229,6 +266,10 @@ support:
 | F-018 | MCP introspection and runtime feature exposure | Implemented |
 | F-019 | Independent and aggregated MCP deployment | Implemented |
 | F-020 | Session-isolated MCP exposure over HTTP | Not implemented |
+| F-021 | Knowledge ingestion, embeddings, retrieval, and source ACLs | Not implemented |
+| F-022 | Multi-agent coordination contract and governed handoffs | Not implemented |
+| F-023 | Workflow execution with branching, approvals, and run records | Not implemented |
+| F-024 | Reuse of versioned assets across agents, workflows, and models | Partial: shared catalogs exist, no run-time reuse contract |
 
 ## 7. Quality requirements
 

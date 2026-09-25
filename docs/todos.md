@@ -72,6 +72,23 @@ ConnectRPC client and resume after a controlled failure.
 **Done when:** an operator can explain which definitions, policies, models,
 and tools participated in a run.
 
+### Define multi-agent coordination
+
+- [ ] Add a coordination contract declaring agent roles, permitted handoffs, and
+      the artifact each handoff carries.
+- [ ] Add shared-context rules: which knowledge, skills, and tool capabilities
+      transfer on a handoff and which stay private.
+- [ ] Add escalation targets for approval, failure, and ambiguity.
+- [ ] Evaluate the receiving profile's reach and the active policy snapshot
+      before a handoff proceeds.
+- [ ] Record every handoff in the run trail with the profile and workflow
+      versions involved.
+- [ ] Guard against coordination loops and unbounded delegation depth.
+
+**Done when:** a workflow can route work between two or more versioned agent
+profiles, with a recorded, policy-checked handoff and no ad-hoc messaging
+outside it.
+
 ## P1 — production runtime
 
 ### Model providers

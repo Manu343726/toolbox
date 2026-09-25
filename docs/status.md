@@ -5,11 +5,26 @@
 **Pre-MCP implementation baseline:** `58f5f46 docs: add project agent guidelines and skills`<br>
 **MCP implementation:** added in the current change
 
-## Summary
+## Product goal
 
-The repository has a working foundation for independently deployable
-ConnectRPC subsystems. The foundation is green and independently buildable;
-the feature services are currently reference implementations.
+Toolbox is the foundation for a fully AI-assisted working environment: shared
+knowledge with retrieval, governed external tool calls, multi-agent definition
+and coordination, and versioned workflow definition. Rules, skills, prompts,
+knowledge, tools, and policies are authored once as versioned assets and reused
+by every agent, workflow, and model.
+
+## Summary against that goal
+
+| Foundation                        | State today                                                          | Remaining                                                                 |
+| --------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Knowledge base and retrieval      | Knowledge sources and deterministic metadata search                 | Ingestion, chunking, embeddings, indexes, reranking, source ACLs           |
+| External tool calls               | Declared tool capabilities and policy-gated invocation               | Real capability manifests, permission scopes, sandboxing, typed results    |
+| Multi-agent definition and coordination | Versioned agent profiles with capability references             | Coordination contract, handoffs, shared-context rules, escalation, loop guards |
+| Workflow definition               | Versioned workflow definitions with validation                       | Execution, branching, retries, approvals, auditable run record            |
+
+The supporting framework is green and independently buildable; the capability
+services are reference implementations, and the product pillars above are the
+P0/P1 roadmap.
 
 ## Delivered
 
