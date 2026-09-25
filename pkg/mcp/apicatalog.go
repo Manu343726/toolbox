@@ -9,6 +9,7 @@ import (
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
+	"github.com/Manu343726/toolbox/pkg/discovery"
 )
 
 // This file is the MCP adapter for the standard API model. It reads a catalog of
@@ -25,11 +26,14 @@ type APICatalogOptions struct {
 	// Options are the generated server's options. Policy defaults to a policy
 	// derived from the operations' declared capabilities.
 	Options Options
-	// IncludeHiddenAPIs adds an API's operations to the catalog even when the
-	// catalog did not list them. It is false by default.
-	IncludeHiddenAPIs bool
 	// APISelector optionally narrows the catalog to the APIs it accepts.
 	APISelector func(api.API) bool
+	// IgnoreExposure builds the surface from the catalog's descriptions alone,
+	// ignoring the exposure decisions it recorded. It is false by default: when a
+	// catalog says an operation is hidden or denied, this server does not offer it,
+	// because a second opinion about a decision the catalog already made would make
+	// the catalog's answers undependable.
+	IgnoreExposure bool
 }
 
 // NewFromAPICatalog builds an MCP server over a catalog of registered API
@@ -62,21 +66,28 @@ func NewFromAPICatalog(ctx context.Context, catalog api.Catalog, invoker api.Inv
 	if options.Policy == nil {
 		options.Policy = APIPolicy()
 	}
-	server := newServer(options)
-	toolNames := make(map[string]string)
+	servers, err := catalog.Servers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog servers: %w", err)
+	}
+	byID := make(map[string]api.Server, len(servers))
+	for _, candidate := range servers {
+		byID[candidate.ID] = candidate
+	}
+	selected := make([]api.API, 0, len(apis))
 	for _, described := range apis {
 		if catalogOptions.APISelector != nil && !catalogOptions.APISelector(described) {
 			continue
 		}
-		servers, serverErr := catalog.Servers(ctx)
-		if serverErr != nil {
-			return nil, fmt.Errorf("list catalog servers: %w", serverErr)
-		}
-		byID := make(map[string]api.Server, len(servers))
-		for _, candidate := range servers {
-			byID[candidate.ID] = candidate
-		}
-		for _, entry := range apiFeatures(described, byID, invoker, options.Policy) {
+		selected = append(selected, described)
+	}
+	// The catalog's exposure decisions are read once, for every operation, so the
+	// gateway and the catalog cannot disagree about a single one.
+	exposures := readExposures(ctx, catalog, selected, catalogOptions.IgnoreExposure)
+	server := newServer(options)
+	toolNames := make(map[string]string)
+	for _, described := range selected {
+		for _, entry := range apiFeatures(described, byID, invoker, options.Policy, exposures, options.InitialExposure) {
 			if err := server.addEntry(entry, toolNames); err != nil {
 				return nil, err
 			}
@@ -84,6 +95,40 @@ func NewFromAPICatalog(ctx context.Context, catalog api.Catalog, invoker api.Inv
 	}
 	server.finish()
 	return server, nil
+}
+
+// readExposures asks the catalog what it has exposed, when it can answer. A catalog
+// that does not track exposure yields nothing, and the gateway falls back to its
+// own policy — which is what keeps a read-only catalog usable.
+func readExposures(
+	ctx context.Context,
+	catalog api.Catalog,
+	apis []api.API,
+	ignored bool,
+) map[string]api.Exposure {
+	if ignored {
+		return nil
+	}
+	source, ok := catalog.(api.ExposureSource)
+	if !ok {
+		return nil
+	}
+	identifiers := make([]string, 0, 32)
+	for _, described := range apis {
+		for _, operation := range described.Operations() {
+			identifiers = append(identifiers, operation.ID)
+		}
+	}
+	if len(identifiers) == 0 {
+		return nil
+	}
+	exposures, err := source.Exposures(ctx, identifiers)
+	if err != nil {
+		// A catalog that cannot report its decisions has not made any this gateway
+		// must honour, so the gateway answers for itself.
+		return nil
+	}
+	return exposures
 }
 
 // APIPolicy returns the default policy for a catalog-backed server. An operation
@@ -97,12 +142,26 @@ func APIPolicy() FeaturePolicy {
 	})
 }
 
-// apiFeatures turns one registered API into candidate features.
-func apiFeatures(described api.API, servers map[string]api.Server, invoker api.Invoker, policy FeaturePolicy) []*featureEntry {
+// apiFeatures turns one registered API into candidate features, honouring what
+// the catalog decided about each of them.
+func apiFeatures(
+	described api.API,
+	servers map[string]api.Server,
+	invoker api.Invoker,
+	policy FeaturePolicy,
+	exposures map[string]api.Exposure,
+	initialExposure InitialExposure,
+) []*featureEntry {
 	entries := make([]*featureEntry, 0, len(described.Operations()))
 	for _, service := range described.Services {
+		if discovery.IsInfrastructureService(service.Name) {
+			// A subsystem's own plumbing is not a tool: health checks, the registry,
+			// the documentation service, and the framework's extension contracts are
+			// how the platform works, not what a user adopted.
+			continue
+		}
 		for _, operation := range service.Operations {
-			entries = append(entries, apiFeatureEntry(described, service, operation, servers, invoker, policy))
+			entries = append(entries, apiFeatureEntry(described, service, operation, servers, invoker, policy, exposures, initialExposure))
 		}
 	}
 	return entries
@@ -132,6 +191,8 @@ func apiFeatureEntry(
 	servers map[string]api.Server,
 	invoker api.Invoker,
 	policy FeaturePolicy,
+	exposures map[string]api.Exposure,
+	initialExposure InitialExposure,
 ) *featureEntry {
 	qualified := apiFeatureName(described, operation.Service)
 	description := operation.Summary
@@ -157,6 +218,23 @@ func apiFeatureEntry(
 	if operation.Response != nil {
 		outputRef = operation.Response.Ref
 	}
+	// The catalog's decision is authoritative for the operations it knows about: a
+	// denied operation is not a tool, and a hidden one is not exposed even when
+	// this server's own policy would allow it. An operation the catalog has never
+	// seen falls back to the policy, which is what a catalog that predates the
+	// decision cannot object to.
+	exposure, decided := exposures[operation.ID]
+	allowed := policy.AllowFeature(qualified, operation.Name)
+	callable := invoker != nil && !operation.Streaming.Streaming() && len(described.ServerIDs) > 0
+	exposed := allowed && callable && initialExposure == ExposeAllowedFeatures
+	switch {
+	case !decided:
+	case !exposure.Allowed:
+		allowed = false
+		exposed = false
+	default:
+		exposed = exposure.Exposed && callable
+	}
 	entry := &featureEntry{
 		feature: Feature{
 			ID:              featureID(qualified, operation.Name),
@@ -168,8 +246,9 @@ func apiFeatureEntry(
 			OutputType:      outputRef,
 			ClientStreaming: operation.Streaming.Client,
 			ServerStreaming: operation.Streaming.Server,
-			Allowed:         policy.AllowFeature(qualified, operation.Name),
-			Callable:        invoker != nil && !operation.Streaming.Streaming() && len(described.ServerIDs) > 0,
+			Allowed:         allowed,
+			Exposed:         exposed,
+			Callable:        callable,
 			Capabilities:    capabilities,
 		},
 		inputSchema:        operationArgumentsSchema(operation),

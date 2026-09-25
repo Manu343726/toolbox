@@ -286,6 +286,8 @@ support:
 | F-028 | On-demand exposure of individual API operations | Implemented |
 | F-029 | Target schema translation and adapted serving with documentation and schema download | Implemented for the OpenAPI target |
 | F-030 | User-contributed formats, targets, and transports | Implemented by contract; no third-party provider shipped yet |
+| F-031 | Reusable format packages behind thin provider subsystems | Implemented for OpenAPI and protobuf contracts |
+| F-032 | Automatic exposure of a host's own subsystems from their served contracts | Implemented, with the gateway's source selectable per deployment |
 | F-022 | Multi-agent coordination contract and governed handoffs | Not implemented |
 | F-023 | Workflow execution with branching, approvals, and run records | Not implemented |
 | F-024 | Reuse of versioned assets across agents, workflows, and models | Partial: shared catalogs exist, no run-time reuse contract |

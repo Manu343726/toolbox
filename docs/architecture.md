@@ -161,7 +161,9 @@ SDK behavior.
 | `pkg/cliapp`    | Shared standalone-command runner; adds the automatic `mcp` subcommand to every subsystem command |
 | `pkg/mcp`       | MCP gateway built from a reflected source: feature catalog, exposure state, policy gating, introspection tools, stdio and HTTP transports |
 | `pkg/host`      | Composes independently built subsystem factories in one process; aggregates their descriptors for the combined MCP; derives the API provider set from started subsystems' capabilities |
-| `pkg/api`       | Standard, provider-neutral description of an API: `API`, `Service`, `Operation`, `Schema`, `Server`, plus indexed format and transport descriptors. Holds the framework's own extension contract (`pkg/api/proto/api.proto`), which parser, adapter, and invoker subsystems implement |
+| `pkg/api`       | Standard, provider-neutral description of an API: `API`, `Service`, `Operation`, `Schema`, `Server`, plus indexed format and transport descriptors and the framework's own extension contract. Also the framework's Go interfaces — `Catalog`, `Registrar`, `Invoker`, `ExposureSource` — and the failure classification every provider reports |
+| `pkg/protocontract` | Reads a protobuf service contract, from a FileDescriptorSet or a live endpoint's reflection, and calls the operations it declares. A plain Go package: no transport, no service registration |
+| `pkg/openapi`   | Reads, renders, serves, and calls APIs described by OpenAPI 3.x documents, with no transport of its own |
 
 A subsystem implements its own service and may import any of these packages. It
 must not import another feature subsystem.
@@ -218,11 +220,41 @@ Swagger UI and a downloadable schema, and refuses a base path that would collide
 with a path it generates.
 
 Providers are discovered from the capabilities a started subsystem declares, and
-resolved with `core.Bind` through the generated framework clients. The catalog
-subsystem — `subsystems/apitools` — stores servers, API descriptions, the indexed
-format and transport descriptors, and operation exposure, and routes parsing,
-rendering, serving, and invocation to whichever provider claims the work. It
-imports no provider subsystem; a deployment supplies a provider directory.
+bound by provider identifier through the generated framework clients. A provider is
+never bound by service name, because several providers serve the same contract on
+purpose and a name cannot tell them apart.
+
+The catalog subsystem — `subsystems/apitools` — stores servers, API descriptions,
+the indexed format and transport descriptors, and operation exposure, and routes
+parsing, rendering, serving, and invocation to whichever provider claims the work. It
+imports no provider subsystem; a deployment supplies a provider directory. It also
+exposes itself as `api.Catalog`, `api.Registrar`, `api.Invoker`, and
+`api.ExposureSource`, so a composition in the same process uses it directly.
+
+### Behaviour lives in packages, subsystems are their addressable form
+
+The OpenAPI and protobuf implementations are reusable root packages, not subsystem
+logic. A subsystem mounts a package behind a contract so a catalog in another
+process can reach it; a host that has both in one process calls the package. See
+[`decisions/0005-reusable-packages-behind-thin-providers.md`](decisions/0005-reusable-packages-behind-thin-providers.md).
+
+### Automatic exposure of a host's own subsystems
+
+A host can register what it runs in the catalog, with nothing written per subsystem:
+
+1. Each started subsystem's contract is read from the subsystem itself.
+2. The capabilities its manifest declared are attached to the services they belong
+   to, because a contract cannot state them.
+3. The description is stored and bound to the subsystem's endpoint.
+4. The operations a declared capability covers are exposed. An operation no
+   capability covers is not a tool, and an operation the catalog's policy refuses
+   is reported rather than forced.
+
+Subsystems whose services are all platform plumbing — health, the registry, the
+documentation service, and the framework's extension contracts — are skipped, with
+a reason. The MCP gateway can build its tool surface from that catalog, naming the
+same operations as the reflection path, so the source of the surface can be chosen
+per deployment.
 
 See [`decisions/0004-api-introspection-and-providers.md`](decisions/0004-api-introspection-and-providers.md)
 for the decision and its consequences.

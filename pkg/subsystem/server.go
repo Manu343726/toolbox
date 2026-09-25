@@ -390,3 +390,24 @@ func uniqueSorted(values []string) []string {
 	}
 	return result
 }
+
+// ServiceCapabilities returns the capabilities the subsystem declared for each of
+// its services, keyed by fully-qualified service name.
+//
+// The descriptor flattens these together, because a registry and a discovery
+// client both want one list. A composition that joins a served contract to what the
+// subsystem is for needs them apart: a capability belongs to a service, not to a
+// process.
+func (s *Server) ServiceCapabilities() map[string][]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	capabilities := make(map[string][]string, len(s.config.Services))
+	for _, service := range s.config.Services {
+		names := make([]string, 0, len(service.Capabilities))
+		for _, capability := range service.Capabilities {
+			names = append(names, capability)
+		}
+		capabilities[service.Name] = uniqueSorted(names)
+	}
+	return capabilities
+}

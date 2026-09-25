@@ -28,19 +28,28 @@ composition; they are not yet production storage or AI execution engines.
 
 ## Provider subsystems
 
-A provider subsystem implements one of the framework's three extension
-contracts. It owns no feature contract of its own, and it declares what it does
-through the capabilities it advertises, so a deployment can find it without the
-framework knowing it exists.
+A provider subsystem implements one of the framework's three extension contracts. It
+owns no feature contract of its own, and it declares what it does through the
+capabilities it advertises, so a deployment can find it without the framework
+knowing it exists.
+
+A provider subsystem holds no behaviour. The work lives in a reusable root package —
+`pkg/protocontract` for protobuf contracts, `pkg/openapi` for OpenAPI documents —
+and the subsystem mounts it behind a contract so a catalog in another process can
+reach the same implementation. A host that runs both in one process uses the package
+directly and needs no provider subsystem at all.
 
 | Subsystem      | Contracts served                                        | What it provides                                                                 |
 | -------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `apitools`     | `toolbox.apitools.v1.ApiToolsService`                    | Repository of servers, registered APIs, the format and transport index, and operation exposure; routes parsing, rendering, serving, and invocation to providers |
+| `apitools`     | `toolbox.apitools.v1.ApiToolsService`                    | Repository of servers, registered APIs, the format and transport index, and operation exposure; routes parsing, rendering, serving, and invocation to providers. Also usable in process as `api.Catalog`, `api.Registrar`, `api.Invoker`, and `api.ExposureSource` |
 | `apiopenapi`   | `toolbox.api.v1.ApiParserService`, `ApiAdapterService`, `ApiInvokerService` | Parses OpenAPI 3.x documents, renders descriptions into OpenAPI documents, serves an adapted surface with a Swagger UI and a downloadable schema, and invokes operations over HTTP |
 | `apigrpc`      | `toolbox.api.v1.ApiParserService`, `ApiInvokerService`   | Parses protobuf contracts from a FileDescriptorSet or from live reflection, and invokes methods over Connect, gRPC, or gRPC-Web |
 
-`apitools` is a feature subsystem and can be adopted on its own; the providers
-work without it, and a deployment can run providers in other processes.
+`apitools` is a feature subsystem and can be adopted on its own; the providers work
+without it, and a deployment can run providers in other processes. The provider
+subsystems are optional in the same way: a single-process deployment calls
+`pkg/protocontract` and `pkg/openapi` directly, and a distributed one serves them
+over the contracts.
 
 ## Current RPC surface
 

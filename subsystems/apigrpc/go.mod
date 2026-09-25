@@ -5,8 +5,6 @@ go 1.27
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/Manu343726/toolbox v0.0.0
-	github.com/Manu343726/toolbox/subsystems/apiopenapi v0.0.0
-	github.com/Manu343726/toolbox/subsystems/testecho v0.0.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.11
 )

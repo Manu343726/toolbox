@@ -8,7 +8,12 @@ import (
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
+	"github.com/Manu343726/toolbox/pkg/openapi"
 )
+
+// This file is the RPC layer of the parser contract: it validates a request,
+// converts it to a plain call, and converts the result back. The reading of a
+// document is [openapi.Parse].
 
 // ParserOptions configures the parser.
 type ParserOptions struct {
@@ -17,7 +22,7 @@ type ParserOptions struct {
 	Formats []api.Format
 }
 
-// Parser implements the framework's parser contract for OpenAPI documents.
+// Parser serves the framework's parser contract for OpenAPI documents.
 //
 // It rejects a document written in a format it does not own, so a catalog that
 // selects the wrong parser fails loudly instead of producing a description that
@@ -34,7 +39,7 @@ func NewParser(options ParserOptions) *Parser {
 	}
 	parser := &Parser{formats: make(map[string]bool, len(claimed))}
 	for _, format := range claimed {
-		parser.formats[strings.TrimSpace(format)] = true
+		parser.formats[api.NormalizeIdentifier(string(format))] = true
 	}
 	return parser
 }
@@ -43,7 +48,7 @@ func NewParser(options ParserOptions) *Parser {
 func (p *Parser) Formats() []api.Format {
 	result := make([]api.Format, 0, len(p.formats))
 	for format := range p.formats {
-		result = append(result, format)
+		result = append(result, api.Format(format))
 	}
 	return result
 }
@@ -61,14 +66,23 @@ func (p *Parser) ParseApi(_ context.Context, request *connect.Request[apiv1.Pars
 	if format == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("format is required"))
 	}
-	if !p.formats[format] {
+	if !p.formats[api.NormalizeIdentifier(format)] {
+		names := make([]string, 0, len(p.formats))
+		for claimed := range p.formats {
+			names = append(names, claimed)
+		}
 		return nil, connect.NewError(
 			connect.CodeInvalidArgument,
-			fmt.Errorf("this parser handles %s, not %q", strings.Join(p.Formats(), ", "), format),
+			fmt.Errorf("this parser handles %s, not %q", strings.Join(names, ", "), format),
 		)
 	}
-	parsed, warnings, err := parseDocument(request.Msg.GetDocument(), parseRequest{
-		APID: request.Msg.GetApiId(),
+	document := request.Msg.GetDocument()
+	if len(document) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("a document is required"))
+	}
+	described, warnings, err := openapi.Parse(document, openapi.ParseOptions{
+		APIID:   request.Msg.GetApiId(),
+		BaseURL: strings.TrimSpace(request.Msg.GetBaseUrl()),
 		Source: api.Source{
 			Kind:     request.Msg.GetSource().GetKind(),
 			Location: request.Msg.GetSource().GetLocation(),
@@ -76,19 +90,13 @@ func (p *Parser) ParseApi(_ context.Context, request *connect.Request[apiv1.Pars
 		},
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, providerError(err)
 	}
-	// A document may declare its own servers; when the caller supplied a base URL
-	// and the document declared none, the caller's location becomes the declared
-	// one so the catalog can bind the API to it.
-	if len(parsed.DeclaredServers) == 0 && strings.TrimSpace(request.Msg.GetBaseUrl()) != "" {
-		parsed.DeclaredServers = []api.DeclaredServer{{URL: strings.TrimSpace(request.Msg.GetBaseUrl())}}
-	}
-	// The parser reports the format descriptors it implements, so a catalog can
-	// index them without a separate registration step.
 	return connect.NewResponse(&apiv1.ParseApiResponse{
-		Api:      parsed.ToProto(),
-		Warnings: warnings,
+		Api: described.ToProto(),
+		// The parser reports the format descriptors it implements, so a catalog can
+		// index them without a separate registration step.
 		Formats:  []*apiv1.ApiFormatDescriptor{FormatDescriptor().ToProto()},
+		Warnings: warnings,
 	}), nil
 }

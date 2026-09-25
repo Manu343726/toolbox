@@ -67,6 +67,19 @@ type StaticCatalog struct {
 	RegisteredServers []Server
 	// RegisteredAPIs are the registered APIs.
 	RegisteredAPIs []API
+	// ExposedOperations are the exposure decisions this catalog holds, keyed by
+	// operation identifier. A catalog that carries them answers for them, so a
+	// gateway does not decide differently.
+	ExposedOperations ExposureMap
+}
+
+// Exposures implements ExposureSource, so a static catalog's decisions are
+// authoritative for the operations it carries.
+func (c *StaticCatalog) Exposures(ctx context.Context, operationIDs []string) (map[string]Exposure, error) {
+	if c == nil || c.ExposedOperations == nil {
+		return nil, nil
+	}
+	return c.ExposedOperations.Exposures(ctx, operationIDs)
 }
 
 // Servers returns the registered servers, ordered by identifier.

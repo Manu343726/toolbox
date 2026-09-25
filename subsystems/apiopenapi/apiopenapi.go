@@ -1,15 +1,16 @@
-// Package apiopenapi is the OpenAPI provider subsystem: it parses OpenAPI 3.x
-// description documents into the framework's standard API model, and it invokes
-// the operations of an API described that way.
+// Package apiopenapi exposes the framework's OpenAPI implementation as a provider
+// subsystem.
 //
-// It is one provider among many. The framework does not know what OpenAPI is —
-// it knows that a parser subsystem can turn a document into a standard API
-// description, and that an adapter subsystem can invoke one of its operations.
-// The two contracts this subsystem implements are what make a user-defined
-// format possible by writing one more subsystem with these same contracts.
+// The work lives in [openapi], a plain Go package, because the framework needs it
+// in process: a host renders a description with it, an adapted surface is served
+// with it, and the MCP gateway reads the descriptions it produces. This subsystem
+// is the addressable form — it serves the parser, adapter, and invoker contracts
+// so a catalog in another process, or a deployment whose providers run separately,
+// can reach the same implementation over ConnectRPC.
 //
-// A useful consequence of that separation: this subsystem owns the identifiers
-// "openapi" and "http". Nothing in the framework branches on them.
+// Nothing about the translation is duplicated here. A subsystem that exists only
+// to make a package addressable is the cheapest kind of subsystem: there is no
+// logic to keep in step, because there is no logic.
 package apiopenapi
 
 import (
@@ -19,6 +20,7 @@ import (
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
+	"github.com/Manu343726/toolbox/pkg/openapi"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 )
 
@@ -26,18 +28,19 @@ const (
 	// Name is the stable subsystem name.
 	Name = "apiopenapi"
 	// Version is the reference implementation version.
-	Version = "0.1.0"
+	Version = openapi.Version
 
-	// FormatOpenAPI is the description format this parser handles.
-	FormatOpenAPI api.Format = "openapi"
-	// TransportHTTP is the transport this adapter reaches.
-	TransportHTTP api.Transport = "http"
+	// FormatOpenAPI is the description format this provider reads. This subsystem
+	// owns that identifier; nothing in the framework branches on it.
+	FormatOpenAPI api.Format = openapi.Format
+	// TargetOpenAPI is the representation this provider renders into. It is the
+	// same identifier as the format it reads, because an OpenAPI document is both
+	// what a caller supplies and what this provider publishes.
+	TargetOpenAPI = openapi.Target
+	// TransportHTTP is the transport this provider reaches.
+	TransportHTTP api.Transport = openapi.TransportHTTP
 	// TransportHTTPS is the TLS variant of the same transport.
-	TransportHTTPS api.Transport = "https"
-	// TargetOpenAPI is the representation this subsystem renders into: an OpenAPI
-	// document produced from a standard description, whatever that description
-	// was parsed from.
-	TargetOpenAPI = "openapi"
+	TransportHTTPS api.Transport = openapi.TransportHTTPS
 )
 
 // Options configures the OpenAPI provider subsystem.
@@ -51,35 +54,35 @@ type Options struct {
 	HTTPClient *http.Client
 	// RequestTimeout bounds one invocation. It defaults to 30 seconds.
 	RequestTimeout time.Duration
+	// SwaggerUI is an OpenAPI documentation UI, such as the official swagger-ui
+	// bundle, served on adapted surfaces' documentation paths. When empty, each
+	// surface serves a documentation page generated from its own schema.
+	SwaggerUI []byte
 	// Background is optional provider work.
 	Background func(context.Context) error
 }
 
 // New is the programmatic in-process entrypoint for the OpenAPI provider. It
-// mounts both extension-point contracts: the parser and the adapter.
+// mounts all three extension-point contracts: the parser, the adapter, and the
+// invoker.
 func New(options Options) (*subsystem.Server, error) {
 	version := options.Version
 	if version == "" {
 		version = Version
 	}
-	client := options.HTTPClient
-	if client == nil {
-		timeout := options.RequestTimeout
-		if timeout == 0 {
-			timeout = 30 * time.Second
-		}
-		client = &http.Client{Timeout: timeout}
-	}
 	parserPath, parserHandler := apiv1connect.NewApiParserServiceHandler(NewParser(ParserOptions{}))
-	adapterPath, adapterHandler := apiv1connect.NewApiAdapterServiceHandler(NewAdapter(
-		NewRenderer(),
-		NewServer(ServerOptions{RequestTimeout: options.RequestTimeout}),
-	))
-	invokerPath, invokerHandler := apiv1connect.NewApiInvokerServiceHandler(NewInvoker(InvokerOptions{HTTPClient: client, RequestTimeout: options.RequestTimeout}))
+	adapterPath, adapterHandler := apiv1connect.NewApiAdapterServiceHandler(NewAdapter(AdapterOptions{
+		SwaggerUI:      options.SwaggerUI,
+		RequestTimeout: options.RequestTimeout,
+	}))
+	invokerPath, invokerHandler := apiv1connect.NewApiInvokerServiceHandler(NewInvoker(InvokerOptions{
+		HTTPClient:     options.HTTPClient,
+		RequestTimeout: options.RequestTimeout,
+	}))
 	return subsystem.NewServer(subsystem.Config{
 		Name:          Name,
 		Version:       version,
-		Description:   "Parses OpenAPI 3.x documents into the standard API model and invokes their operations over HTTP.",
+		Description:   "Parses OpenAPI 3.x documents into the standard API model, renders descriptions into them, serves adapted surfaces, and invokes their operations over HTTP.",
 		ListenAddress: options.ListenAddress,
 		Background:    options.Background,
 		Services: []subsystem.Service{
@@ -96,62 +99,51 @@ func New(options Options) (*subsystem.Server, error) {
 				Capabilities: []string{api.RenderCapability(TargetOpenAPI)},
 			},
 			{
-				Name:         apiv1connect.ApiInvokerServiceName,
-				Path:         invokerPath,
-				Handler:      invokerHandler,
-				Capabilities: []string{api.InvokeCapability(TransportHTTP), api.InvokeCapability(TransportHTTPS)},
+				Name:    apiv1connect.ApiInvokerServiceName,
+				Path:    invokerPath,
+				Handler: invokerHandler,
+				Capabilities: []string{
+					api.InvokeCapability(TransportHTTP),
+					api.InvokeCapability(TransportHTTPS),
+				},
 			},
 		},
 	})
 }
 
-// FormatDescriptor describes the format this parser handles, so a catalog can
-// index it and answer "can this deployment parse OpenAPI?".
+// FormatDescriptor describes the format this provider reads, stamped with the
+// subsystem that contributed it.
 func FormatDescriptor() api.FormatDescriptor {
-	return api.FormatDescriptor{
-		ID:                   FormatOpenAPI,
-		Name:                 "OpenAPI",
-		Version:              Version,
-		SpecificationVersion: "3.0.3/3.1.0",
-		Description:          "OpenAPI 3.x description documents served as JSON or YAML.",
-		MediaTypes:           []string{"application/json", "application/yaml", "text/yaml"},
-		FileExtensions:       []string{"json", "yaml", "yml"},
-		Provider:             Name,
-	}
+	descriptor := openapi.FormatDescriptor()
+	descriptor.ID = string(FormatOpenAPI)
+	descriptor.Version = Version
+	descriptor.Provider = Name
+	return descriptor
 }
 
-// TransportDescriptors describes the transports this adapter reaches.
+// TargetDescriptor describes the representation this provider renders.
+func TargetDescriptor() api.FormatDescriptor {
+	descriptor := openapi.TargetDescriptor()
+	descriptor.Version = Version
+	descriptor.Provider = Name
+	return descriptor
+}
+
+// TransportDescriptors describes the transports this provider reaches.
 func TransportDescriptors() []api.TransportDescriptor {
-	return []api.TransportDescriptor{
-		{
-			ID:          TransportHTTP,
-			Name:        "HTTP",
-			Version:     Version,
-			Description: "Plain HTTP requests built from an OpenAPI operation.",
-			Schemes:     []string{"http"},
-			Provider:    Name,
-		},
-		{
-			ID:          TransportHTTPS,
-			Name:        "HTTPS",
-			Version:     Version,
-			Description: "TLS HTTP requests built from an OpenAPI operation.",
-			Schemes:     []string{"https"},
-			Provider:    Name,
-		},
+	descriptors := openapi.TransportDescriptors()
+	for i := range descriptors {
+		descriptors[i].Version = Version
+		descriptors[i].Provider = Name
 	}
+	return descriptors
 }
 
 // Providers describes this subsystem to a catalog's provider directory. It
-// implements three contracts, so it contributes three provider records: one for
-// reading OpenAPI documents, one for rendering descriptions into them, and one
-// for calling the APIs they describe.
+// implements three contracts — it reads an OpenAPI document, it renders one, and
+// it calls the operations one describes — so it contributes a provider record for
+// each.
 func Providers(endpoint string) []api.Provider {
-	serviceNames := []string{
-		apiv1connect.ApiParserServiceName,
-		apiv1connect.ApiAdapterServiceName,
-		apiv1connect.ApiInvokerServiceName,
-	}
 	return []api.Provider{
 		{
 			ID:                    Name + "-parser",
@@ -165,7 +157,7 @@ func Providers(endpoint string) []api.Provider {
 			ImplementationVersion: Version,
 		},
 		{
-			ID:                    Name + "-renderer",
+			ID:                    Name + "-adapter",
 			Subsystem:             Name,
 			Role:                  api.ProviderAdapter,
 			Targets:               []string{TargetOpenAPI},
@@ -176,24 +168,16 @@ func Providers(endpoint string) []api.Provider {
 			ImplementationVersion: Version,
 		},
 		{
-			ID:                    Name + "-http",
-			Subsystem:             Name,
-			Role:                  api.ProviderInvoker,
-			Transports:            []api.Transport{TransportHTTP, TransportHTTPS},
-			Endpoint:              endpoint,
-			ServiceNames:          []string{apiv1connect.ApiInvokerServiceName},
-			Capabilities:          []string{api.InvokeCapability(TransportHTTP), api.InvokeCapability(TransportHTTPS)},
-			Status:                api.ServerStatusServing,
-			ImplementationVersion: Version,
-		},
-		{
-			// A convenience record so a deployment that only needs the service
-			// names can resolve this subsystem without knowing its roles.
-			ID:                    Name,
-			Subsystem:             Name,
-			Role:                  api.ProviderParser,
-			Endpoint:              endpoint,
-			ServiceNames:          serviceNames,
+			ID:           Name + "-invoker",
+			Subsystem:    Name,
+			Role:         api.ProviderInvoker,
+			Transports:   []api.Transport{TransportHTTP, TransportHTTPS},
+			Endpoint:     endpoint,
+			ServiceNames: []string{apiv1connect.ApiInvokerServiceName},
+			Capabilities: []string{
+				api.InvokeCapability(TransportHTTP),
+				api.InvokeCapability(TransportHTTPS),
+			},
 			Status:                api.ServerStatusServing,
 			ImplementationVersion: Version,
 		},

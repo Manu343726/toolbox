@@ -1,11 +1,9 @@
-package apiopenapi
+package openapi
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -13,9 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
-	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
 )
 
 // Reserved paths under an adapted surface's base path. They belong to the target
@@ -36,14 +32,14 @@ const (
 	defaultMaxBodyBytes = 8 << 20
 )
 
-// Server serves APIs in the OpenAPI target format.
+// Surfaces serves APIs in the OpenAPI target format.
 //
 // It mounts two things under one base path: the adapted operations, which
 // forward to the original server, and the target's own documentation, which is a
-// Swagger UI plus the raw document. The documentation lives under reserved
-// segments that are checked against every generated path, so serving the UI can
-// never shadow an operation the API actually has.
-type Server struct {
+// documentation page plus the raw document. The documentation lives under
+// reserved segments that are checked against every generated path, so serving the
+// page can never shadow an operation the API actually has.
+type Surfaces struct {
 	renderer *Renderer
 	timeout  time.Duration
 	// swaggerUI is an OpenAPI documentation UI supplied by the deployment, such
@@ -56,8 +52,8 @@ type Server struct {
 	instances map[string]*servedInstance
 }
 
-// ServerOptions configures the serving adapter.
-type ServerOptions struct {
+// SurfaceOptions configures the surfaces a process serves.
+type SurfaceOptions struct {
 	// SwaggerUI is the documentation page to serve. When empty, only the raw
 	// schema document is served.
 	SwaggerUI []byte
@@ -67,18 +63,52 @@ type ServerOptions struct {
 	MaxBodyBytes int64
 }
 
-// NewServer creates the OpenAPI serving adapter.
-func NewServer(options ServerOptions) *Server {
+// NewSurfaces creates the OpenAPI serving registry.
+func NewSurfaces(options SurfaceOptions) *Surfaces {
 	timeout := options.RequestTimeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
-	return &Server{
+	return &Surfaces{
 		renderer:  NewRenderer(),
 		timeout:   timeout,
 		swaggerUI: options.SwaggerUI,
 		instances: make(map[string]*servedInstance),
 	}
+}
+
+// ServeOptions configures one adapted surface.
+type ServeOptions struct {
+	// ListenAddress is where the surface listens. Empty lets the process choose a
+	// loopback port.
+	ListenAddress string
+	// BasePath is the path prefix the surface is mounted under. Empty lets this
+	// package choose one that cannot collide with the paths it generates, and a
+	// proposal that would collide is refused.
+	BasePath string
+	// Options are target-specific switches, as key/value pairs.
+	Options map[string]string
+}
+
+// Served is one running adapted surface.
+type Served struct {
+	// Target is the representation being served.
+	Target string
+	// InstanceID identifies the surface for stopping.
+	InstanceID string
+	// Endpoint is the base URL the surface answers on.
+	Endpoint string
+	// BasePath is the path prefix the surface is mounted under.
+	BasePath string
+	// Paths are the paths of the adapted operations, including the prefix.
+	Paths []string
+	// DocumentationEndpoint is the dedicated path of the target's own
+	// documentation.
+	DocumentationEndpoint string
+	// SchemaEndpoint is the dedicated path the target's schema is downloaded from.
+	SchemaEndpoint string
+	// Warnings are the non-fatal findings of rendering and mounting.
+	Warnings []string
 }
 
 type servedInstance struct {
@@ -88,142 +118,8 @@ type servedInstance struct {
 }
 
 // ServeApi implements the framework's adapter contract for serving.
-func (s *Server) ServeApi(_ context.Context, request *connect.Request[apiv1.ServeApiRequest]) (*connect.Response[apiv1.ServeApiResponse], error) {
-	if request == nil || request.Msg == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("request is required"))
-	}
-	target := strings.TrimSpace(request.Msg.GetTarget())
-	if target == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
-	}
-	if target != TargetOpenAPI {
-		return nil, connect.NewError(
-			connect.CodeInvalidArgument,
-			fmt.Errorf("this adapter serves %s, not %q", TargetOpenAPI, target),
-		)
-	}
-	described, err := api.APIFromProto(request.Msg.GetApi())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("source description: %w", err))
-	}
-	original, err := api.ServerFromProto(request.Msg.GetServer())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	if strings.TrimSpace(original.BaseURL) == "" {
-		return nil, connect.NewError(
-			connect.CodeInvalidArgument,
-			fmt.Errorf("the original server has no base url; an adapted surface has to forward somewhere"),
-		)
-	}
-	baseURL, err := url.Parse(original.BaseURL)
-	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("original server has an invalid base url %q", original.BaseURL))
-	}
-	rendered, err := s.renderer.RenderApi(context.Background(), connect.NewRequest(&apiv1.RenderApiRequest{
-		Api:    described.ToProto(),
-		Target: target,
-	}))
-	if err != nil {
-		return nil, err
-	}
-	document, err := primaryDocument(rendered.Msg)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	// The YAML form is rendered from the same description as the JSON one, so a
-	// download in either format describes the same API.
-	yamlDocument, err := s.renderer.RenderApi(context.Background(), connect.NewRequest(&apiv1.RenderApiRequest{
-		Api:       described.ToProto(),
-		Target:    target,
-		MediaType: "application/yaml",
-	}))
-	if err != nil {
-		return nil, err
-	}
-	yamlFile, err := primaryDocument(yamlDocument.Msg)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	routes, warnings, err := adaptedRoutes(described)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	// The base path is chosen so that nothing the adapter mounts can collide with
-	// anything the adapted API itself serves. A caller may propose one; the
-	// adapter still refuses a proposal that would collide and says so.
-	basePath, collision, err := resolveBasePath(strings.TrimSpace(request.Msg.GetBasePath()), routes, original.BaseURL)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	if collision != "" {
-		warnings = append(warnings, fmt.Sprintf(
-			"the original server already serves %q; the adapted surface uses a different base path", collision,
-		))
-	}
-	client := &http.Client{Timeout: s.timeout}
-	instanceID := instanceIdentifier(described.ID, basePath)
-	listener, err := net.Listen("tcp", listenAddress(request.Msg.GetListenAddress()))
-	if err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("listen for the adapted surface: %w", err))
-	}
-	mux := http.NewServeMux()
-	handler := s.handler(instanceID, basePath, baseURL, document, yamlFile, routes, client)
-	mux.Handle(basePath+"/", handler)
-	mux.Handle(basePath, handler)
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = server.Serve(listener) }()
-	instance := &servedInstance{
-		server:   server,
-		endpoint: "http://" + listener.Addr().String() + basePath,
-		client:   client,
-	}
-	s.mu.Lock()
-	if existing, duplicate := s.instances[instanceID]; duplicate {
-		s.mu.Unlock()
-		_ = server.Close()
-		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("api %q is already served at %s", described.ID, existing.endpoint))
-	}
-	s.instances[instanceID] = instance
-	s.mu.Unlock()
-
-	paths := make([]string, 0, len(routes))
-	for _, route := range routes {
-		paths = append(paths, basePath+route.path)
-	}
-	sort.Strings(paths)
-	response := &apiv1.ServeApiResponse{
-		Target:         target,
-		Endpoint:       instance.endpoint,
-		BasePath:       basePath,
-		Paths:          paths,
-		Warnings:       append(append([]string(nil), rendered.Msg.GetWarnings()...), warnings...),
-		InstanceId:     instanceID,
-		SchemaEndpoint: basePath + "/" + reservedSchemaSegment + "/" + schemaFileJSON,
-	}
-	// The documentation endpoint always exists: with a supplied UI it serves that,
-	// and without one it serves a page generated from this API's own schema.
-	response.DocumentationEndpoint = basePath + "/" + reservedDocsSegment + "/"
-	return connect.NewResponse(response), nil
-}
 
 // StopApi implements the framework's adapter contract.
-func (s *Server) StopApi(_ context.Context, request *connect.Request[apiv1.StopApiRequest]) (*connect.Response[apiv1.StopApiResponse], error) {
-	if request == nil || request.Msg == nil || strings.TrimSpace(request.Msg.GetInstanceId()) == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("instance_id is required"))
-	}
-	s.mu.Lock()
-	instance, ok := s.instances[strings.TrimSpace(request.Msg.GetInstanceId())]
-	delete(s.instances, strings.TrimSpace(request.Msg.GetInstanceId()))
-	s.mu.Unlock()
-	if !ok {
-		return connect.NewResponse(&apiv1.StopApiResponse{Stopped: false}), nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = instance.server.Shutdown(ctx)
-	return connect.NewResponse(&apiv1.StopApiResponse{Stopped: true}), nil
-}
 
 // route is one adapted operation the surface serves.
 type route struct {
@@ -272,7 +168,7 @@ func adaptedRoutes(described api.API) ([]route, []string, error) {
 		}
 	}
 	if len(routes) == 0 {
-		return nil, nil, fmt.Errorf("api %q has no operation this adapter can serve", described.ID)
+		return nil, nil, api.Errorf(api.KindInvalid, "api %q has no operation this package can serve", described.ID)
 	}
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].path == routes[j].path {
@@ -309,7 +205,7 @@ func resolveBasePath(requested string, routes []route, originalBaseURL string) (
 	if candidate != "" {
 		normalized := normalizeBasePath(candidate)
 		if reason := collisionReason(normalized, routes, originalBaseURL); reason != "" {
-			return "", "", fmt.Errorf("base_path %q cannot be used: %s", candidate, reason)
+			return "", "", api.Errorf(api.KindInvalid, "base path %q cannot be used: %s", candidate, reason)
 		}
 		return normalized, collision, nil
 	}
@@ -325,7 +221,7 @@ func resolveBasePath(requested string, routes []route, originalBaseURL string) (
 			return normalized, collision, nil
 		}
 	}
-	return "", "", fmt.Errorf("no base path avoids the paths this API serves")
+	return "", "", api.Errorf(api.KindInvalid, "no base path avoids the paths this API serves")
 }
 
 func collisionReason(base string, routes []route, originalBaseURL string) string {
@@ -371,21 +267,23 @@ func instanceIdentifier(apiID, basePath string) string {
 	return strings.Trim(sum, "-")
 }
 
-func primaryDocument(response *apiv1.RenderApiResponse) ([]byte, error) {
-	if response == nil || len(response.GetFiles()) == 0 {
-		return nil, fmt.Errorf("the adapter produced no schema file")
+// primaryDocument returns the file a client that understands only one document
+// should start from.
+func primaryDocument(files []File) ([]byte, error) {
+	if len(files) == 0 {
+		return nil, api.Errorf(api.KindInternal, "the renderer produced no schema file")
 	}
-	for _, file := range response.GetFiles() {
-		if file.GetPrimary() {
-			return file.GetContent(), nil
+	for _, file := range files {
+		if file.Primary {
+			return file.Content, nil
 		}
 	}
-	return response.GetFiles()[0].GetContent(), nil
+	return files[0].Content, nil
 }
 
 // handler serves the adapted operations, the schema document, and the
 // documentation page, all under one base path.
-func (s *Server) handler(
+func (s *Surfaces) handler(
 	instanceID, basePath string,
 	original *url.URL,
 	document, yamlDocument []byte,
@@ -479,7 +377,7 @@ func wantsDownload(r *http.Request) bool {
 // documentationPage renders the documentation page. The page is generated from
 // the schema the same adapter produced, so the page and the served routes cannot
 // disagree about what the API looks like, and it links the schema download.
-func (s *Server) documentationPage(instanceID string, document []byte, basePath string) []byte {
+func (s *Surfaces) documentationPage(instanceID string, document []byte, basePath string) []byte {
 	var parsed map[string]any
 	if err := json.Unmarshal(document, &parsed); err != nil {
 		parsed = map[string]any{}
@@ -528,7 +426,7 @@ func itoa(value int) string {
 
 // tunnel forwards one request to the original server, substituting the values
 // captured from the path back into the original path template.
-func (s *Server) tunnel(w http.ResponseWriter, r *http.Request, original *url.URL, candidate route, values map[string]string, client *http.Client) {
+func (s *Surfaces) tunnel(w http.ResponseWriter, r *http.Request, original *url.URL, candidate route, values map[string]string, client *http.Client) {
 	target := *original
 	path := candidate.path
 	for name, value := range values {

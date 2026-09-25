@@ -2,11 +2,11 @@ package host
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
+	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,40 +101,38 @@ func TestProviderDirectoryRefusesUnknownProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), "no provider")
 }
 
-func TestProviderDirectoryReportsWhenNoResolverIsConfigured(t *testing.T) {
-	// The directory knows the provider — it derived it from the capabilities — but
-	// nothing has told it where the provider is, so binding is refused with a
-	// message that says which half is missing.
-	directory := (&Host{}).ProviderDirectory()
-	directory.host = nil
-	_, err := directory.Parser(context.Background(), "apiopenapi-parser")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no provider")
-
-	// A host that has derived a provider but has no resolver yet reports the
-	// missing half, rather than reporting the provider as unknown.
-	// A host that has started a provider but has no resolver yet reports the
-	// missing half: the provider exists, what is missing is its placement.
+func TestProviderDirectoryBindsAHostProviderWithoutAResolver(t *testing.T) {
+	// A provider the host started knows its own endpoint, so it is reachable
+	// without a registry, a resolver, or any configuration a deployment has to get
+	// right. That is what makes a single-process deployment work out of the box.
+	path, handler := apiv1connect.NewApiInvokerServiceHandler(&noOpInvoker{})
+	server, err := subsystem.NewServer(subsystem.Config{
+		Name: "apimystery",
+		Services: []subsystem.Service{{
+			Name:         apiv1connect.ApiInvokerServiceName,
+			Path:         path,
+			Handler:      handler,
+			Capabilities: []string{api.InvokeCapability("mystery")},
+		}},
+	})
+	require.NoError(t, err)
 	h := New()
-	require.NoError(t, h.Register("apiopenapi", func() (*subsystem.Server, error) {
-		return subsystem.NewServer(subsystem.Config{
-			Name: "apiopenapi",
-			Services: []subsystem.Service{{
-				Name:         "toolbox.api.v1.ApiParserService",
-				Path:         "/toolbox.api.v1.ApiParserService/",
-				Handler:      http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
-				Capabilities: []string{api.ParseCapability("openapi")},
-			}},
-		})
-	}))
+	require.NoError(t, h.Register("apimystery", func() (*subsystem.Server, error) { return server, nil }))
+	require.NoError(t, h.Select("apimystery"))
 	require.NoError(t, h.Start(context.Background()))
 	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
 
-	directory = h.ProviderDirectory()
-	_, err = directory.Parser(context.Background(), "apiopenapi-parser")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no resolver configured",
-		"the provider exists; what is missing is its placement")
+	directory := h.ProviderDirectory()
+	assert.Nil(t, directory.clients, "no resolver has been installed, and none is needed")
+	client, err := directory.Invoker(context.Background(), "apimystery-invoker")
+	require.NoError(t, err)
+	assert.NotNil(t, client)
+}
+
+// noOpInvoker is a contract implementation that answers nothing, which is enough
+// for a test that binds a client and does not call it.
+type noOpInvoker struct {
+	apiv1connect.UnimplementedApiInvokerServiceHandler
 }
 
 func TestProviderDirectoryDescribeIsStable(t *testing.T) {
@@ -162,4 +160,54 @@ func TestProviderEndpointCarriesCapabilityNames(t *testing.T) {
 	require.Len(t, providers, 2)
 	assert.Contains(t, endpoint.Capabilities, "api.parse.f")
 	assert.Contains(t, endpoint.Capabilities, "api.invoke.t")
+}
+
+// TestProviderDirectoryBindsEachProviderToItsOwnEndpoint covers the case two
+// providers create by existing: several subsystems serve the same contract,
+// because serving it is how a format or a transport is contributed. A client
+// bound by service name would reach whichever endpoint claimed the name first, so
+// a catalog asking for one provider would silently get another's behaviour.
+func TestProviderDirectoryBindsEachProviderToItsOwnEndpoint(t *testing.T) {
+	h := New()
+	for _, name := range []string{"alpha", "beta"} {
+		name := name
+		path, handler := apiv1connect.NewApiInvokerServiceHandler(&noOpInvoker{})
+		server, err := subsystem.NewServer(subsystem.Config{
+			Name: name,
+			Services: []subsystem.Service{{
+				Name:    apiv1connect.ApiInvokerServiceName,
+				Path:    path,
+				Handler: handler,
+				// Both providers claim an invocation transport, which is what makes
+				// the catalog able to choose between them.
+				Capabilities: []string{api.InvokeCapability("connectrpc")},
+			}},
+		})
+		require.NoError(t, err)
+		require.NoError(t, h.Register(name, func() (*subsystem.Server, error) { return server, nil }))
+	}
+	require.NoError(t, h.Start(context.Background()))
+	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
+
+	directory := h.ProviderDirectory()
+	directory.SetResolver(core.NewStaticResolver(core.Endpoint{
+		// One endpoint claims the contract on behalf of both providers, which is
+		// exactly the ambiguity this test exists to rule out.
+		Name:         "any",
+		URL:          h.Servers()["alpha"].Endpoint(),
+		ServiceNames: []string{apiv1connect.ApiInvokerServiceName},
+	}))
+
+	alpha, err := directory.Invoker(context.Background(), "alpha-invoker")
+	require.NoError(t, err, "the first provider binds")
+	beta, err := directory.Invoker(context.Background(), "beta-invoker")
+	require.NoError(t, err, "the second provider binds")
+	assert.NotSame(t, alpha, beta,
+		"two providers serving one contract are two clients, one per endpoint")
+
+	// A client is memoized per provider, so a second request costs nothing and
+	// cannot pick a different endpoint.
+	again, err := directory.Invoker(context.Background(), "alpha-invoker")
+	require.NoError(t, err)
+	assert.Same(t, alpha, again)
 }

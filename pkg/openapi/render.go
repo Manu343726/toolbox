@@ -1,7 +1,6 @@
-package apiopenapi
+package openapi
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -9,9 +8,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
-	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
 )
 
 // Renderer implements the framework's adapter contract: it renders a standard
@@ -27,7 +24,7 @@ type Renderer struct {
 
 // NewRenderer creates the OpenAPI renderer.
 func NewRenderer() *Renderer {
-	return &Renderer{targets: map[string]bool{TargetOpenAPI: true}}
+	return &Renderer{targets: map[string]bool{Target: true}}
 }
 
 // Targets returns the representations this renderer produces.
@@ -41,47 +38,6 @@ func (r *Renderer) Targets() []string {
 }
 
 // RenderApi implements the framework's ApiAdapterService.
-func (r *Renderer) RenderApi(_ context.Context, request *connect.Request[apiv1.RenderApiRequest]) (*connect.Response[apiv1.RenderApiResponse], error) {
-	if request == nil || request.Msg == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("request is required"))
-	}
-	target := strings.TrimSpace(request.Msg.GetTarget())
-	if target == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
-	}
-	if !r.targets[target] {
-		return nil, connect.NewError(
-			connect.CodeInvalidArgument,
-			fmt.Errorf("this renderer produces %s, not %q", strings.Join(r.Targets(), ", "), target),
-		)
-	}
-	described, err := api.APIFromProto(request.Msg.GetApi())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("source description: %w", err))
-	}
-	document, warnings, err := renderOpenAPI(described, renderOptions{
-		mediaType: strings.TrimSpace(request.Msg.GetMediaType()),
-		options:   request.Msg.GetOptions(),
-	})
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	// The target's schema is returned as a file set, because a target may be
-	// described by more than one file and a caller that only knows how to start
-	// from one needs to be told which that is.
-	return connect.NewResponse(&apiv1.RenderApiResponse{
-		Files: []*apiv1.ApiSchemaFile{{
-			Name:      "openapi.json",
-			Content:   document,
-			MediaType: "application/json",
-			Primary:   true,
-		}},
-		MediaType:     "application/json",
-		FileExtension: "json",
-		Warnings:      warnings,
-		Targets:       []*apiv1.ApiFormatDescriptor{TargetDescriptor().ToProto()},
-	}), nil
-}
 
 type renderOptions struct {
 	mediaType string
@@ -107,14 +63,13 @@ func (o renderOptions) boolean(name string, fallback bool) bool {
 // catalog can index what the deployment can publish.
 func TargetDescriptor() api.FormatDescriptor {
 	return api.FormatDescriptor{
-		ID:                   TargetOpenAPI,
+		ID:                   Target,
 		Name:                 "OpenAPI document",
 		Version:              Version,
 		SpecificationVersion: "3.1.0",
 		Description:          "An OpenAPI 3.1 document rendered from a standard API description, whatever format that description was parsed from.",
 		MediaTypes:           []string{"application/json", "application/yaml"},
 		FileExtensions:       []string{"json", "yaml", "yml"},
-		Provider:             Name,
 	}
 }
 
@@ -512,29 +467,3 @@ func marshalDocument(document map[string]any, options renderOptions) ([]byte, []
 // target's surface while tunneling to the original server.
 //
 // Keeping both in one service is deliberate. A schema that a client reads and a
-// surface the same client calls have to agree, and the only way to guarantee they
-// do is to produce both from the same translation.
-type Adapter struct {
-	renderer *Renderer
-	server   *Server
-}
-
-// NewAdapter creates the combined OpenAPI adapter.
-func NewAdapter(renderer *Renderer, server *Server) *Adapter {
-	return &Adapter{renderer: renderer, server: server}
-}
-
-// RenderApi implements the framework's ApiAdapterService.
-func (a *Adapter) RenderApi(ctx context.Context, request *connect.Request[apiv1.RenderApiRequest]) (*connect.Response[apiv1.RenderApiResponse], error) {
-	return a.renderer.RenderApi(ctx, request)
-}
-
-// ServeApi implements the framework's ApiAdapterService.
-func (a *Adapter) ServeApi(ctx context.Context, request *connect.Request[apiv1.ServeApiRequest]) (*connect.Response[apiv1.ServeApiResponse], error) {
-	return a.server.ServeApi(ctx, request)
-}
-
-// StopApi implements the framework's ApiAdapterService.
-func (a *Adapter) StopApi(ctx context.Context, request *connect.Request[apiv1.StopApiRequest]) (*connect.Response[apiv1.StopApiResponse], error) {
-	return a.server.StopApi(ctx, request)
-}

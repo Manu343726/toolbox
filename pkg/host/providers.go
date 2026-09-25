@@ -71,6 +71,14 @@ type ProviderEndpoint struct {
 	Capabilities []string
 	// ServiceNames are the services it serves.
 	ServiceNames []string
+	// ServiceCapabilities are the capabilities the subsystem declared for each
+	// service, keyed by fully-qualified service name.
+	//
+	// The flattened descriptor cannot carry this: a capability belongs to a
+	// service, and joining a contract to a manifest needs to know which one. This
+	// is the information a description read from a contract cannot state for
+	// itself.
+	ServiceCapabilities map[string][]string
 }
 
 // ProvidersOf derives provider records from started subsystems, so a deployment
@@ -136,16 +144,24 @@ func providerForRole(endpoint ProviderEndpoint, role string) *api.Provider {
 
 // Endpoints returns the started subsystems as provider endpoints.
 func (h *Host) Endpoints() []ProviderEndpoint {
+	servers := h.Servers()
 	descriptors := h.Descriptors()
 	endpoints := make([]ProviderEndpoint, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		endpoints = append(endpoints, ProviderEndpoint{
+		endpoint := ProviderEndpoint{
 			Subsystem:             descriptor.SubsystemName,
 			Endpoint:              descriptor.Endpoint,
 			ImplementationVersion: descriptor.ImplementationVersion,
 			Capabilities:          append([]string(nil), descriptor.Capabilities...),
 			ServiceNames:          append([]string(nil), descriptor.ServiceNames...),
-		})
+		}
+		if server, ok := servers[descriptor.SubsystemName]; ok && server != nil {
+			// A capability belongs to a service, and a description read from a
+			// contract needs to know which service it belongs to. The flattened
+			// descriptor cannot carry that, so it is read from the running server.
+			endpoint.ServiceCapabilities = server.ServiceCapabilities()
+		}
+		endpoints = append(endpoints, endpoint)
 	}
 	return endpoints
 }
@@ -194,17 +210,52 @@ func (d *ProviderDirectory) bind[T any](
 	if !d.known(ctx, id) {
 		return zero, fmt.Errorf("no provider %q is configured in this host", id)
 	}
-	if resolver == nil {
-		return zero, fmt.Errorf("provider %q cannot be resolved: this host has no resolver configured", id)
+	// A provider is identified by its own identifier, and its record says where it
+	// is. Resolving by service name instead would be ambiguous the moment two
+	// providers serve the same contract — which is exactly what contributing a
+	// format or a transport means — and the wrong provider would answer.
+	endpoint := d.endpointOf(ctx, id)
+	if endpoint == "" {
+		if resolver == nil {
+			return zero, fmt.Errorf("provider %q cannot be resolved: it declares no endpoint", id)
+		}
+		resolved, resolveErr := resolver.Resolve(ctx, serviceName)
+		if resolveErr != nil || resolved.URL == "" {
+			return zero, fmt.Errorf("resolve provider %q: no endpoint serves %s", id, serviceName)
+		}
+		endpoint = resolved.URL
 	}
-	client, err := bindClient(ctx, core.NewClient(core.ClientOptions{Resolver: resolver}), serviceName, constructor)
+	client, err := bindClient(
+		ctx,
+		core.NewClient(core.ClientOptions{Resolver: core.NewStaticResolver(core.Endpoint{
+			Name:         id,
+			URL:          endpoint,
+			ServiceNames: []string{serviceName},
+		})}),
+		serviceName,
+		constructor,
+	)
 	if err != nil {
-		return zero, fmt.Errorf("resolve provider %q: %w", id, err)
+		return zero, fmt.Errorf("bind provider %q at %s: %w", id, endpoint, err)
 	}
 	d.mu.Lock()
 	d.cache[id] = client
 	d.mu.Unlock()
 	return client, nil
+}
+
+// endpointOf returns where one of this host's providers is reachable.
+func (d *ProviderDirectory) endpointOf(ctx context.Context, id string) string {
+	providers, err := d.Providers(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, provider := range providers {
+		if provider.ID == id {
+			return provider.Endpoint
+		}
+	}
+	return ""
 }
 
 // known reports whether a provider identifier is one this host currently runs.

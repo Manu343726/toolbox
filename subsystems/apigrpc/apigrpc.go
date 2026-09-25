@@ -1,12 +1,16 @@
-// Package apigrpc is the gRPC provider subsystem: it turns a protobuf service
-// contract into the framework's standard API description, and it invokes those
-// operations over Connect, gRPC, or gRPC-Web.
+// Package apigrpc exposes the framework's protobuf-contract implementation as a
+// provider subsystem.
 //
-// Like every other provider, it implements the two framework contracts and
-// nothing else. The framework does not know that "grpc" exists as a format; it
-// knows that a parser subsystem can describe a contract and an adapter can
-// invoke one. This subsystem's contribution is the descriptor it reports for
-// the format it owns, and the contract it serves.
+// The work lives in [protocontract], a plain Go package, because the framework
+// needs it in process: a host describes its own subsystems with it, and the MCP
+// gateway reads the same standard description it produces. This subsystem is the
+// addressable form — it serves the parser and invoker contracts so a catalog in
+// another process, or a deployment whose providers are deployed separately, can
+// reach the same implementation over ConnectRPC.
+//
+// Nothing about the translation is duplicated here. A subsystem that exists only
+// to make a package addressable is the cheapest kind of subsystem: there is no
+// logic to keep in step, because there is no logic.
 package apigrpc
 
 import (
@@ -16,7 +20,7 @@ import (
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
-	"github.com/Manu343726/toolbox/pkg/discovery"
+	"github.com/Manu343726/toolbox/pkg/protocontract"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 )
 
@@ -26,14 +30,17 @@ const (
 	// Version is the reference implementation version.
 	Version = "0.1.0"
 
-	// FormatGRPC is the description format this parser handles. The same
-	// contract is served over Connect, gRPC, and gRPC-Web, so one format
-	// identifier covers all three.
-	FormatGRPC api.Format = "grpc"
-	// TransportConnectRPC is the transport this adapter reaches by default.
+	// FormatGRPC is the description format this provider handles. The same contract
+	// is served over Connect, gRPC, and gRPC-Web, so one format identifier covers
+	// all three.
+	FormatGRPC api.Format = protocontract.Format
+	// TransportConnectRPC is the transport this provider reaches by default.
 	TransportConnectRPC api.Transport = "connectrpc"
 	// TransportGRPC is the gRPC variant of the same transport.
 	TransportGRPC api.Transport = "grpc"
+	// TransportGRPCWeb is the gRPC-Web variant, for callers that cannot speak
+	// HTTP/2.
+	TransportGRPCWeb api.Transport = "grpc-web"
 )
 
 // Options configures the gRPC provider subsystem.
@@ -52,14 +59,14 @@ type Options struct {
 }
 
 // New is the programmatic in-process entrypoint for the gRPC provider. It mounts
-// both extension-point contracts: the parser and the adapter.
+// both extension-point contracts: the parser and the invoker.
 func New(options Options) (*subsystem.Server, error) {
 	version := options.Version
 	if version == "" {
 		version = Version
 	}
 	parserPath, parserHandler := apiv1connect.NewApiParserServiceHandler(NewParser(ParserOptions{}))
-	adapterPath, adapterHandler := apiv1connect.NewApiInvokerServiceHandler(NewAdapter(AdapterOptions{
+	invokerPath, invokerHandler := apiv1connect.NewApiInvokerServiceHandler(NewInvoker(InvokerOptions{
 		HTTPClient:     options.HTTPClient,
 		RequestTimeout: options.RequestTimeout,
 	}))
@@ -77,57 +84,49 @@ func New(options Options) (*subsystem.Server, error) {
 				Capabilities: []string{api.ParseCapability(FormatGRPC)},
 			},
 			{
-				Name:         apiv1connect.ApiInvokerServiceName,
-				Path:         adapterPath,
-				Handler:      adapterHandler,
-				Capabilities: []string{api.InvokeCapability(TransportConnectRPC), api.InvokeCapability(TransportGRPC)},
+				Name:    apiv1connect.ApiInvokerServiceName,
+				Path:    invokerPath,
+				Handler: invokerHandler,
+				Capabilities: []string{
+					api.InvokeCapability(TransportConnectRPC),
+					api.InvokeCapability(TransportGRPC),
+					api.InvokeCapability(TransportGRPCWeb),
+				},
 			},
 		},
 	})
 }
 
-// FormatDescriptor describes the format this parser handles.
+// FormatDescriptor describes the format this provider reads, stamped with the
+// subsystem that contributed it.
 func FormatDescriptor() api.FormatDescriptor {
-	return api.FormatDescriptor{
-		ID:                   FormatGRPC,
-		Name:                 "Protocol Buffers service contract",
-		Version:              Version,
-		SpecificationVersion: "proto3",
-		Description:          "Protobuf service contracts served over Connect, gRPC, or gRPC-Web, read from a FileDescriptorSet or from a live endpoint's reflection.",
-		MediaTypes:           []string{"application/x-protobuf", "application/octet-stream"},
-		FileExtensions:       []string{"protoset", "desc", "binpb"},
-		Provider:             Name,
-	}
+	descriptor := protocontract.FormatDescriptor()
+	descriptor.ID = string(FormatGRPC)
+	descriptor.Version = Version
+	descriptor.Provider = Name
+	return descriptor
 }
 
-// TransportDescriptors describes the transports this adapter reaches.
+// TransportDescriptors describes the transports this provider reaches.
 func TransportDescriptors() []api.TransportDescriptor {
-	return []api.TransportDescriptor{
-		{
-			ID:                TransportConnectRPC,
-			Name:              "ConnectRPC",
-			Version:           Version,
-			Description:       "Unary Connect requests against a protobuf service contract.",
-			Schemes:           []string{"http", "https"},
-			SupportsStreaming: true,
-			Provider:          Name,
-		},
-		{
-			ID:                TransportGRPC,
-			Name:              "gRPC",
-			Version:           Version,
-			Description:       "Unary gRPC requests against a protobuf service contract.",
-			Schemes:           []string{"http", "https"},
-			SupportsStreaming: true,
-			Provider:          Name,
-		},
+	descriptors := protocontract.TransportDescriptors()
+	for i := range descriptors {
+		descriptors[i].Version = Version
+		descriptors[i].Provider = Name
 	}
+	return descriptors
 }
 
-// Providers describes this subsystem to a catalog's provider directory. This
-// subsystem implements two contracts — it reads a protobuf contract and it calls
-// one — so it contributes a provider record for each.
+// Providers describes this subsystem to a catalog's provider directory. It
+// implements two contracts — it reads a protobuf contract and it calls one — so
+// it contributes a provider record for each, plus a convenience record that names
+// both for a deployment that only needs the service names.
 func Providers(endpoint string) []api.Provider {
+	invokerCapabilities := []string{
+		api.InvokeCapability(TransportConnectRPC),
+		api.InvokeCapability(TransportGRPC),
+		api.InvokeCapability(TransportGRPCWeb),
+	}
 	return []api.Provider{
 		{
 			ID:                    Name + "-parser",
@@ -141,36 +140,25 @@ func Providers(endpoint string) []api.Provider {
 			ImplementationVersion: Version,
 		},
 		{
-			ID:                    Name + "-connect",
+			ID:                    Name + "-invoker",
 			Subsystem:             Name,
 			Role:                  api.ProviderInvoker,
-			Transports:            []api.Transport{TransportConnectRPC, TransportGRPC},
+			Transports:            []api.Transport{TransportConnectRPC, TransportGRPC, TransportGRPCWeb},
 			Endpoint:              endpoint,
 			ServiceNames:          []string{apiv1connect.ApiInvokerServiceName},
-			Capabilities:          []string{api.InvokeCapability(TransportConnectRPC), api.InvokeCapability(TransportGRPC)},
+			Capabilities:          invokerCapabilities,
 			Status:                api.ServerStatusServing,
 			ImplementationVersion: Version,
 		},
 		{
-			// A convenience record so a deployment that only needs the service
-			// names can resolve this subsystem without knowing its roles.
 			ID:                    Name,
 			Subsystem:             Name,
 			Role:                  api.ProviderParser,
 			Endpoint:              endpoint,
 			ServiceNames:          []string{apiv1connect.ApiParserServiceName, apiv1connect.ApiInvokerServiceName},
+			Capabilities:          append([]string{api.ParseCapability(FormatGRPC)}, invokerCapabilities...),
 			Status:                api.ServerStatusServing,
 			ImplementationVersion: Version,
 		},
 	}
-}
-
-// newDiscoveryClient creates the discovery client an adapter or a reflection
-// based parse uses for one endpoint.
-func newDiscoveryClient(endpoint string, client *http.Client) *discovery.Client {
-	options := []discovery.Option{}
-	if client != nil {
-		options = append(options, discovery.WithHTTPClient(client))
-	}
-	return discovery.New(endpoint, options...)
 }

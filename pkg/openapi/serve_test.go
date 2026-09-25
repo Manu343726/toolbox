@@ -1,4 +1,4 @@
-package apiopenapi
+package openapi
 
 import (
 	"context"
@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
-	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +26,7 @@ func petAPI(t *testing.T) api.API {
 		Name:    "shop",
 		Version: "1.0.0",
 		Title:   "Shop",
-		Format:  FormatOpenAPI,
+		Format:  Format,
 		Services: []api.Service{{
 			Name: "pets",
 			Operations: []api.Operation{{
@@ -73,21 +71,13 @@ func startOriginalServer(t *testing.T) *originalServer {
 	return original
 }
 
-func serveForTest(t *testing.T, adapter *Adapter, described api.API, server api.Server) *apiv1.ServeApiResponse {
+// serveForTest starts one adapted surface and stops it when the test ends.
+func serveForTest(t *testing.T, surfaces *Surfaces, described api.API, server api.Server) *Served {
 	t.Helper()
-	response, err := adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api:     described.ToProto(),
-		Server:  server.ToProto(),
-		Target:  TargetOpenAPI,
-		Options: map[string]string{},
-	}))
+	served, err := surfaces.Serve(described, server, ServeOptions{})
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = adapter.StopApi(context.Background(), connect.NewRequest(&apiv1.StopApiRequest{
-			InstanceId: response.Msg.GetInstanceId(),
-		}))
-	})
-	return response.Msg
+	t.Cleanup(func() { surfaces.Stop(served.InstanceID) })
+	return served
 }
 
 // origin strips the base path from a served endpoint, leaving the scheme and
@@ -101,26 +91,35 @@ func origin(endpoint string) string {
 	return "http://" + trimmed
 }
 
-func newServingAdapter(t *testing.T) *Adapter {
+// newSurfaces creates a serving registry, with a documentation UI configured the
+// way a deployment would.
+func newSurfaces(t *testing.T) *Surfaces {
 	t.Helper()
-	return NewAdapter(NewRenderer(), NewServer(ServerOptions{SwaggerUI: []byte(sampleSwaggerUI)}))
+	return NewSurfaces(SurfaceOptions{SwaggerUI: []byte(sampleSwaggerUI)})
+}
+
+// newSurfacesWithoutUI creates a serving registry with no configured UI, so the
+// generated documentation page is the one under test.
+func newSurfacesWithoutUI(t *testing.T) *Surfaces {
+	t.Helper()
+	return NewSurfaces(SurfaceOptions{})
 }
 
 func TestServedSurfaceTunnelsToOriginalServer(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
-	served := serveForTest(t, adapter, petAPI(t), api.Server{
+	surfaces := newSurfaces(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{
 		ID:      "shop-host",
 		Name:    "Shop host",
 		BaseURL: original.URL,
-		Format:  FormatOpenAPI,
+		Format:  Format,
 	})
 
-	require.NotEmpty(t, served.GetPaths())
-	assert.Equal(t, TargetOpenAPI, served.GetTarget())
-	assert.Equal(t, "/_toolbox/adapted", served.GetBasePath())
+	require.NotEmpty(t, served.Paths)
+	assert.Equal(t, Target, served.Target)
+	assert.Equal(t, "/_toolbox/adapted", served.BasePath)
 
-	response, err := http.Get(served.GetEndpoint() + "/pets/7")
+	response, err := http.Get(served.Endpoint + "/pets/7")
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
@@ -139,10 +138,10 @@ func TestServedSurfaceServesDocumentationWithoutAConfiguredUI(t *testing.T) {
 	// describes this API, because the page is generated from the schema the same
 	// adapter produced.
 	original := startOriginalServer(t)
-	adapter := NewAdapter(NewRenderer(), NewServer(ServerOptions{}))
-	served := serveForTest(t, adapter, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI})
+	surfaces := newSurfacesWithoutUI(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format})
 
-	response, err := http.Get(origin(served.GetEndpoint()) + served.GetDocumentationEndpoint())
+	response, err := http.Get(origin(served.Endpoint) + served.DocumentationEndpoint)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
@@ -154,13 +153,13 @@ func TestServedSurfaceServesDocumentationWithoutAConfiguredUI(t *testing.T) {
 
 func TestServedSurfaceServesSwaggerUIOnDedicatedPath(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
-	served := serveForTest(t, adapter, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI})
+	surfaces := newSurfaces(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format})
 
-	require.NotEmpty(t, served.GetDocumentationEndpoint())
-	assert.Equal(t, "/_toolbox/adapted/"+reservedDocsSegment+"/", served.GetDocumentationEndpoint())
+	require.NotEmpty(t, served.DocumentationEndpoint)
+	assert.Equal(t, "/_toolbox/adapted/"+reservedDocsSegment+"/", served.DocumentationEndpoint)
 
-	response, err := http.Get(origin(served.GetEndpoint()) + served.GetDocumentationEndpoint())
+	response, err := http.Get(origin(served.Endpoint) + served.DocumentationEndpoint)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
@@ -170,22 +169,22 @@ func TestServedSurfaceServesSwaggerUIOnDedicatedPath(t *testing.T) {
 	assert.Equal(t, sampleSwaggerUI, string(body), "a deployment's supplied UI is served as supplied")
 
 	// The documentation path is not one of the API's own paths.
-	for _, path := range served.GetPaths() {
-		assert.NotEqual(t, served.GetDocumentationEndpoint(), path)
+	for _, path := range served.Paths {
+		assert.NotEqual(t, served.DocumentationEndpoint, path)
 	}
 }
 
 func TestSchemaIsDownloadable(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
-	served := serveForTest(t, adapter, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI})
+	surfaces := newSurfaces(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format})
 
-	require.NotEmpty(t, served.GetSchemaEndpoint())
-	assert.Equal(t, "/_toolbox/adapted/"+reservedSchemaSegment+"/"+schemaFileJSON, served.GetSchemaEndpoint())
+	require.NotEmpty(t, served.SchemaEndpoint)
+	assert.Equal(t, "/_toolbox/adapted/"+reservedSchemaSegment+"/"+schemaFileJSON, served.SchemaEndpoint)
 
 	// The JSON schema is served inline for a plain request. The reported endpoint
 	// is the full path, so a caller never has to rebuild it.
-	response, err := http.Get(origin(served.GetEndpoint()) + served.GetSchemaEndpoint())
+	response, err := http.Get(origin(served.Endpoint) + served.SchemaEndpoint)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
@@ -200,13 +199,13 @@ func TestSchemaIsDownloadable(t *testing.T) {
 	assert.Contains(t, paths, "/pets/{petId}")
 
 	// The same schema is downloadable as a file.
-	download, err := http.Get(origin(served.GetEndpoint()) + served.GetSchemaEndpoint() + "?download=true")
+	download, err := http.Get(origin(served.Endpoint) + served.SchemaEndpoint + "?download=true")
 	require.NoError(t, err)
 	defer func() { _ = download.Body.Close() }()
 	assert.Equal(t, `attachment; filename="openapi.json"`, download.Header.Get("Content-Disposition"))
 
 	// And the YAML form is available from the same place.
-	yamlResponse, err := http.Get(origin(served.GetEndpoint()) + strings.TrimSuffix(served.GetSchemaEndpoint(), schemaFileJSON) + schemaFileYAML + "?download=true")
+	yamlResponse, err := http.Get(origin(served.Endpoint) + strings.TrimSuffix(served.SchemaEndpoint, schemaFileJSON) + schemaFileYAML + "?download=true")
 	require.NoError(t, err)
 	defer func() { _ = yamlResponse.Body.Close() }()
 	yamlBody, err := io.ReadAll(yamlResponse.Body)
@@ -215,7 +214,7 @@ func TestSchemaIsDownloadable(t *testing.T) {
 	assert.Contains(t, string(yamlBody), "openapi: 3.1.0")
 
 	// The directory lists what can be downloaded.
-	listing, err := http.Get(origin(served.GetEndpoint()) + served.GetBasePath() + "/" + reservedSchemaSegment + "/")
+	listing, err := http.Get(origin(served.Endpoint) + served.BasePath + "/" + reservedSchemaSegment + "/")
 	require.NoError(t, err)
 	defer func() { _ = listing.Body.Close() }()
 	listingBody, err := io.ReadAll(listing.Body)
@@ -226,10 +225,10 @@ func TestSchemaIsDownloadable(t *testing.T) {
 
 func TestSchemaEndpointRejectsAnotherFile(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
-	served := serveForTest(t, adapter, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI})
+	surfaces := newSurfaces(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format})
 
-	response, err := http.Get(origin(served.GetEndpoint()) + served.GetBasePath() + "/" + reservedSchemaSegment + "/secrets.json")
+	response, err := http.Get(origin(served.Endpoint) + served.BasePath + "/" + reservedSchemaSegment + "/secrets.json")
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, response.StatusCode)
@@ -237,19 +236,14 @@ func TestSchemaEndpointRejectsAnotherFile(t *testing.T) {
 
 func TestBasePathIsRefusedWhenItWouldCollide(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
+	surfaces := newSurfaces(t)
 
 	// A base path that would shadow an adapted operation is refused rather than
 	// silently moved, because a moved prefix would invalidate the URLs the caller
 	// was told about.
-	_, err := adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api:      petAPI(t).ToProto(),
-		Server:   api.Server{ID: "h", Name: "H", BaseURL: original.URL, Format: FormatOpenAPI}.ToProto(),
-		Target:   TargetOpenAPI,
-		BasePath: "/pets",
-	}))
+	_, err := surfaces.Serve(petAPI(t), api.Server{ID: "h", Name: "H", BaseURL: original.URL, Format: Format}, ServeOptions{BasePath: "/pets"})
 	require.Error(t, err)
-	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Equal(t, api.KindInvalid, api.KindOf(err))
 	assert.Contains(t, err.Error(), "cannot be used")
 }
 
@@ -260,71 +254,43 @@ func TestBasePathWarnsWhenItShadowsTheOriginalServerPath(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer original.Close()
-	adapter := newServingAdapter(t)
+	surfaces := newSurfaces(t)
 
-	served := serveForTest(t, adapter, petAPI(t), api.Server{
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{
 		ID:      "shop-host",
 		Name:    "Shop",
 		BaseURL: original.URL + "/shop",
-		Format:  FormatOpenAPI,
+		Format:  Format,
 	})
-	assert.NotEmpty(t, served.GetWarnings())
+	assert.NotEmpty(t, served.Warnings)
 }
 
 func TestServeApiRequiresTheOriginalServer(t *testing.T) {
-	adapter := newServingAdapter(t)
+	surfaces := newSurfaces(t)
 
 	// An adapted surface has to forward somewhere; without an original server
 	// there is nothing to tunnel to, and the request is refused rather than
 	// answered with a surface that always fails.
-	_, err := adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api:    petAPI(t).ToProto(),
-		Server: api.Server{ID: "shop-host", Name: "Shop", Format: FormatOpenAPI}.ToProto(),
-		Target: TargetOpenAPI,
-	}))
+	_, err := surfaces.Serve(petAPI(t), api.Server{ID: "shop-host", Name: "Shop", Format: Format}, ServeOptions{})
 	require.Error(t, err)
-	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Equal(t, api.KindInvalid, api.KindOf(err))
 	assert.Contains(t, err.Error(), "base url")
 }
 
-func TestServeApiRejectsForeignTarget(t *testing.T) {
-	adapter := newServingAdapter(t)
-	_, err := adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api:    petAPI(t).ToProto(),
-		Server: api.Server{ID: "h", Name: "H", BaseURL: "http://x.test", Format: FormatOpenAPI}.ToProto(),
-		Target: "protoset",
-	}))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "openapi")
-}
-
-func TestStopApiEndsTheSurface(t *testing.T) {
+func TestStopEndsTheSurface(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
+	surfaces := newSurfaces(t)
 	described := petAPI(t)
-	server := api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI}
+	server := api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format}
 
-	response, err := adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api:    described.ToProto(),
-		Server: server.ToProto(),
-		Target: TargetOpenAPI,
-	}))
+	served, err := surfaces.Serve(described, server, ServeOptions{})
 	require.NoError(t, err)
-	endpoint := response.Msg.GetEndpoint()
+	endpoint := served.Endpoint
 
-	stopped, err := adapter.StopApi(context.Background(), connect.NewRequest(&apiv1.StopApiRequest{
-		InstanceId: response.Msg.GetInstanceId(),
-	}))
-	require.NoError(t, err)
-	assert.True(t, stopped.Msg.GetStopped())
-
-	// Stopping again is reported, not treated as an error: a stop request for an
-	// unknown instance is answered honestly.
-	again, err := adapter.StopApi(context.Background(), connect.NewRequest(&apiv1.StopApiRequest{
-		InstanceId: response.Msg.GetInstanceId(),
-	}))
-	require.NoError(t, err)
-	assert.False(t, again.Msg.GetStopped())
+	assert.True(t, surfaces.Stop(served.InstanceID), "a running surface is stopped")
+	// Stopping again is reported, not treated as an error: a stop for an unknown
+	// instance is answered honestly.
+	assert.False(t, surfaces.Stop(served.InstanceID))
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	if _, err := client.Get(endpoint + "/pets/1"); err == nil {
@@ -334,23 +300,17 @@ func TestStopApiEndsTheSurface(t *testing.T) {
 
 func TestServingTheSameAPITwiceIsReported(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
+	surfaces := newSurfaces(t)
 	described := petAPI(t)
-	server := api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI}
+	server := api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format}
 
-	first, err := adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api: described.ToProto(), Server: server.ToProto(), Target: TargetOpenAPI,
-	}))
+	first, err := surfaces.Serve(described, server, ServeOptions{})
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = adapter.StopApi(context.Background(), connect.NewRequest(&apiv1.StopApiRequest{InstanceId: first.Msg.GetInstanceId()}))
-	})
+	t.Cleanup(func() { surfaces.Stop(first.InstanceID) })
 
-	_, err = adapter.ServeApi(context.Background(), connect.NewRequest(&apiv1.ServeApiRequest{
-		Api: described.ToProto(), Server: server.ToProto(), Target: TargetOpenAPI,
-	}))
+	_, err = surfaces.Serve(described, server, ServeOptions{})
 	require.Error(t, err)
-	assert.Equal(t, connect.CodeAlreadyExists, connect.CodeOf(err))
+	assert.Equal(t, api.KindAlreadyExists, api.KindOf(err), "serving the same API twice is reported, not silently accepted")
 }
 
 func TestAdaptedPathMatching(t *testing.T) {
@@ -368,10 +328,10 @@ func TestAdaptedPathMatching(t *testing.T) {
 
 func TestServedSurfaceReturnsNotFoundForUnknownPath(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := newServingAdapter(t)
-	served := serveForTest(t, adapter, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI})
+	surfaces := newSurfaces(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format})
 
-	response, err := http.Get(served.GetEndpoint() + "/unknown/1")
+	response, err := http.Get(served.Endpoint + "/unknown/1")
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, response.StatusCode)
@@ -380,15 +340,15 @@ func TestServedSurfaceReturnsNotFoundForUnknownPath(t *testing.T) {
 
 func TestDocumentationPageLinksTheSchemaDownload(t *testing.T) {
 	original := startOriginalServer(t)
-	adapter := NewAdapter(NewRenderer(), NewServer(ServerOptions{}))
-	served := serveForTest(t, adapter, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: FormatOpenAPI})
+	surfaces := newSurfacesWithoutUI(t)
+	served := serveForTest(t, surfaces, petAPI(t), api.Server{ID: "shop-host", Name: "Shop", BaseURL: original.URL, Format: Format})
 
-	response, err := http.Get(origin(served.GetEndpoint()) + served.GetDocumentationEndpoint())
+	response, err := http.Get(origin(served.Endpoint) + served.DocumentationEndpoint)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	assert.Contains(t, string(body), schemaFileJSON)
 	assert.Contains(t, string(body), "download=true")
-	assert.True(t, strings.Contains(string(body), served.GetBasePath()))
+	assert.True(t, strings.Contains(string(body), served.BasePath))
 }

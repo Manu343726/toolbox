@@ -147,16 +147,36 @@ selected subsystems. `--minimal` starts with introspection tools only.
 ## API catalogs
 
 A second path builds the same gateway from a catalog of registered API
-descriptions: `mcp.NewFromAPICatalog(ctx, catalog, invoker, options)`. A catalog
-is any `api.Catalog`, and an invoker is any `api.Invoker` — in a deployment
-those come from the API catalog subsystem, so the operations an agent gains by
-registering an API on the fly are exposed under the same rules as reflected
-methods: the same policy boundary, the same exposure lifecycle, the same
-management tools.
+descriptions: `mcp.NewFromAPICatalog(ctx, catalog, invoker, options)`. A catalog is
+any `api.Catalog`, and an invoker is any `api.Invoker` — in a deployment those come
+from the API catalog subsystem, so the operations an agent gains by registering an
+API on the fly are exposed under the same rules as reflected methods: the same
+policy boundary, the same exposure lifecycle, the same management tools.
 
-With `--minimal`, or with a catalog that has no invoker yet, the operations are
-described and documented but not exposed: a described operation is not a callable
-one, and the server says which half is missing.
+The catalog's own decisions are authoritative. A catalog that tracks exposure
+reports every operation it knows, exposed or not; an operation it reports as hidden
+is not offered even though the gateway's own policy would allow it, and one it
+denies is never a tool. An operation the catalog has never heard of falls back to
+the gateway's policy, so a catalog that predates a decision cannot shrink the
+surface by accident. A catalog without an invoker still describes and documents its
+operations: a described operation is not a callable one, and the server says which
+half is missing.
+
+### Choosing the source of the surface
+
+`toolbox mcp` builds its surface from reflection by default. `--mcp-source catalog`
+builds it from the catalog instead, after registering every started subsystem from
+the contract that subsystem serves:
+
+```sh
+toolbox mcp --mcp-source catalog --component apitools --component knowledge
+```
+
+Both name the same operations identically, so switching the source renames nothing
+an agent already uses. What the catalog adds is exposure per operation, the ability
+to re-publish a description in another format, and registrations that outlive the
+gateway. A subsystem whose services are all platform plumbing contributes no tools
+and is reported as skipped.
 
 ## OpenCode sessions
 

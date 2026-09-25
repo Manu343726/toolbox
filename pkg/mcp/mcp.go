@@ -187,6 +187,9 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 		}
 		metadata := serviceMetadata(source, serviceName)
 		for i := range schema.Methods {
+			// The policy answers once per method: an entry decides its own initial
+			// exposure, and both its allowance and its exposure come from here.
+			allowed := options.Policy.AllowFeature(serviceName, schema.Methods[i].Name)
 			method := schema.Methods[i]
 			if method.Name == "" || method.Input == nil || method.Output == nil {
 				return nil, fmt.Errorf("service %q contains an invalid reflected method at index %d", serviceName, i)
@@ -201,9 +204,16 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 					OutputType:      string(method.Output.FullName()),
 					ClientStreaming: method.ClientStreaming,
 					ServerStreaming: method.ServerStreaming,
-					Allowed:         options.Policy.AllowFeature(serviceName, method.Name),
+					Allowed:         allowed,
 					Callable:        !method.ClientStreaming && !method.ServerStreaming,
-					Capabilities:    append([]string(nil), metadata.Capabilities...),
+					// The entry decides its own initial exposure, because what a
+					// source can say about it differs: a reflected method knows only
+					// the policy, while a catalog operation also knows what the
+					// catalog decided. An operation that cannot be called is never
+					// exposed, whatever decided that.
+					Exposed: allowed && !method.ClientStreaming && !method.ServerStreaming &&
+						options.InitialExposure == ExposeAllowedFeatures,
+					Capabilities: append([]string(nil), metadata.Capabilities...),
 				},
 				inputSchema:  jsonSchemaForMessage(method.Input, documentationParameters(documentationMethod(schema.Documentation, method.Name))),
 				outputSchema: jsonSchemaForMessage(method.Output, nil),
@@ -257,18 +267,19 @@ func (s *Server) addEntry(entry *featureEntry, toolNames map[string]string) erro
 	return nil
 }
 
-// finish sorts the feature order, installs the management tools, and applies the
-// initial exposure.
+// finish sorts the feature order, installs the management tools, and installs the
+// tools the entries decided to expose.
+//
+// An entry decides its own initial exposure, because what it knows differs: a
+// reflected method knows only the policy, while a catalog operation knows what the
+// catalog decided about it. This method installs what they decided and nothing
+// more.
 func (s *Server) finish() {
 	sort.Strings(s.order)
 	s.addManagementTools()
-	if s.options.InitialExposure != ExposeAllowedFeatures {
-		return
-	}
 	for _, id := range s.order {
 		entry := s.entries[id]
-		if entry.feature.Allowed && entry.feature.Callable {
-			entry.feature.Exposed = true
+		if entry.feature.Allowed && entry.feature.Callable && entry.feature.Exposed {
 			s.addFeatureTool(entry)
 		}
 	}
@@ -625,4 +636,39 @@ func serviceDescription(service *shareddocs.Service) string {
 		return ""
 	}
 	return service.Description
+}
+
+// CallToolForTest invokes a generated tool by feature identifier and returns its
+// JSON content, so a composition can prove the whole call path without speaking
+// the transport. It is the same path the stdio and Streamable HTTP handlers take.
+func (s *Server) CallToolForTest(ctx context.Context, reference string, arguments json.RawMessage) ([]byte, error) {
+	result, err := s.callFeature(ctx, reference, arguments)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("feature %q produced no result", reference)
+	}
+	if result.IsError {
+		return nil, fmt.Errorf("%s", textOfResult(result))
+	}
+	return jsonOfResult(result), nil
+}
+
+func textOfResult(result *sdkmcp.CallToolResult) string {
+	for _, content := range result.Content {
+		if text, ok := content.(*sdkmcp.TextContent); ok {
+			return text.Text
+		}
+	}
+	return "the tool reported an error without a message"
+}
+
+func jsonOfResult(result *sdkmcp.CallToolResult) []byte {
+	if result.StructuredContent != nil {
+		if encoded, err := json.Marshal(result.StructuredContent); err == nil {
+			return encoded
+		}
+	}
+	return []byte(textOfResult(result))
 }

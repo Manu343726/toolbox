@@ -220,6 +220,10 @@ type Server struct {
 	Transport Transport
 	// Description is a human-readable server description.
 	Description string
+	// Source records where the contract this server serves was read from, when it
+	// was read: a document a caller supplied, or an endpoint that described
+	// itself. It is absent for a server someone registered by hand.
+	Source Source
 	// Capabilities are the explicit capabilities this server grants.
 	Capabilities []string
 	// Status is the operational state of the server.
@@ -675,4 +679,12 @@ func (a API) Summarize() Summary {
 		Services:   len(a.Services),
 		Operations: operations,
 	}
+}
+
+// NormalizeIdentifier trims and lowercases an identifier, so a comparison of
+// open identifiers does not depend on how a caller happened to type one. Format,
+// transport, and capability identifiers are chosen by whoever contributes them, so
+// they arrive with whatever casing and padding that contributor used.
+func NormalizeIdentifier(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

@@ -40,12 +40,21 @@ Read these before making architectural changes:
 
 4. **Shared foundation code belongs in the root public packages.** Use
    `pkg/subsystem`, `pkg/core`, `pkg/discovery`, `pkg/docs`, `pkg/cli`,
-   `pkg/mcp`, and `pkg/cliapp` instead of copying SDK behavior into
-   subsystems.
+   `pkg/mcp`, `pkg/cliapp`, `pkg/api`, `pkg/protocontract`, and `pkg/openapi`
+   instead of copying SDK behavior into subsystems.
+
+   Behaviour the framework needs in process belongs in a root package, not in a
+   subsystem. A subsystem exists to make an implementation *addressable* over
+   ConnectRPC; when a package and its subsystem both hold logic, the two can drift.
+   Provider subsystems mount a package and convert messages — nothing else.
 
 5. **The registry resolves endpoints; reflection describes schemas.** Keep
    endpoint discovery and protobuf reflection separate. Do not use a
    compile-time map of feature endpoints as the runtime linking mechanism.
+
+   Resolve before constructing a client, and bind a provider by its identifier
+   rather than by contract name: several providers serve the same contract on
+   purpose, so a name cannot tell them apart.
 
 6. **Known contracts use generated, type-safe clients.** Resolve first, then
    construct the generated client with `core.Bind` or the generated constructor.
@@ -55,7 +64,10 @@ Read these before making architectural changes:
 
 7. **Reflection does not authorize a method as an agent tool.** Capabilities,
    side effects, permissions, and approval requirements must be explicit in the
-   subsystem manifest or a policy layer.
+   subsystem manifest or a policy layer. Registering an API, describing a
+   subsystem, or starting a gateway never exposes an operation on its own: only a
+   declared capability authorizes one, and a policy that refuses it is reported
+   rather than overridden.
 
 8. **Provider-specific code stays behind a subsystem boundary.** Core workflow,
    agent, skill, and knowledge contracts must not contain OpenAI, Anthropic, or

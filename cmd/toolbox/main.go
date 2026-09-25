@@ -13,9 +13,11 @@ import (
 	"syscall"
 
 	"connectrpc.com/connect"
+	"github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/Manu343726/toolbox/pkg/host"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
+	"github.com/Manu343726/toolbox/pkg/protocontract"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	agent "github.com/Manu343726/toolbox/subsystems/agent"
 	apigrpc "github.com/Manu343726/toolbox/subsystems/apigrpc"
@@ -69,6 +71,7 @@ func newRootCommand() *cobra.Command {
 	mcpFlags.Bool("all", false, "Expose all built-in subsystems")
 	mcpFlags.Bool("minimal", false, "Start with only introspection tools")
 	mcpFlags.Bool("include-infrastructure", false, "Include health, registry, documentation, and reflection services")
+	mcpFlags.String("mcp-source", "reflection", "Where the tool surface comes from: reflection reads served contracts directly, catalog registers every subsystem in the API catalog first")
 	mcpFlags.StringSlice("service", nil, "Only expose these fully-qualified services; repeatable or comma-separated")
 	root.AddCommand(mcpCommand)
 	return root
@@ -98,11 +101,23 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	source, err := cmd.Flags().GetString("mcp-source")
+	if err != nil {
+		return err
+	}
+	source = api.NormalizeIdentifier(source)
+	switch source {
+	case "reflection", "catalog":
+	case "":
+		source = "reflection"
+	default:
+		return fmt.Errorf("--mcp-source must be reflection or catalog, not %q", source)
+	}
 	if !all && len(components) == 0 {
 		all = true
 	}
 
-	h, err := buildHost()
+	h, catalog, err := buildHost()
 	if err != nil {
 		return err
 	}
@@ -122,6 +137,14 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	if minimal {
 		initialExposure = toolboxmcp.ExposeNoFeatures
 	}
+	// The catalog path registers what the host runs, then builds the gateway from
+	// the catalog. The reflection path reads the served contracts directly. Both
+	// produce tools with the same names, so an agent sees one surface either way;
+	// what differs is that the catalog can be exposed per operation, re-published in
+	// another format, and kept when the gateway restarts.
+	if source == "catalog" {
+		return runCatalogMCP(cmd, h, catalog, initialExposure, minimal)
+	}
 	descriptors := h.Descriptors()
 	if len(serviceFilter) > 0 {
 		descriptors, err = filterDescriptorsByService(descriptors, serviceFilter)
@@ -138,6 +161,56 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	return bridge.ServeStdio(cmd.Context())
+}
+
+// runCatalogMCP builds the gateway from the API catalog rather than from
+// reflection: every started subsystem is described, registered, and its declared
+// operations exposed, and the tools are generated from those descriptions.
+func runCatalogMCP(
+	cmd *cobra.Command,
+	h *host.Host,
+	catalog *sharedCatalog,
+	initialExposure toolboxmcp.InitialExposure,
+	minimal bool,
+) error {
+	includeInfrastructure, err := cmd.Flags().GetBool("include-infrastructure")
+	if err != nil {
+		return err
+	}
+	seed, err := catalog.registerSubsystems(cmd.Context(), includeInfrastructure)
+	if err != nil {
+		return err
+	}
+	for _, warning := range seed.Warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "toolbox: "+warning)
+	}
+	registered := 0
+	for _, entry := range seed.Seeded {
+		if entry.Exposed > 0 {
+			registered++
+			continue
+		}
+		if entry.Skipped != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "toolbox: %s was not registered: %s\n", entry.Subsystem, entry.Skipped)
+		}
+	}
+	bridge, err := toolboxmcp.NewFromAPICatalog(cmd.Context(), catalog.service.Catalog(), catalog.service.Invoker(), toolboxmcp.APICatalogOptions{
+		Options: toolboxmcp.Options{
+			Name:                  "toolbox",
+			Description:           "Model Context Protocol server for Toolbox subsystems, built from the API catalog.",
+			InitialExposure:       initialExposure,
+			IncludeInfrastructure: includeInfrastructure,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(
+		cmd.ErrOrStderr(),
+		"toolbox: %d of %d subsystems registered from their own contracts, %d operations exposed\n",
+		registered, len(seed.Seeded), seed.Exposed(),
+	)
 	return bridge.ServeStdio(cmd.Context())
 }
 
@@ -192,7 +265,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, err := buildHost()
+	h, _, err := buildHost()
 	if err != nil {
 		return err
 	}
@@ -216,15 +289,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return h.Shutdown(context.Background())
 }
 
-func buildHost() (*host.Host, error) {
+func buildHost() (*host.Host, *sharedCatalog, error) {
 	h := host.New()
 	// The API catalog is given the host's own provider directory, so it finds the
 	// parsers, adapters, and invokers this process starts without importing a
 	// single provider subsystem.
 	providers := h.ProviderDirectory()
+	// The catalog is composed explicitly rather than through a factory, because the
+	// automatic exposure path needs the very service the subsystem serves: a host
+	// that registers its own subsystems writes into this store, and the MCP gateway
+	// reads the same one. Two views of one catalog, not two catalogs.
+	catalogStore := apitools.NewMemory(apitools.StoreOptions{})
+	catalogService := apitools.NewService(catalogStore, providers)
+	catalog := &sharedCatalog{service: catalogService}
 	factories := map[string]subsystem.Factory{
-		"agent":         func() (*subsystem.Server, error) { return agent.New(agent.Options{}) },
-		"apitools":      func() (*subsystem.Server, error) { return apitools.New(apitools.Options{Directory: providers}) },
+		"agent": func() (*subsystem.Server, error) { return agent.New(agent.Options{}) },
+		"apitools": func() (*subsystem.Server, error) {
+			return apitools.NewServiceServer(catalogService, apitools.Options{Store: catalogStore, Directory: providers})
+		},
 		"apiopenapi":    func() (*subsystem.Server, error) { return apiopenapi.New(apiopenapi.Options{}) },
 		"apigrpc":       func() (*subsystem.Server, error) { return apigrpc.New(apigrpc.Options{}) },
 		"documentation": func() (*subsystem.Server, error) { return documentation.New(documentation.Options{}) },
@@ -240,7 +322,7 @@ func buildHost() (*host.Host, error) {
 	}
 	for name, factory := range factories {
 		if err := h.Register(name, factory); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	h.OnStarted(func(context.Context, *subsystem.Descriptor) error {
@@ -249,7 +331,32 @@ func buildHost() (*host.Host, error) {
 		providers.SetResolver(core.NewStaticResolver(hostEndpoints(h)...))
 		return nil
 	})
-	return h, nil
+	catalog.host = h
+	return h, catalog, nil
+}
+
+// sharedCatalog is the API catalog a host serves and, in the automatic path, fills:
+// the same service, whether it is reached in process or over ConnectRPC.
+type sharedCatalog struct {
+	host    *host.Host
+	service *apitools.Service
+}
+
+// registerSubsystems describes every started subsystem and stores it in the
+// catalog, exposing the operations each subsystem declared capabilities for.
+//
+// This is the whole automatic path: each subsystem's contract is read from the
+// subsystem itself, the capabilities its manifest declared are attached to the
+// services they belong to, the description is stored, and its exposable operations
+// are exposed. Nothing is written per subsystem, and nothing is exposed that no
+// declared capability covers.
+func (c *sharedCatalog) registerSubsystems(ctx context.Context, includeInfrastructure bool) (host.SeedResult, error) {
+	if c.host == nil {
+		return host.SeedResult{}, fmt.Errorf("the host is not composed yet")
+	}
+	return c.host.RegisterInto(ctx, c.service.Registrar(), protocontract.NewDescriptor(protocontract.Descriptor{}), host.SeedOptions{
+		IncludeInfrastructure: includeInfrastructure,
+	})
 }
 
 // hostEndpoints describes the started subsystems as resolvable endpoints, so a

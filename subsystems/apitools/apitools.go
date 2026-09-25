@@ -18,6 +18,7 @@ package apitools
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
@@ -107,3 +108,34 @@ const ParserServiceName = apiv1connect.ApiParserServiceName
 // InvokerServiceName is the fully-qualified name of the framework's invocation
 // contract.
 const InvokerServiceName = apiv1connect.ApiInvokerServiceName
+
+// NewServiceServer mounts an existing service as the API catalog subsystem.
+//
+// A composition that serves the catalog and also wants it in process — to register
+// what it found, or to feed a gateway — creates the service once and mounts it here,
+// rather than starting a subsystem and reaching it over ConnectRPC afterwards.
+func NewServiceServer(service *Service, options Options) (*subsystem.Server, error) {
+	if service == nil {
+		return nil, fmt.Errorf("a catalog service is required")
+	}
+	options.Store = service.store
+	options.Directory = service.directory
+	version := options.Version
+	if version == "" {
+		version = Version
+	}
+	path, handler := apitoolsv1connect.NewApiToolsServiceHandler(service)
+	return subsystem.NewServer(subsystem.Config{
+		Name:          Name,
+		Version:       version,
+		Description:   "Catalog of registered APIs, index of API formats, and on-demand API tool exposure.",
+		ListenAddress: options.ListenAddress,
+		Background:    options.Background,
+		Services: []subsystem.Service{{
+			Name:         apitoolsv1connect.ApiToolsServiceName,
+			Path:         path,
+			Handler:      handler,
+			Capabilities: []string{CapabilityRead, CapabilityIndex, CapabilityWrite, CapabilityCall},
+		}},
+	})
+}

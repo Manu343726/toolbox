@@ -1,4 +1,4 @@
-package apiopenapi
+package openapi
 
 import (
 	"crypto/sha256"
@@ -293,7 +293,7 @@ func parseDocument(data []byte, request parseRequest) (api.API, []string, error)
 		Version:     strings.TrimSpace(parsed.Info.Version),
 		Title:       strings.TrimSpace(parsed.Info.Title),
 		Description: strings.TrimSpace(parsed.Info.Description),
-		Format:      FormatOpenAPI,
+		Format:      Format,
 		Source: api.Source{
 			Kind:     request.Source.Kind,
 			Location: request.Source.Location,
