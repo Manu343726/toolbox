@@ -227,6 +227,11 @@ list, read documentation for, expose, and hide individual methods. See
 
 ## 8. Composition modes
 
+These modes exist to serve the product requirement that a user adopts either the
+whole environment or only the capabilities they need. Each mode produces the
+same behavior per capability; only the set of capabilities in the process
+changes.
+
 ### Standalone mode
 
 ```sh
@@ -237,6 +242,13 @@ make build
 
 The subsystem starts its own service endpoint and can run without the combined
 host. Dependencies must be supplied through a resolver or configuration.
+
+A standalone subsystem also exposes itself independently to agents, so a user
+can adopt one capability without running any other:
+
+```sh
+./bin/knowledge mcp
+```
 
 ### Selected mode
 
@@ -255,6 +267,15 @@ The host constructs and starts only the selected subsystem factories.
 The host starts all built-in modules. Each module still registers and resolves
 services through the same runtime interfaces. The combined process is a
 composition convenience, not a privileged integration path.
+
+### Additive adoption
+
+A capability moved between modes keeps its contract, policy, and documentation
+and is not migrated. Adding a subsystem to a running deployment does not change
+the contract, endpoint, or behavior of the subsystems already deployed; new
+cross-subsystem traffic appears only when a definition explicitly references the
+new capability. This is why a subsystem may not import another subsystem: doing
+so would make the cost of leaving one out non-zero.
 
 ## 9. Data ownership and persistence
 

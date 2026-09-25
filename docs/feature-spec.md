@@ -21,6 +21,15 @@ declarations are authored once as versioned assets and reused by every agent,
 workflow, and model. Toolbox is provider-neutral: work is not bound to one model
 provider or one deployment topology.
 
+The framework is also adoptable in part. A user may run the complete
+environment, or adopt only the capabilities they need — for example the
+knowledge base alone — through the independent subsystem MCPs. A capability
+adopted on its own keeps the properties it has inside the full environment:
+versioned definitions, explicit policy, documentation, and direct reachability
+by an agent runtime. Adoption is additive: adding capabilities later must not
+require replacing, migrating, or rewriting what is already in use, and the cost
+of a capability the user did not want is not having to run it.
+
 The framework is useful when work must be repeatable, governed by domain rules,
 and executed by more than one agent or service. Target users include:
 
@@ -39,14 +48,16 @@ and executed by more than one agent or service. Target users include:
    definition — as reusable, versioned assets.
 2. Ensure rules, skills, prompts, and knowledge are authored once and reused, so
    adding an agent, a workflow, or a new model does not require rewriting them.
-3. Make workflows composable from independent services.
-4. Keep domain rules explicit, versioned, and enforceable outside prompts.
-5. Make service contracts provider-neutral and independently deployable.
-6. Allow built-in and third-party services to participate through the same
+3. Let a user adopt the whole environment or only the capabilities they need,
+   without adopting a capability costing them anything to leave out.
+4. Make workflows composable from independent services.
+5. Keep domain rules explicit, versioned, and enforceable outside prompts.
+6. Make service contracts provider-neutral and independently deployable.
+7. Allow built-in and third-party services to participate through the same
    ConnectRPC/reflection/registry model.
-7. Provide a portable environment containing definitions, skills, prompts,
+8. Provide a portable environment containing definitions, skills, prompts,
    knowledge references, policies, and capability declarations.
-8. Make the runtime observable, testable, and replaceable at subsystem
+9. Make the runtime observable, testable, and replaceable at subsystem
    boundaries.
 
 ### Non-goals for the foundation

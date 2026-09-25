@@ -17,7 +17,8 @@ Toolbox provides them once, as a foundation you build on:
 | **Workflow definition**      | The process written down as a versioned, reviewable plan rather than improvised each run |
 
 Write your rules, skills, prompts and knowledge once. Every agent, workflow and
-model you add afterwards reuses them.
+model you add afterwards reuses them. And take all of it or just the part you
+need — each capability is usable on its own.
 
 ## The goal
 
@@ -97,6 +98,33 @@ rewrite of everyone's instructions.
 *Removes:* improvisation, and the silent drift of "how we do things" into
 whoever prompted last.
 
+## Use it as a whole, or take one piece
+
+Toolbox is a complete environment you can adopt as-is, but it is not a
+take-it-or-leave-it bundle. Each capability stands on its own, so you can start
+with the one that solves a real problem and add the others when you need them.
+
+Common ways people start:
+
+| You want                        | You take                                            | What you get                                                             |
+| ------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
+| A knowledge base for your agents| Just the knowledge capability                        | Shared, searchable, governed knowledge — nothing else to run or maintain |
+| Your tools available to agents  | Just the tools capability, plus policies             | Declared actions with approval boundaries, no other machinery            |
+| A process assistants follow     | Workflows, plus whichever capabilities the steps use | A versioned plan instead of per-agent instructions                      |
+| Coordination between agents     | Agents, workflows, and the capabilities they need   | Defined roles and handoffs without adopting the whole environment       |
+| The full environment            | Everything                                            | One toolbox where rules, knowledge, tools, and process stay in one place  |
+
+Whatever you choose, the capability you adopt keeps the same properties as in the
+full environment: it is versioned, governed by policy, documented, and
+reachable by your agent runtime over the Model Context Protocol. Adopting more
+later is additive — it does not replace or invalidate what you already run, and
+nothing you adopted has to be rewritten when you do.
+
+This is why each capability is an independent service rather than a module
+inside a monolith: a capability you did not want should cost you nothing to
+leave out. See [`docs/architecture.md`](docs/architecture.md) for how the
+composition modes implement this.
+
 ## What is in the toolbox
 
 | Building block | What it holds                                              | Why it matters                                                    |
@@ -150,6 +178,19 @@ needs as it goes:
 
 ```sh
 ./bin/toolbox mcp --all --minimal
+```
+
+Or adopt just the capabilities you want — either from the host:
+
+```sh
+./bin/toolbox mcp --component knowledge
+./bin/toolbox mcp --component knowledge --component policy
+```
+
+…or run a single capability on its own, with no host at all:
+
+```sh
+./bin/knowledge mcp
 ```
 
 Then read [`docs/feature-spec.md`](docs/feature-spec.md) — it describes what
