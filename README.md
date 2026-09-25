@@ -1,176 +1,176 @@
 # Toolbox
 
-Toolbox is a Go framework for building AI-agent capabilities as independent
-services — and for exposing those services to agents through
-[Model Context Protocol](https://modelcontextprotocol.io/) without hand-writing
-tool wrappers, command layers, or documentation.
+**The AI agent workflow toolbox.**
 
-Your services keep their own contracts. Toolbox derives the agent-facing
-surface from those contracts, so the tools an agent sees always match the API
-you actually ship.
+Toolbox gives AI agents a shared, governed set of capabilities — workflows,
+prompts, knowledge, skills, models, tools and policies — instead of a pile of
+hardcoded prompts and one-off tool wrappers.
 
-## Why
+An agent opens the toolbox, sees what it is allowed to use, pulls in what the
+job needs, and works inside explicit limits. Humans, scripts and agents use the
+same toolbox, so nothing an agent can do is a secret from the rest of your
+team.
 
-An agent can only use a service it can **discover**, **understand**, and
-**safely call**. Teams usually bridge that gap with a bespoke MCP wrapper per
-service, plus a hand-written CLI and a separate doc page — three artifacts that
-drift from the real contract as soon as the service changes.
+## The problem
 
-Toolbox keeps one source of truth. Change the contract and the agent tools,
-their schemas, the CLI, and the documentation all follow.
+Most agent setups are assembled by hand:
 
-## Features
+- every agent gets its own giant prompt, and the prompt is the only place its
+  behaviour is defined;
+- tools are scattered across repositories, duplicated per project, and drift
+  from the services that actually implement them;
+- nobody can answer "what is this agent allowed to do?" or "which agent used
+  that tool last Tuesday?";
+- adding a capability means touching every agent that might need it.
 
-### Agents can call your services
+The result is agents that are hard to reuse, hard to change, and hard to trust.
 
-Toolbox generates an MCP server from the services you already expose. Every
-allowed RPC method becomes a tool with a JSON Schema built from your protobuf
-contract, and the descriptions agents read come from the comments you already
-write. It works with any MCP client, over stdio or Streamable HTTP.
+## What Toolbox gives you
 
-### Agents start small and grow on demand
+### One toolbox, many agents
 
-A large tool list is expensive and confusing. Toolbox agents can begin with
-introspection tools only, then pull in the features they need:
+Workflows, prompts, knowledge sources, skills, models, tools and policies live
+in the toolbox once. Any agent can use them. Adding a capability makes it
+available everywhere immediately, instead of to the agents you remember to
+update.
 
-- `list_services` / `list_features` — what is available
-- `describe_feature` / `read_feature_documentation` — what it does
-- `expose_feature` / `hide_feature` — turn features on and off at runtime
-- `feature_exposure` — audit the current footprint
-- `call_rpc` — a generic escape hatch for one-off calls
+### Workflows as first-class, reviewable artifacts
 
-The same gateway can start fully exposed (`--all`) or minimal
-(`--minimal`); the agent decides the rest.
+A workflow is a named, versioned plan: which steps run, in what order, using
+which capabilities. Workflows are validated before they are used, reviewed like
+code, and reused across agents. Changing how work happens is a version bump, not
+a prompt rewrite.
 
-### Reflection never grants permission
+### Agents defined by what they can reach
 
-Discovery and authorization are separate. A reflected method is not callable
-until an explicit feature policy allows it, and a policy is declared per
-service or subsystem rather than inferred from a schema. Agents see what
-exists; your policy decides what runs.
+An agent profile references the skills, knowledge, tools and policies it uses
+rather than embedding them in text. The same profile works with a different
+model, a different team, or a different environment, because the profile
+describes intent, not implementation.
 
-### Services describe themselves
+### Governance instead of trust
 
-Every service exposes reflection, machine-readable handshake metadata, and can
-register itself with a registry using leases. Callers resolve an endpoint first
-and construct a client second, so a missing service fails immediately instead
-of half-way through a request.
+Every capability declares what it does, and policies decide what each action
+requires: allowed, or allowed with approval. The toolbox refuses actions its
+policies do not permit, so limits are enforced by the system rather than
+requested in a prompt. You can always answer what an agent could have done.
 
-### Documentation cannot go stale
+### Agents that ask for what they need
 
-Comments in your contract are extracted into the service documentation, the
-generated CLI help, and agent-readable feature documentation. There is no
-second place to update.
+Agents start by seeing the toolbox's catalogue, not by loading every tool
+forever. They request the specific capabilities a task needs, and release them
+when the task is done. Context stays small, behaviour stays legible, and the
+footprint an agent used is inspectable.
 
-### The CLI matches the API
+### Model freedom
 
-Commands are generated from the reflected schema, so flags, arguments, and help
-text follow the contract automatically. New methods appear as new commands
-without writing command code.
+Workflows and agent profiles are provider-neutral. Bring the model that fits
+the task — or the budget, or the region — without rewriting the work itself.
+Model access is a capability, not a hardcoded dependency.
 
-### Capabilities stay independent
+### Bring your own capabilities
 
-Each capability is its own Go module with its own contract, implementation,
-tests, and binary. Add, replace, or ship one capability without touching the
-others. When you want them together, a single host process composes them — but
-no capability imports another.
+The included capabilities are a starting point, not a ceiling. Add your own
+services, and the toolbox treats them the same way it treats the built-ins:
+discoverable, documented and governed.
 
-### Typed where it matters, dynamic where it helps
+### One toolbox for humans and agents
 
-Calls to services whose contracts you compile against are fully typed.
-Services you only know at runtime are still reachable through the same
-discovery and client layer, so plugins and external systems integrate without
-recompiling.
+The same definitions back the command line, your scripts and your agents.
+There is no agent-only surface that drifts, and no privileged path that only
+works for the framework.
 
-### Provider-neutral by design
+### Works where your agents already are
 
-Core contracts — workflows, agents, prompts, knowledge, skills, models, tools,
-policies — contain no provider-specific request or response types. Providers
-sit behind the model capability; the contracts stay yours.
+The toolbox plugs into the agent tools and IDEs your team already uses, through
+the Model Context Protocol that agent runtimes speak. No new agent client to
+adopt, no prompt conventions to teach.
 
-## Capabilities included
+## What is in the toolbox
 
-The repository ships reference capabilities that are useful on their own and
-double as a worked example of the framework.
+| Capability      | What it is                                                            | What an agent does with it                              |
+| --------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Workflows**   | Versioned plans made of steps                                        | Look up a plan, validate it, follow it, improve it        |
+| **Agents**      | Versioned profiles that reference capabilities                       | Act as a configured role with a defined reach              |
+| **Skills**      | Reusable units of know-how bound to the capabilities they need        | Load a skill when the task matches it                     |
+| **Prompts**     | Parameterised templates                                               | Render a template instead of improvising wording          |
+| **Knowledge**   | Sources an agent is allowed to consult                               | Search only the sources it is entitled to                 |
+| **Models**      | The models available to the team                                     | Choose or be given a model for the step it is running     |
+| **Tools**       | Declared actions, each with its own requirements                     | Invoke an action, subject to that action's policy         |
+| **Policies**    | The rules that decide what needs approval                            | Check what a step requires before taking it               |
+| **Health**      | Whether each part of the toolbox is ready                            | Avoid relying on something that is not available         |
 
-| Capability     | What an agent can do with it                                  |
-| -------------- | ------------------------------------------------------------- |
-| `workflow`     | Store, list, retrieve, and validate versioned workflow definitions |
-| `agent`        | Manage provider-neutral agent profiles and their references     |
-| `skill`        | Manage reusable skills and the capabilities they require        |
-| `prompt`       | Store templates and render them with variables                 |
-| `knowledge`    | Store sources and search them                                   |
-| `model`        | List available models and invoke a provider                    |
-| `tool`         | Declare tools and invoke explicitly registered implementations |
-| `policy`       | Evaluate allow/approval rules by policy                        |
-| `registry`     | Discover and resolve service endpoints                          |
-| `health`       | Report component serving state                                 |
-| `documentation`| Read the documentation carried by the contracts themselves      |
+Every item is versioned, so behaviour is reproducible and changes are visible.
 
-## Quick start
+## A day with the toolbox
 
-Build the capabilities and the host:
+> An agent is asked to prepare the weekly report. It finds the report workflow,
+> loads the prompt template it names, searches the knowledge sources it is
+> allowed to consult, and reaches the publish step. The publish step requires
+> approval, so the agent prepares the draft and requests sign-off instead of
+> sending anything itself. The whole exchange is recorded against the
+> workflow version it used.
+
+## Getting started
+
+Build the toolbox:
 
 ```sh
 make build
 ```
 
-Expose everything to an agent as one MCP server:
+Run everything it contains:
+
+```sh
+./bin/toolbox --all
+```
+
+Hand it to your agents:
 
 ```sh
 ./bin/toolbox mcp --all
 ```
 
-Or start minimal and let the agent discover what it needs:
+Any MCP-capable agent runtime can then connect to that command and use the
+toolbox. To give an agent a smaller, quieter toolbox, start it with
+`--minimal` and let it request capabilities as it needs them.
 
-```sh
-./bin/toolbox mcp --all --minimal
-```
+From there, the fastest way to understand the product is to read
+[`docs/feature-spec.md`](docs/feature-spec.md) and then look at the workflows,
+agents and prompts it describes.
 
-Expose a single capability, or a single service inside it:
+## Who it is for
 
-```sh
-./bin/toolbox mcp --component workflow
-./bin/toolbox mcp --component workflow --service toolbox.workflow.v1.WorkflowService
-```
-
-Every capability also ships as its own MCP:
-
-```sh
-./bin/workflow mcp
-```
-
-Point your MCP client at one of these commands, or wire it into an agent
-session — see [`docs/mcp.md`](docs/mcp.md) for the feature model, exposure
-semantics, and client setup. OpenCode sessions started in this repository
-already have the gateway and the project documentation available.
-
-Run the services themselves the same way:
-
-```sh
-./bin/toolbox --component workflow   # one capability
-./bin/toolbox --all                  # every capability, composed
-```
-
-## Documentation
-
-[`docs/README.md`](docs/README.md) is the documentation map:
-
-- [Feature specification](docs/feature-spec.md) — goals, requirements, acceptance criteria
-- [Architecture](docs/architecture.md) — how capabilities, discovery, and calls fit together
-- [MCP gateway](docs/mcp.md) — tools, exposure control, client and session setup
-- [Subsystem catalog](docs/subsystems.md) — every capability and its contract
-- [Development guide](docs/development.md) — build, protobuf, and contribution workflow
-- [Testing guide](docs/testing.md) — unit, integration, and race-testing rules
-- [Status and roadmap](docs/status.md) · [todos](docs/todos.md) — what is done and what is next
-
-Contributors and agents should read [`AGENTS.md`](AGENTS.md).
+- **AI and platform engineers** standardising how agents get tools, and how
+  those tools are governed.
+- **Agent developers** who want reusable, versioned behaviour instead of
+  prompt-by-prompt hand-tuning.
+- **Teams** that need to answer, at any moment, what an agent is capable of and
+  what it actually did.
 
 ## Status
 
-Early and actively developed. The framework foundation — independent
-capabilities, discovery, documentation, generated CLI, and the MCP gateway —
-works end to end, and the included capabilities are reference
-implementations rather than production engines. See
-[`docs/status.md`](docs/status.md) for the current state and
-[`docs/todos.md`](docs/todos.md) for what is planned.
+Early and actively developed. The framework works end to end today and the
+included capabilities are working reference implementations rather than
+finished products — the current state is written up in
+[`docs/status.md`](docs/status.md) and the plan in
+[`docs/todos.md`](docs/todos.md).
+
+## Documentation
+
+[`docs/README.md`](docs/README.md) is the map. Product and design reading
+first:
+
+- [Feature specification](docs/feature-spec.md) — what the product is and what it must do
+- [Subsystem catalog](docs/subsystems.md) — every capability and its contract
+- [Current status](docs/status.md) and [roadmap](docs/todos.md)
+
+Engineering detail lives here:
+
+- [Architecture](docs/architecture.md) — boundaries, runtime layers, composition, constraints
+- [MCP gateway](docs/mcp.md) — agent tooling, exposure control, client setup
+- [Development guide](docs/development.md) — build, contracts, code generation
+- [Testing guide](docs/testing.md) — test layers and required checks
+- [Protocol conventions](docs/protocol.md) and [decisions](docs/decisions/README.md)
+
+Contributors and agents should read [`AGENTS.md`](AGENTS.md).

@@ -146,7 +146,26 @@ dynamic unary invocation
 Dynamic calls are an interoperability path, not the preferred path for
 first-party code. Streaming dynamic calls are not currently supported.
 
-## 5. Documentation and CLI flow
+## 5. Public foundation packages
+
+Subsystems and the host compose from these shared packages instead of copying
+SDK behavior.
+
+| Package         | Responsibility                                                                   |
+| --------------- | -------------------------------------------------------------------------------- |
+| `pkg/subsystem` | Transport and lifecycle SDK: listeners, h2c, generated handler mounting, reflection, handshake metadata, graceful shutdown |
+| `pkg/discovery` | Reflection-based service/schema discovery, descriptor caching, documentation lookup, dynamic unary invocation |
+| `pkg/core`      | `core.Resolver` endpoint resolution plus service-to-service calls; `core.Bind` constructs generated, type-safe clients after resolution succeeds |
+| `pkg/docs`      | Neutral documentation model parsed from descriptor sets generated with `--include_source_info` |
+| `pkg/cli`       | Cobra command generator driven by reflected methods and documentation            |
+| `pkg/cliapp`    | Shared standalone-command runner; adds the automatic `mcp` subcommand to every subsystem command |
+| `pkg/mcp`       | MCP gateway built from a reflected source: feature catalog, exposure state, policy gating, introspection tools, stdio and HTTP transports |
+| `pkg/host`      | Composes independently built subsystem factories in one process; aggregates their descriptors for the combined MCP |
+
+A subsystem implements its own service and may import any of these packages. It
+must not import another feature subsystem.
+
+## 6. Documentation and CLI flow
 
 ```text
 .proto source comments
@@ -174,7 +193,7 @@ The documentation service and CLI are separate concerns:
 
 Subsystem commands do not hand-write RPC-specific Cobra methods or flags.
 
-## 6. MCP gateway
+## 7. MCP gateway
 
 The public `pkg/mcp` package turns a reflected ConnectRPC source into an MCP
 server. It uses protobuf reflection for schemas and dynamic unary invocation,
@@ -206,7 +225,7 @@ available when the initial feature surface is empty, allowing an agent to
 list, read documentation for, expose, and hide individual methods. See
 [`docs/mcp.md`](mcp.md) for the tool contract and deployment commands.
 
-## 7. Composition modes
+## 8. Composition modes
 
 ### Standalone mode
 
@@ -237,7 +256,7 @@ The host starts all built-in modules. Each module still registers and resolves
 services through the same runtime interfaces. The combined process is a
 composition convenience, not a privileged integration path.
 
-## 8. Data ownership and persistence
+## 9. Data ownership and persistence
 
 Each subsystem owns its state and persistence. No feature should query another
 feature's database directly. Cross-subsystem state is exchanged through:
@@ -251,7 +270,7 @@ feature's database directly. Cross-subsystem state is exchanged through:
 The current reference stores are in-memory. Persistence interfaces and SQLite
 adapters are planned work.
 
-## 9. Extension model
+## 10. Extension model
 
 A third-party subsystem is compatible when it:
 
@@ -264,7 +283,7 @@ A third-party subsystem is compatible when it:
 Reflection alone is insufficient for agent exposure. A service must explicitly
 declare tool capabilities, side effects, permissions, and policy requirements.
 
-## 10. Architectural constraints
+## 11. Architectural constraints
 
 - No framework-wide aggregate feature proto.
 - No feature-to-feature implementation imports.
@@ -275,7 +294,7 @@ declare tool capabilities, side effects, permissions, and policy requirements.
   compatibility decision.
 - No generated artifacts in source control.
 
-## 11. Related documents
+## 12. Related documents
 
 - [Feature specification](feature-spec.md)
 - [Subsystem catalog](subsystems.md)
