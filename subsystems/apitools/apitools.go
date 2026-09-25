@@ -52,9 +52,10 @@ type Options struct {
 	// indexing, and exposure all function, while parse and call operations
 	// report that no provider is configured.
 	Directory ProviderDirectory
-	// Policy authorizes operation exposure. The zero value denies operations
-	// that declare no capability.
-	Policy OperationPolicy
+	// Policy decides which registered operations may be exposed. The zero value
+	// permits nothing, so a catalog that nobody has stated a policy for describes
+	// and documents every API it holds while none of it is callable.
+	Policy api.Policy
 	// ListenAddress defaults to 127.0.0.1:0.
 	ListenAddress string
 	// Version overrides the implementation version.

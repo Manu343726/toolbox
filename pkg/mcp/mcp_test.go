@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/discovery"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,7 +60,7 @@ func TestServerGeneratesGatedToolsAndIntrospection(t *testing.T) {
 	source := newFakeSource(t)
 	bridge, err := New(ctx, source, Options{
 		Name:            "test-mcp",
-		Policy:          AllowAllFeatures(),
+		Policy:          APIPolicy(),
 		InitialExposure: ExposeAllowedFeatures,
 	})
 	require.NoError(t, err)
@@ -119,7 +121,7 @@ func TestServerGeneratesGatedToolsAndIntrospection(t *testing.T) {
 
 func TestServerMinimalStartsWithIntrospectionOnly(t *testing.T) {
 	bridge, err := New(context.Background(), newFakeSource(t), Options{
-		Policy:          AllowAllFeatures(),
+		Policy:          APIPolicy(),
 		InitialExposure: ExposeNoFeatures,
 	})
 	require.NoError(t, err)
@@ -134,7 +136,7 @@ func TestServerMinimalStartsWithIntrospectionOnly(t *testing.T) {
 func TestPolicyIsSeparateFromReflection(t *testing.T) {
 	source := newFakeSource(t)
 	bridge, err := New(context.Background(), source, Options{
-		Policy: DenyAllFeatures(),
+		Policy: api.DenyAll(),
 	})
 	require.NoError(t, err)
 	session, stop := connectTestServer(t, bridge)
@@ -159,7 +161,7 @@ func TestPolicyIsSeparateFromReflection(t *testing.T) {
 
 func TestHTTPHandlerServesTheGeneratedSurface(t *testing.T) {
 	bridge, err := New(context.Background(), newFakeSource(t), Options{
-		Policy:          AllowAllFeatures(),
+		Policy:          APIPolicy(),
 		InitialExposure: ExposeNoFeatures,
 	})
 	require.NoError(t, err)
@@ -174,7 +176,7 @@ func TestHTTPHandlerServesTheGeneratedSurface(t *testing.T) {
 }
 
 func TestExposureStateIsConcurrencySafe(t *testing.T) {
-	bridge, err := New(context.Background(), newFakeSource(t), Options{Policy: AllowAllFeatures()})
+	bridge, err := New(context.Background(), newFakeSource(t), Options{Policy: APIPolicy()})
 	require.NoError(t, err)
 	var wait sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -194,15 +196,74 @@ func TestExposureStateIsConcurrencySafe(t *testing.T) {
 	wait.Wait()
 }
 
-func TestPolicyCanNarrowServiceToExplicitMethods(t *testing.T) {
-	policy := PolicyFromServices([]ServiceMetadata{{
-		Name:           "test.v1.EchoService",
-		Capabilities:   []string{"testecho.echo"},
-		AllowedMethods: []string{"Echo"},
-	}})
-	assert.True(t, policy.AllowFeature("test.v1.EchoService", "Echo"))
-	assert.False(t, policy.AllowFeature("test.v1.EchoService", "StreamEcho"))
-	assert.False(t, policy.AllowFeature("other.v1.Service", "Echo"))
+func TestAGatewayDeniesAServiceThatDeclaredNothing(t *testing.T) {
+	// The defect this replaced: a service whose contract said nothing about what
+	// calling it does was authorized by a sibling's declaration, because a
+	// flattened capability list was copied onto every service of a subsystem. The
+	// two services here declare differently, and only the one that declared is
+	// offered.
+	source := newFakeSource(t)
+	source.schema.Documentation = &shareddocs.Service{
+		Name: "test.v1.EchoService",
+		Methods: []shareddocs.Method{{
+			Name:        "Echo",
+			Annotations: mustAnnotations(t, "@toolbox.side-effects read_only"),
+		}, {
+			Name:        "DoThing",
+			Annotations: mustAnnotations(t, ""),
+		}},
+	}
+	policy, err := api.NewPolicy(api.Rule{
+		Pattern:  "test.v1.EchoService/Echo",
+		Decision: api.DecisionAllow,
+	})
+	require.NoError(t, err)
+
+	bridge, err := New(context.Background(), source, Options{Policy: policy})
+	require.NoError(t, err)
+	allowed := map[string]bool{}
+	for _, feature := range bridge.Features() {
+		allowed[feature.Method] = feature.Allowed
+	}
+	assert.True(t, allowed["Echo"], "a method whose contract declared an effect is the one the rule names")
+	assert.False(t, allowed["DoThing"],
+		"a method whose contract declared nothing is not covered by a rule about another method")
+}
+
+func TestAGatewayCanGrantAWholeClassAcrossEveryService(t *testing.T) {
+	// What separating classification from grant buys: a policy that is coarse
+	// enough to be worth writing, which a per-capability list could not express.
+	source := newFakeSource(t)
+	source.schema.Documentation = &shareddocs.Service{
+		Name: "test.v1.EchoService",
+		Methods: []shareddocs.Method{{
+			Name:        "Echo",
+			Annotations: mustAnnotations(t, "@toolbox.side-effects read_only"),
+		}, {
+			Name:        "Wipe",
+			Annotations: mustAnnotations(t, "@toolbox.side-effects delete"),
+		}},
+	}
+	policy, err := api.NewPolicy(
+		api.Rule{Pattern: "*", Classes: []api.EffectClass{api.EffectClassRead}, Decision: api.DecisionAllow},
+		api.Rule{Pattern: "*", Classes: []api.EffectClass{api.EffectClassWrite}, Decision: api.DecisionDeny},
+	)
+	require.NoError(t, err)
+
+	bridge, err := New(context.Background(), source, Options{Policy: policy})
+	require.NoError(t, err)
+	allowed := map[string]bool{}
+	for _, feature := range bridge.Features() {
+		allowed[feature.Method] = feature.Allowed
+	}
+	assert.True(t, allowed["Echo"], "every read, named or not")
+	assert.False(t, allowed["Wipe"], "and no write, without either having been enumerated")
+}
+
+func mustAnnotations(t *testing.T, comment string) shareddocs.AnnotationSet {
+	t.Helper()
+	_, annotations := shareddocs.ParseAnnotations(comment)
+	return annotations
 }
 
 func TestJSONSchemaUsesProtobufJSONNamesAndTypes(t *testing.T) {

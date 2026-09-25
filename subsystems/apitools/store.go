@@ -35,10 +35,11 @@ var (
 
 // StoreOptions configures the in-memory catalog.
 type StoreOptions struct {
-	// Policy authorizes operations for exposure. The zero value authorizes an
-	// operation only when the API or the operation declares a capability, so
-	// exposure stays an explicit decision rather than a discovery artifact.
-	Policy OperationPolicy
+	// Policy decides which operations may be exposed. The zero value permits
+	// nothing: a catalog with no stated policy describes and documents every
+	// registered API while none of it is callable, because "no policy" and "every
+	// policy" must never be the same value.
+	Policy api.Policy
 	// Now supplies the clock used for registration timestamps. Tests inject a
 	// fixed clock; the zero value uses time.Now.
 	Now func() time.Time
@@ -55,16 +56,15 @@ type Memory struct {
 	transports map[string]api.TransportDescriptor
 	exposure   map[string]bool
 	revision   int64
-	policy     OperationPolicy
+	policy     api.Policy
 	now        func() time.Time
 }
 
 // NewMemory creates an empty catalog.
 func NewMemory(options StoreOptions) *Memory {
+	// The zero policy is the deny-all policy, so nothing here invents a default
+	// that would authorize a deployment's whole surface.
 	policy := options.Policy
-	if policy == nil {
-		policy = CapabilityPolicy{}
-	}
 	now := options.Now
 	if now == nil {
 		now = time.Now
@@ -81,7 +81,7 @@ func NewMemory(options StoreOptions) *Memory {
 }
 
 // Policy returns the policy the catalog authorizes exposure with.
-func (m *Memory) Policy() OperationPolicy {
+func (m *Memory) Policy() api.Policy {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.policy
@@ -515,7 +515,7 @@ func (m *Memory) Operation(apiID, operationID string) (api.Operation, bool, erro
 	for _, service := range target.Services {
 		for _, operation := range service.Operations {
 			if operation.ID == operationID {
-				return operation.Clone(), m.policy.AllowOperation(target, operation), nil
+				return operation.Clone(), m.allows(target, operation), nil
 			}
 		}
 	}
@@ -539,9 +539,9 @@ func (m *Memory) SetExposed(apiID, operationID string, exposed bool) (bool, erro
 		return false, fmt.Errorf("%w: operation %q of api %q", ErrNotFound, operationID, apiID)
 	}
 	if exposed {
-		if !m.policy.AllowOperation(target, operation) {
+		if !m.allows(target, operation) {
 			return false, fmt.Errorf(
-				"%w: operation %q is not authorized by the operation policy", ErrNotAllowed, operationID,
+				"%w: operation %q is not authorized by the deployment's policy", ErrNotAllowed, operationID,
 			)
 		}
 		if operation.Streaming.Streaming() {
@@ -563,6 +563,19 @@ func (m *Memory) SetExposed(apiID, operationID string, exposed bool) (bool, erro
 	m.exposure[operationID] = exposed
 	m.revision++
 	return true, nil
+}
+
+// allows reports whether the catalog's policy permits exposing an operation.
+//
+// The identifier and the declared side effects are the whole input: what the
+// operation is called, and what its contract says invoking it does. Both are facts
+// the description already carries, so the catalog does not have to be told a
+// second vocabulary to answer this.
+func (m *Memory) allows(target api.API, operation api.Operation) bool {
+	return m.policy.Allows(api.OperationFacts{
+		ID:          operation.ID,
+		SideEffects: operation.SideEffects,
+	})
 }
 
 func findOperation(target api.API, operationID string) (api.Operation, bool) {
@@ -629,7 +642,7 @@ func (m *Memory) Exposure(filter ExposureFilter) []Exposure {
 			for _, operation := range candidate.Operations {
 				result = append(result, Exposure{
 					Operation: operation.Clone(),
-					Allowed:   m.policy.AllowOperation(target, operation),
+					Allowed:   m.allows(target, operation),
 					Exposed:   m.exposure[operation.ID],
 					Invokable: !operation.Streaming.Streaming() && len(target.ServerIDs) > 0,
 				})

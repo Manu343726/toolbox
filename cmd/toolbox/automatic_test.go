@@ -18,7 +18,7 @@ import (
 // subsystem's own contract, and the gateway offers the subsystem's operations as
 // tools.
 func TestAutomaticExposureOfSubsystems(t *testing.T) {
-	h, catalog, err := buildHost()
+	h, catalog, err := buildHost("")
 	require.NoError(t, err)
 	// Health and registry are started on purpose: their services declare
 	// capabilities, so the uniform rule has to hold for them too.
@@ -74,7 +74,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 		context.Background(),
 		catalog.service.Catalog(),
 		catalog.service.Invoker(),
-		toolboxmcp.APICatalogOptions{},
+		toolboxmcp.APICatalogOptions{Options: toolboxmcp.Options{Policy: catalog.policy}},
 	)
 	require.NoError(t, err)
 	features := gateway.Features()
@@ -86,14 +86,20 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	assert.True(t, byTool["knowledge__search"], "a declared operation is offered as a tool")
 	assert.True(t, byTool["workflow__validate_workflow"], "every subsystem contributes its declared operations")
 
-	// A service is a tool because it declared a capability, whoever serves it: a
-	// health check or a registry is offered like any other, and the reflection
-	// services are not offered because they provide no capability at all.
-	assert.True(t, byTool["health__check"], "a declared capability is offered, whatever service declares it")
-	assert.True(t, byTool["registry__list_services"], "a declared capability is offered, whatever service declares it")
+	// Every contract in the deployment is annotated, so the default policy — every
+	// read, nothing that changes state — offers each subsystem's reads whoever
+	// serves them. The reflection services are not offered because they provide no
+	// capability at all.
+	assert.True(t, byTool["health__check"], "a declared read is offered, whatever service declares it")
+	assert.True(t, byTool["registry__list_services"], "a declared read is offered, whatever service declares it")
 	for name := range byTool {
 		assert.NotContains(t, name, "reflection", "reflection is not a tool")
 	}
+
+	// A write is not offered, because the default document does not grant one. This
+	// is the half that used to be the default's whole answer.
+	assert.False(t, byTool["knowledge__put_source"],
+		"the default policy grants reads, so a write is registered, described, and not exposed")
 
 	// A call goes through the catalog's invoker to the real subsystem. The search
 	// is empty on purpose: the assertion is that the call path is real, not what a
@@ -111,7 +117,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 // TestReflectionAndCatalogAgreeOnToolNames guards the promise that switching the
 // source of the tool surface does not rename anything an agent already uses.
 func TestReflectionAndCatalogAgreeOnToolNames(t *testing.T) {
-	h, catalog, err := buildHost()
+	h, catalog, err := buildHost("")
 	require.NoError(t, err)
 	require.NoError(t, h.Select("knowledge", "apigrpc"))
 	require.NoError(t, h.Start(context.Background()))
@@ -123,7 +129,7 @@ func TestReflectionAndCatalogAgreeOnToolNames(t *testing.T) {
 		context.Background(),
 		catalog.service.Catalog(),
 		catalog.service.Invoker(),
-		toolboxmcp.APICatalogOptions{},
+		toolboxmcp.APICatalogOptions{Options: toolboxmcp.Options{Policy: catalog.policy}},
 	)
 	require.NoError(t, err)
 	fromReflection, err := toolboxmcp.NewFromDescriptors(

@@ -61,12 +61,6 @@ type EndpointSource struct {
 // the first registration stands. That is the limit of what a name can address,
 // and it is why the catalog is where providers are told apart — there each one is
 // a separate API with its own identifier.
-func (s *EndpointSource) ServiceOwner(serviceName string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.byService[strings.TrimSpace(serviceName)]
-}
-
 // SharedServices returns the services more than one endpoint serves, in a stable
 // order.
 //
@@ -188,29 +182,14 @@ func (s *EndpointSource) Invoke(ctx context.Context, serviceName, methodName str
 	return client.Invoke(ctx, serviceName, methodName, request)
 }
 
-// ServiceMetadata returns the explicit metadata for a service, if known.
-func (s *EndpointSource) ServiceMetadata(serviceName string) (ServiceMetadata, bool) {
+// ServiceOwner returns the endpoint that serves a service. A name addresses one
+// endpoint, which is the limit of what reflection can reach.
+func (s *EndpointSource) ServiceOwner(serviceName string) string { return s.ownerOf(serviceName) }
+
+func (s *EndpointSource) ownerOf(serviceName string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	endpointName, ok := s.byService[serviceName]
-	if !ok {
-		return ServiceMetadata{}, false
-	}
-	for _, endpoint := range s.endpoints {
-		if endpoint.Name != endpointName {
-			continue
-		}
-		for _, service := range endpoint.Services {
-			if service.Name == serviceName {
-				return ServiceMetadata{
-					Name:           service.Name,
-					Capabilities:   append([]string(nil), service.Capabilities...),
-					AllowedMethods: append([]string(nil), service.AllowedMethods...),
-				}, true
-			}
-		}
-	}
-	return ServiceMetadata{}, false
+	return s.byService[strings.TrimSpace(serviceName)]
 }
 
 func (s *EndpointSource) clientForService(ctx context.Context, serviceName string) (*discovery.Client, error) {

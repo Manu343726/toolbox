@@ -44,10 +44,11 @@ type SeedOptions struct {
 	// Format is the description format the endpoints' contracts are read as. It
 	// defaults to DefaultContractFormat.
 	Format api.Format
-	// ExposeAll exposes every operation, including ones no capability covers. It
-	// is false by default: an operation nobody declared a capability for is not a
-	// tool, and "it was registered" is not a reason to make it callable.
-	ExposeAll bool
+	// Policy decides which operations the catalog is asked to expose. The zero
+	// value permits nothing, so a host nobody stated a policy for registers and
+	// describes every subsystem it runs while offering none of their operations.
+	// Exposure is a policy decision, and a convenience is not a policy.
+	Policy api.Policy
 	// ExcludeServices drops services from each description by name. It is the
 	// deployment's own list: the framework excludes nothing on its own, so what a
 	// subsystem serves is what a catalog holds unless somebody says otherwise.
@@ -163,7 +164,6 @@ func (h *Host) registerOne(
 		// A subsystem the deployment could not describe is reported, not fatal.
 		return Seeded{Subsystem: endpoint.Subsystem, Skipped: err.Error()}, warnings, nil
 	}
-	enriched := described.WithCapabilities(endpoint.ServiceCapabilities)
 	server, _, err := registrar.RegisterServer(ctx, api.Server{
 		ID:           endpoint.Subsystem,
 		Name:         endpoint.Subsystem,
@@ -172,19 +172,26 @@ func (h *Host) registerOne(
 		Transport:    DefaultSubsystemTransport,
 		Description:  fmt.Sprintf("The %s subsystem, described from the contract it serves.", endpoint.Subsystem),
 		Source:       described.Source,
-		Capabilities: firstNonEmptyCapabilities(enriched.Capabilities, endpoint.Capabilities),
+		Capabilities: append([]string(nil), endpoint.Capabilities...),
 	})
 	if err != nil {
 		return Seeded{}, warnings, fmt.Errorf("register the %s server: %w", endpoint.Subsystem, err)
 	}
-	stored, replaced, err := registrar.RegisterAPI(ctx, enriched, server.ID)
+	stored, replaced, err := registrar.RegisterAPI(ctx, described, server.ID)
 	if err != nil {
 		return Seeded{}, warnings, fmt.Errorf("register the %s contract: %w", endpoint.Subsystem, err)
 	}
 	operations := stored.Operations()
 	exposed := 0
 	for _, operation := range operations {
-		if !options.ExposeAll && !stored.DeclaresCapability(operation) {
+		// The deployment's policy answers here, over two facts the description
+		// already carries: what the operation is called, and what its contract says
+		// invoking it does. Nothing is exposed that the policy does not permit, and
+		// the policy is not derived from what registering discovered.
+		if !options.Policy.Allows(api.OperationFacts{
+			ID:          operation.ID,
+			SideEffects: operation.SideEffects,
+		}) {
 			continue
 		}
 		changed, err := registrar.SetExposed(ctx, stored.ID, operation.ID, true)
@@ -281,13 +288,4 @@ func isExcluded(name string, options SeedOptions) bool {
 		}
 	}
 	return false
-}
-
-func firstNonEmptyCapabilities(values ...[]string) []string {
-	for _, candidate := range values {
-		if len(candidate) > 0 {
-			return append([]string(nil), candidate...)
-		}
-	}
-	return nil
 }

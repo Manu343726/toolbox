@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Manu343726/toolbox/pkg/api"
 	"strings"
 
 	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
@@ -270,7 +271,7 @@ func cloneFeatureEntry(entry *featureEntry) *featureEntry {
 		return nil
 	}
 	clone := *entry
-	clone.feature.Capabilities = append([]string(nil), entry.feature.Capabilities...)
+	clone.feature.SideEffects = append([]api.SideEffect(nil), entry.feature.SideEffects...)
 	return &clone
 }
 

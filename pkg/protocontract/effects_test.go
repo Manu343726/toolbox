@@ -5,7 +5,6 @@ import (
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
-	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,13 +162,11 @@ func TestEndpointDescriptionCarriesSideEffectsToo(t *testing.T) {
 	// The classification has to arrive on the path a host actually uses, which is
 	// reflection against a live server rather than a descriptor set in hand.
 	//
-	// A generated Go descriptor omits source locations, so the reader is pointed at
-	// the documentation catalog the contract's descriptor set registered itself
-	// into. That wiring is what makes the effect arrive, and without it every
-	// operation of a live subsystem would arrive unclassified.
-	described, warnings, err := NewDescriptor(Descriptor{
-		Documentation: shareddocs.DefaultCatalog(),
-	}).FromEndpoint(t.Context(), startParserServer(t))
+	// Nothing here wires up a documentation catalog: the reflection client already
+	// prefers the descriptor set the contract's build embedded, which is the only
+	// place the comments exist, because a generated Go descriptor has no source
+	// locations. That is what makes the effect arrive on the path a host uses.
+	described, warnings, err := NewDescriptor(Descriptor{}).FromEndpoint(t.Context(), startParserServer(t))
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
@@ -177,19 +174,6 @@ func TestEndpointDescriptionCarriesSideEffectsToo(t *testing.T) {
 	require.True(t, ok, "the method was described from real reflection")
 	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, operation.SideEffects,
 		"the effect the contract's own comment declares arrived over reflection")
-}
-
-func TestEndpointDescriptionWithoutDocumentationStaysUnclassified(t *testing.T) {
-	// The other half of the same fact: a reader with no documentation to consult
-	// sees the contract's shape and nothing else. That is the safe direction, and
-	// it is why a deployment in one process has to wire the catalog in rather than
-	// assume reflection carried the comments.
-	described, _, err := NewDescriptor(Descriptor{}).FromEndpoint(t.Context(), startParserServer(t))
-	require.NoError(t, err)
-
-	operation, ok := described.Operation(api.OperationID(described.ID, apiv1connect.ApiParserServiceName, "ParseApi"))
-	require.True(t, ok)
-	assert.Empty(t, operation.SideEffects)
 }
 
 // startParserServer serves the framework's parser contract and returns its

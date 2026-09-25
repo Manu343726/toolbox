@@ -59,6 +59,7 @@ func newRootCommand() *cobra.Command {
 	flags := root.Flags()
 	flags.StringSlice("component", nil, "Subsystem names to launch; repeatable or comma-separated")
 	flags.Bool("all", false, "Launch all built-in subsystems")
+	flags.String("policy", "", "Path to a policy document deciding which operations may be exposed; the default grants every read and nothing that changes state")
 
 	mcpCommand := &cobra.Command{
 		Use:   "mcp",
@@ -78,6 +79,7 @@ func newRootCommand() *cobra.Command {
 	_ = mcpFlags.MarkDeprecated("include-infrastructure", "use --include-reflection; services are no longer excluded by name")
 	_ = mcpFlags.MarkHidden("include-infrastructure")
 	mcpFlags.String("mcp-source", "reflection", "Where the tool surface comes from: reflection reads served contracts directly, catalog registers every subsystem in the API catalog first")
+	mcpFlags.String("policy", "", "Path to a policy document deciding which operations may be exposed; the default grants every read and nothing that changes state")
 	mcpFlags.StringSlice("service", nil, "Only expose these fully-qualified services; repeatable or comma-separated")
 	root.AddCommand(mcpCommand)
 	return root
@@ -89,6 +91,10 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	all, err := cmd.Flags().GetBool("all")
+	if err != nil {
+		return err
+	}
+	policyPath, err := cmd.Flags().GetString("policy")
 	if err != nil {
 		return err
 	}
@@ -127,7 +133,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, catalog, err := buildHost()
+	h, catalog, err := buildHost(policyPath)
 	if err != nil {
 		return err
 	}
@@ -165,6 +171,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	bridge, err := toolboxmcp.NewFromDescriptors(cmd.Context(), descriptors, toolboxmcp.Options{
 		Name:              "toolbox",
 		Description:       "Aggregated Model Context Protocol server for Toolbox subsystems.",
+		Policy:            catalog.policy,
 		InitialExposure:   initialExposure,
 		IncludeReflection: includeReflection,
 	})
@@ -213,6 +220,7 @@ func runCatalogMCP(
 		Options: toolboxmcp.Options{
 			Name:              "toolbox",
 			Description:       "Model Context Protocol server for Toolbox subsystems, built from the API catalog.",
+			Policy:            catalog.policy,
 			InitialExposure:   initialExposure,
 			IncludeReflection: includeReflection,
 		},
@@ -272,6 +280,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	policyPath, err := cmd.Flags().GetString("policy")
+	if err != nil {
+		return err
+	}
 	if all && len(components) > 0 {
 		return fmt.Errorf("--all cannot be combined with --component")
 	}
@@ -279,7 +291,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, _, err := buildHost()
+	h, _, err := buildHost(policyPath)
 	if err != nil {
 		return err
 	}
@@ -303,7 +315,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return h.Shutdown(context.Background())
 }
 
-func buildHost() (*host.Host, *sharedCatalog, error) {
+// buildHost composes the host and the catalog it fills. The policy path is the
+// deployment's answer to what an agent may call, and it is read here because the
+// catalog, the seeder and the gateway all have to be answering from one document.
+func buildHost(policyPath string) (*host.Host, *sharedCatalog, error) {
 	h := host.New()
 	// The API catalog is given the host's own provider directory, so it finds the
 	// parsers, adapters, and invokers this process starts without importing a
@@ -313,9 +328,23 @@ func buildHost() (*host.Host, *sharedCatalog, error) {
 	// automatic exposure path needs the very service the subsystem serves: a host
 	// that registers its own subsystems writes into this store, and the MCP gateway
 	// reads the same one. Two views of one catalog, not two catalogs.
-	catalogStore := apitools.NewMemory(apitools.StoreOptions{})
+	// One policy, read once, held by all three consumers: the catalog that
+	// authorizes exposure, the seeder that asks for it, and the gateway that
+	// reports it. Three readers of one document is the whole point; three policies
+	// that could disagree is the failure.
+	// Named for what it is rather than for its type: the package imported as
+	// "policy" is the reference capability service, and a local of the same name
+	// would shadow it inside the factory map below.
+	surface, from, err := loadPolicy(policyPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if from != "" {
+		fmt.Fprintf(os.Stderr, "toolbox: policy read from %s\n", from)
+	}
+	catalogStore := apitools.NewMemory(apitools.StoreOptions{Policy: surface})
 	catalogService := apitools.NewService(catalogStore, providers)
-	catalog := &sharedCatalog{service: catalogService}
+	catalog := &sharedCatalog{service: catalogService, policy: surface}
 	factories := map[string]subsystem.Factory{
 		"agent": func() (*subsystem.Server, error) { return agent.New(agent.Options{}) },
 		"apitools": func() (*subsystem.Server, error) {
@@ -355,6 +384,7 @@ func buildHost() (*host.Host, *sharedCatalog, error) {
 type sharedCatalog struct {
 	host    *host.Host
 	service *apitools.Service
+	policy  api.Policy
 }
 
 // registerSubsystems describes every started subsystem and stores it in the
@@ -371,6 +401,10 @@ func (c *sharedCatalog) registerSubsystems(ctx context.Context, includeReflectio
 	}
 	return c.host.RegisterInto(ctx, c.service.Registrar(), protocontract.NewDescriptor(protocontract.Descriptor{}), host.SeedOptions{
 		IncludeReflection: includeReflection,
+		// The same document the catalog authorizes with and the gateway reports
+		// with. Three readers of one policy is the point; three policies that could
+		// disagree is the failure.
+		Policy: c.policy,
 	})
 }
 

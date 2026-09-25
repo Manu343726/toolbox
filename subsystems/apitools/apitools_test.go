@@ -29,13 +29,39 @@ func fixedClock() func() time.Time {
 	return func() time.Time { return moment }
 }
 
+// newTestStore builds a store that permits its whole surface, because most of
+// these tests are about the mechanism rather than about the default. The default
+// is deny-everything and is tested once, on its own.
 func newTestStore(t *testing.T, options ...func(*StoreOptions)) *Memory {
 	t.Helper()
-	settings := StoreOptions{Now: fixedClock()}
+	settings := StoreOptions{Now: fixedClock(), Policy: api.AllowAll()}
 	for _, option := range options {
 		option(&settings)
 	}
 	return NewMemory(settings)
+}
+
+func TestACatalogWithNoPolicyRefusesEveryOperation(t *testing.T) {
+	// "No policy" and "every policy" must never be the same value. A catalog nobody
+	// stated a policy for still describes and documents everything it holds; none
+	// of it is callable.
+	store := NewMemory(StoreOptions{Now: fixedClock()})
+	_, _, err := store.RegisterServer(testServer("shop"), false)
+	require.NoError(t, err)
+	target := testAPI("shop-api")
+	target.Services[0].Operations[0].SideEffects = []api.SideEffect{api.SideEffectReadOnly}
+	stored, _, err := store.RegisterAPI(target, "shop", false)
+	require.NoError(t, err)
+
+	assert.Equal(t, api.DenyAll(), store.Policy())
+	_, err = store.SetExposed(stored.ID, "shop-api/pets/getPetById", true)
+	assert.ErrorIs(t, err, ErrNotAllowed,
+		"a read is not permitted by the absence of a policy, however harmless it is")
+
+	// Hiding is always permitted, so a deployment can record a decision either way.
+	changed, err := store.SetExposed(stored.ID, "shop-api/pets/getPetById", false)
+	require.NoError(t, err)
+	assert.False(t, changed)
 }
 
 func testServer(id string) api.Server {
@@ -159,7 +185,6 @@ func TestExposureRequiresPolicyCapabilityAndServerBinding(t *testing.T) {
 	stored, _, err := store.RegisterAPI(testAPI("shop-api"), "shop", false)
 	require.NoError(t, err)
 
-	// The default policy authorizes an operation that declares a capability.
 	changed, err := store.SetExposed(stored.ID, "shop-api/pets/getPetById", true)
 	require.NoError(t, err)
 	assert.True(t, changed)
@@ -176,25 +201,29 @@ func TestExposureRequiresPolicyCapabilityAndServerBinding(t *testing.T) {
 	assert.False(t, store.Exposed("shop-api/pets/getPetById"))
 }
 
-func TestExposureDeniedWithoutDeclaredCapability(t *testing.T) {
-	store := newTestStore(t)
-	_, _, err := store.RegisterServer(testServer("shop"), false)
+func TestExposureIsRefinedByWhatTheOperationDoes(t *testing.T) {
+	// The same class filter, at the catalog: a deployment that permits reads does
+	// not thereby permit the writes sitting beside them.
+	readsOnly, err := api.NewPolicy(api.Rule{
+		Pattern:  "*",
+		Classes:  []api.EffectClass{api.EffectClassRead},
+		Decision: api.DecisionAllow,
+	})
+	require.NoError(t, err)
+	store := newTestStore(t, func(options *StoreOptions) { options.Policy = readsOnly })
+	_, _, err = store.RegisterServer(testServer("shop"), false)
 	require.NoError(t, err)
 
 	target := testAPI("shop-api")
-	// A description nobody declared a capability for must not become a tool.
-	target.Services[0].Operations[0].Capabilities = nil
-	target.Capabilities = nil
+	// A description nobody classified is not a read, so a read grant does not cover
+	// it.
+	target.Services[0].Operations[0].SideEffects = nil
 	stored, _, err := store.RegisterAPI(target, "shop", false)
 	require.NoError(t, err)
 
 	_, err = store.SetExposed(stored.ID, "shop-api/pets/getPetById", true)
 	require.ErrorIs(t, err, ErrNotAllowed)
 
-	// Hiding is always permitted.
-	changed, err := store.SetExposed(stored.ID, "shop-api/pets/getPetById", false)
-	require.NoError(t, err)
-	assert.False(t, changed)
 }
 
 func TestExposureRejectsStreamingOperation(t *testing.T) {

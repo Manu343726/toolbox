@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/cli"
 	"github.com/Manu343726/toolbox/pkg/discovery"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
@@ -18,9 +19,10 @@ import (
 
 // MCPOptions configures the automatically generated `mcp` subcommand.
 type MCPOptions struct {
-	// Policy optionally overrides the feature policy derived from subsystem
-	// service capabilities.
-	Policy toolboxmcp.FeaturePolicy
+	// Policy decides which of the subsystem's operations the generated MCP may
+	// expose. The zero value permits nothing; a command serving one subsystem
+	// states its own, so a user who asked for this subsystem gets this subsystem.
+	Policy api.Policy
 	// InitialExposure controls whether generated feature tools are present
 	// immediately. The zero value exposes all allowed unary features.
 	InitialExposure toolboxmcp.InitialExposure

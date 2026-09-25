@@ -34,10 +34,9 @@ const fixtureService = "toolbox.fixture.v1.CatalogService"
 func startFixtureSubsystem(t *testing.T) *Host {
 	t.Helper()
 	return startSubsystem(t, "fixture", []subsystem.Service{{
-		Name:         fixtureService,
-		Path:         "/" + fixtureService + "/",
-		Handler:      http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
-		Capabilities: []string{api.ParseCapability("openapi"), api.InvokeCapability("http")},
+		Name:    fixtureService,
+		Path:    "/" + fixtureService + "/",
+		Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
 	}})
 }
 
@@ -154,8 +153,8 @@ func describedFixture(t *testing.T) api.API {
 		Services: []api.Service{{
 			Name: fixtureService,
 			Operations: []api.Operation{
-				{Name: "ListThings", Method: "ListThings"},
-				{Name: "DeleteThing", Method: "DeleteThing"},
+				{Name: "ListThings", Method: "ListThings", SideEffects: []api.SideEffect{api.SideEffectReadOnly}},
+				{Name: "DeleteThing", Method: "DeleteThing", SideEffects: []api.SideEffect{api.SideEffectDelete}},
 			},
 		}, {
 			// A second service with no capability behind it: it is registered
@@ -175,7 +174,14 @@ func TestRegisterIntoDescribesAndExposesAHostSubsystem(t *testing.T) {
 	catalog := newMemoryCatalog()
 	describer := &stubDescriber{described: describedFixture(t)}
 
-	result, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{})
+	// The deployment states what it permits. Everything below follows from that
+	// document rather than from what registering discovered.
+	policy, err := api.NewPolicy(
+		api.Rule{Pattern: "fixture/**", Decision: api.DecisionAllow},
+	)
+	require.NoError(t, err)
+
+	result, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{Policy: policy})
 	require.NoError(t, err)
 	require.Len(t, result.Seeded, 1)
 	entry := result.Seeded[0]
@@ -185,7 +191,8 @@ func TestRegisterIntoDescribesAndExposesAHostSubsystem(t *testing.T) {
 	assert.Equal(t, "fixture", entry.APIID)
 	assert.Equal(t, 2, entry.Services, "every service the subsystem serves is registered")
 	assert.Equal(t, 3, entry.Operations)
-	assert.Equal(t, 2, entry.Exposed, "the capabilities the manifest declared cover both operations")
+	assert.Equal(t, 3, entry.Exposed,
+		"the rule names no class, so it is a statement about every operation — including the unclassified one")
 	assert.Equal(t, 1, result.Exposed())
 
 	// The server record is the subsystem's own endpoint.
@@ -196,24 +203,26 @@ func TestRegisterIntoDescribesAndExposesAHostSubsystem(t *testing.T) {
 	assert.Equal(t, "grpc", string(server.Format))
 	assert.Equal(t, "reflection", server.Source.Kind)
 
-	// The capabilities the subsystem's manifest declared reached the description,
-	// joined to the service they belong to.
+	// The description carries what the contract declared, and nothing about what
+	// the deployment permits: a contract cannot state that, and a description is
+	// not where a decision belongs.
 	stored, ok := catalog.apis["fixture"]
 	require.True(t, ok)
 	require.Len(t, stored.Services, 2)
-	assert.Equal(t, []string{api.InvokeCapability("http"), api.ParseCapability("openapi")}, stored.Services[0].Capabilities,
-		"the capabilities the manifest declared, joined to the service they belong to")
+	assert.Empty(t, stored.Services[0].Capabilities,
+		"a description read from a contract states no authorization facts")
+	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, stored.Services[0].Operations[0].SideEffects,
+		"it does state what invoking an operation does")
 
 	// Both operations are exposed, and the seeder asked for exactly those.
 	assert.Contains(t, catalog.exposure, "fixture/"+fixtureService+"/ListThings")
 	assert.Contains(t, catalog.exposure, "fixture/"+fixtureService+"/DeleteThing")
 }
 
-func TestRegisterIntoExposesNothingWithoutACapability(t *testing.T) {
-	// A subsystem whose service declares no capability: its contract is described
-	// and stored, and none of its operations is a tool.
+func TestRegisterIntoExposesNothingWithoutAPolicy(t *testing.T) {
+	// A host nobody stated a policy for: every subsystem is described, registered
+	// and documented, and no operation is offered. A convenience is not a policy.
 	described := describedFixture(t)
-	described.Services[0].Capabilities = nil
 	described.Services[0].Name = "toolbox.bare.v1.BareService"
 	described.ID = "bare"
 	stripped := startSubsystem(t, "bare", []subsystem.Service{{
@@ -228,7 +237,7 @@ func TestRegisterIntoExposesNothingWithoutACapability(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Seeded, 1)
 	assert.Equal(t, 3, result.Seeded[0].Operations)
-	assert.Zero(t, result.Seeded[0].Exposed, "an operation no capability covers is not a tool")
+	assert.Zero(t, result.Seeded[0].Exposed, "no policy permits nothing, so nothing is a tool")
 	assert.Zero(t, result.Exposed())
 	assert.Empty(t, catalog.exposure)
 }
@@ -239,11 +248,13 @@ func TestRegisterIntoReportsWhatPolicyRefuses(t *testing.T) {
 	catalog.exposeFail = true
 	describer := &stubDescriber{described: describedFixture(t)}
 
-	result, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{})
+	permissive, err := api.NewPolicy(api.Rule{Pattern: "*", Decision: api.DecisionAllow})
+	require.NoError(t, err)
+	result, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{Policy: permissive})
 	require.NoError(t, err)
 	// Seeding never forces an operation past a policy: it reports and moves on.
 	assert.Zero(t, result.Seeded[0].Exposed)
-	require.Len(t, result.Warnings, 2, "every operation that asked to be exposed and was refused is reported")
+	require.Len(t, result.Warnings, 3, "every operation that asked to be exposed and was refused is reported")
 	assert.Contains(t, result.Warnings[0], "stays hidden")
 	assert.Empty(t, catalog.exposure)
 }
@@ -307,7 +318,9 @@ func TestGatewayExposesWhatTheCatalogExposed(t *testing.T) {
 	h := startFixtureSubsystem(t)
 	catalog := newMemoryCatalog()
 	describer := &stubDescriber{described: describedFixture(t)}
-	_, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{})
+	permissive, err := api.NewPolicy(api.Rule{Pattern: "*", Decision: api.DecisionAllow})
+	require.NoError(t, err)
+	_, err = h.RegisterInto(context.Background(), catalog, describer, SeedOptions{Policy: permissive})
 	require.NoError(t, err)
 
 	// The catalog is read through the framework's own interfaces, which is what a
@@ -335,7 +348,7 @@ func TestGatewayExposesWhatTheCatalogExposed(t *testing.T) {
 		func(context.Context, api.Call) (api.Result, error) {
 			return api.Result{Status: 200, Body: json.RawMessage(`{"things":[]}`)}, nil
 		},
-	), mcp.APICatalogOptions{})
+	), mcp.APICatalogOptions{Options: mcp.Options{Policy: mcp.APIPolicy()}})
 	require.NoError(t, err)
 
 	features := gateway.Features()
@@ -363,7 +376,7 @@ func TestGatewayExposesWhatTheCatalogExposed(t *testing.T) {
 	}
 	hidden, err := mcp.NewFromAPICatalog(context.Background(), readable, api.InvokerFunc(
 		func(context.Context, api.Call) (api.Result, error) { return api.Result{}, nil },
-	), mcp.APICatalogOptions{})
+	), mcp.APICatalogOptions{Options: mcp.Options{Policy: mcp.APIPolicy()}})
 	require.NoError(t, err)
 	features = hidden.Features()
 	require.Len(t, features, 3)

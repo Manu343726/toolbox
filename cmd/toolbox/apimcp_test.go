@@ -34,10 +34,10 @@ func startThirdPartyServer(t *testing.T) string {
 			"properties": map[string]any{"city": map[string]any{"type": "string", "description": "City name"}},
 			"required":   []any{"city"},
 		},
+		// The server states what calling its tool does, in the vocabulary the MCP
+		// already defines for exactly this. It says nothing about what a deployment
+		// authorizes, which is a different question and not this server's to answer.
 		Annotations: &sdkmcp.ToolAnnotations{ReadOnlyHint: true},
-		// A server that happens to know the framework's extension declares what its
-		// tools grant. One that does not simply omits it.
-		Meta: sdkmcp.Meta{"x-toolbox-capabilities": []any{"weather.read"}},
 	}, func(_ context.Context, request *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 		// A server's handler receives the arguments as the raw JSON the caller sent,
 		// because unmarshalling them is the handler's decision.
@@ -59,7 +59,7 @@ func startThirdPartyServer(t *testing.T) string {
 // its declared capability, and called through an invoker.
 func TestThirdPartyMCPServerBecomesACatalogAPI(t *testing.T) {
 	weather := startThirdPartyServer(t)
-	h, catalog, err := buildHost()
+	h, catalog, err := buildHost("")
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -92,12 +92,14 @@ func TestThirdPartyMCPServerBecomesACatalogAPI(t *testing.T) {
 	operation, found := describable.API.Operation("weather/mcp/forecast")
 	require.True(t, found)
 	assert.Equal(t, "tools/call", operation.Method)
-	assert.Equal(t, []string{"weather.read"}, operation.Capabilities)
+	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, operation.SideEffects,
+		"a third-party server states what its tool does, in the vocabulary MCP already defines")
 
 	stored, _, err := service.Registrar().RegisterAPI(context.Background(), describable.API, server.ID)
 	require.NoError(t, err)
 
-	// The operation is exposed because a declared capability covers it.
+	// The operation is exposed because the default policy grants reads and this
+	// operation declared itself one.
 	changed, err := service.Registrar().SetExposed(context.Background(), stored.ID, operation.ID, true)
 	require.NoError(t, err)
 	assert.True(t, changed, "a declared capability authorizes the operation")
@@ -129,7 +131,7 @@ func TestAnMCPServerWithNoDeclaredCapabilityIsNotExposed(t *testing.T) {
 	bare := httptest.NewServer(handler)
 	defer bare.Close()
 
-	h, catalog, err := buildHost()
+	h, catalog, err := buildHost("")
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -153,7 +155,7 @@ func TestAnMCPServerWithNoDeclaredCapabilityIsNotExposed(t *testing.T) {
 }
 
 func TestMCPIsAnIndexedFormatAndTransport(t *testing.T) {
-	h, _, err := buildHost()
+	h, _, err := buildHost("")
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -197,7 +199,7 @@ func TestGatewayServesADescriptionAsToolsWithoutAnMCPServer(t *testing.T) {
 	// MCP server can be offered to an agent through the in-process gateway — with no
 	// second protocol hop, because the description is already a description.
 	weather := startThirdPartyServer(t)
-	h, catalog, err := buildHost()
+	h, catalog, err := buildHost("")
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -223,14 +225,15 @@ func TestGatewayServesADescriptionAsToolsWithoutAnMCPServer(t *testing.T) {
 		context.Background(),
 		service.Catalog(),
 		service.Invoker(),
-		toolboxmcp.APICatalogOptions{},
+		toolboxmcp.APICatalogOptions{Options: toolboxmcp.Options{Policy: catalog.policy}},
 	)
 	require.NoError(t, err)
 	features := gateway.Features()
 	require.Len(t, features, 1)
 	assert.Equal(t, "mcp__forecast", features[0].ToolName,
 		"the tool is named the way the server named it, so a client already knows it")
-	assert.True(t, features[0].Exposed, "a declared capability exposed it")
+	assert.True(t, features[0].Exposed,
+		"the tool's readOnlyHint is what classified it, and the default policy grants reads")
 	assert.True(t, features[0].Callable)
 
 	// Calling it goes through the catalog's invoker, to the third-party server.

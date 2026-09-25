@@ -62,9 +62,6 @@ func NewFromAPICatalog(ctx context.Context, catalog api.Catalog, invoker api.Inv
 	if options.InitialExposure != ExposeAllowedFeatures && options.InitialExposure != ExposeNoFeatures {
 		return nil, fmt.Errorf("unsupported initial MCP exposure mode %d", options.InitialExposure)
 	}
-	if options.Policy == nil {
-		options.Policy = APIPolicy()
-	}
 	servers, err := catalog.Servers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog servers: %w", err)
@@ -148,24 +145,13 @@ func readExposures(
 	return exposures
 }
 
-// APIPolicy returns the default policy for a catalog-backed server. An operation
-// is allowed when it, its service, or its API declares a capability, which keeps
-// "this API is registered" from meaning "every operation of it is a tool".
-func APIPolicy() FeaturePolicy {
-	return FeaturePolicyFunc(func(serviceName, methodName string) bool {
-		// The catalog applies its own policy to exposure, and this policy only has
-		// to answer for the surface the catalog handed over.
-		return true
-	})
-}
-
 // apiFeatures turns one registered API into candidate features, honouring what
 // the catalog decided about each of them.
 func apiFeatures(
 	described api.API,
 	servers map[string]api.Server,
 	invoker api.Invoker,
-	policy FeaturePolicy,
+	policy api.Policy,
 	exposures map[string]api.Exposure,
 	initialExposure InitialExposure,
 ) []*featureEntry {
@@ -184,7 +170,7 @@ func apiFeatureEntry(
 	operation api.Operation,
 	servers map[string]api.Server,
 	invoker api.Invoker,
-	policy FeaturePolicy,
+	policy api.Policy,
 	exposures map[string]api.Exposure,
 	initialExposure InitialExposure,
 ) *featureEntry {
@@ -214,7 +200,16 @@ func apiFeatureEntry(
 	// seen falls back to the policy, which is what a catalog that predates the
 	// decision cannot object to.
 	exposure, decided := exposures[operation.ID]
-	allowed := policy.AllowFeature(qualified, operation.Name)
+	// The catalog already applied the deployment's policy when it decided exposure,
+	// so the gateway's own policy is only asked about an operation the catalog has
+	// never seen.
+	allowed := policy.Allows(api.OperationFacts{
+		ID:          operation.ID,
+		SideEffects: operation.SideEffects,
+	})
+	if decided && exposure.Allowed {
+		allowed = true
+	}
 	callable := invoker != nil && !operation.Streaming.Streaming() && len(described.ServerIDs) > 0
 	exposed := allowed && callable && initialExposure == ExposeAllowedFeatures
 	switch {
@@ -239,7 +234,7 @@ func apiFeatureEntry(
 			Allowed:         allowed,
 			Exposed:         exposed,
 			Callable:        callable,
-			Capabilities:    tool.Capabilities,
+			SideEffects:     operation.SideEffects,
 		},
 		// The API the operation belongs to is what tells it apart from an
 		// operation in another API that reduces to the same tool name — which

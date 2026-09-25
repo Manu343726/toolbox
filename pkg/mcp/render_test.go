@@ -228,7 +228,7 @@ func TestRenderedToolsAreTheOnesAGatewayOffers(t *testing.T) {
 		api.InvokerFunc(func(context.Context, api.Call) (api.Result, error) {
 			return api.Result{Status: 200, Body: json.RawMessage(`{"name":"rex"}`)}, nil
 		}),
-		APICatalogOptions{},
+		APICatalogOptions{Options: Options{Policy: APIPolicy()}},
 	)
 	require.NoError(t, err)
 	exposed := map[string]bool{}

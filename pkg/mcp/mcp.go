@@ -3,9 +3,10 @@
 // always-available introspection surface, and lets a client reduce its tool
 // footprint by exposing or hiding individual RPC methods at runtime.
 //
-// Reflection supplies schemas and invocation mechanics. A FeaturePolicy is the
-// separate authorization boundary that decides which reflected methods may be
-// exposed or called.
+// Reflection supplies schemas and invocation mechanics. A policy is the separate
+// authorization boundary that decides which operations may be exposed or called,
+// and it is supplied by the deployment rather than derived from what reflection
+// found.
 package mcp
 
 import (
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/discovery"
 	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -75,9 +77,11 @@ type Options struct {
 	Version string
 	// Description is returned to clients as server instructions.
 	Description string
-	// Policy authorizes reflected methods. When nil, metadata exposed by the
-	// source is used; services without explicit capabilities are denied.
-	Policy FeaturePolicy
+	// Policy decides which operations may be exposed. The zero value permits
+	// nothing: a gateway with no policy exposes no tools, because "no policy" and
+	// "every policy" must not be the same value. A deployment that has decided its
+	// whole surface is available says so with APIPolicy.
+	Policy api.Policy
 	// InitialExposure controls which allowed unary features are present in the
 	// initial tools/list surface. The zero value exposes them all; use
 	// ExposeNoFeatures to start with only the management/introspection tools
@@ -91,28 +95,29 @@ type Options struct {
 
 // Feature is one reflected RPC method that can be exposed as an MCP tool.
 type Feature struct {
-	ID              string   `json:"id"`
-	Service         string   `json:"service"`
-	Method          string   `json:"method"`
-	ToolName        string   `json:"tool_name"`
-	Description     string   `json:"description,omitempty"`
-	InputType       string   `json:"input_type,omitempty"`
-	OutputType      string   `json:"output_type,omitempty"`
-	ClientStreaming bool     `json:"client_streaming,omitempty"`
-	ServerStreaming bool     `json:"server_streaming,omitempty"`
-	Allowed         bool     `json:"allowed"`
-	Exposed         bool     `json:"exposed"`
-	Callable        bool     `json:"callable"`
-	Capabilities    []string `json:"capabilities,omitempty"`
+	ID              string `json:"id"`
+	Service         string `json:"service"`
+	Method          string `json:"method"`
+	ToolName        string `json:"tool_name"`
+	Description     string `json:"description,omitempty"`
+	InputType       string `json:"input_type,omitempty"`
+	OutputType      string `json:"output_type,omitempty"`
+	ClientStreaming bool   `json:"client_streaming,omitempty"`
+	ServerStreaming bool   `json:"server_streaming,omitempty"`
+	Allowed         bool   `json:"allowed"`
+	Exposed         bool   `json:"exposed"`
+	Callable        bool   `json:"callable"`
+	// SideEffects are what the contract declared invoking this operation does. An
+	// empty list means the contract said nothing, which is not the same as a read.
+	SideEffects []api.SideEffect `json:"side_effects,omitempty"`
 }
 
 // ServiceSummary is a compact description of one reflected service.
 type ServiceSummary struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description,omitempty"`
-	Features     int      `json:"features"`
-	Exposed      int      `json:"exposed"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Features    int    `json:"features"`
+	Exposed     int    `json:"exposed"`
 }
 
 // featureEntry is one exposable tool plus everything needed to call it. The
@@ -172,9 +177,6 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 		return nil, fmt.Errorf("list MCP source services: %w", err)
 	}
 	sort.Strings(serviceNames)
-	if options.Policy == nil {
-		options.Policy = policyForSource(source, serviceNames)
-	}
 	// Every advertised service is described, and every method it declares is a
 	// candidate. A service a deployment does not want is denied or hidden, not
 	// invisible: what the manifests declare is what the surface offers, and the
@@ -192,13 +194,12 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 		if schema == nil {
 			continue
 		}
-		metadata := serviceMetadata(source, serviceName)
 		for i := range schema.Methods {
 			method := schema.Methods[i]
 			if method.Name == "" || method.Input == nil || method.Output == nil {
 				return nil, fmt.Errorf("service %q contains an invalid reflected method at index %d", serviceName, i)
 			}
-			entry := reflectedEntry(source, serviceName, method, schema, metadata, options)
+			entry := reflectedEntry(source, serviceName, method, schema, options)
 			entries = append(entries, entry)
 			candidates = append(candidates, toolNameOwner{
 				qualified: serviceName,
@@ -230,13 +231,15 @@ func reflectedEntry(
 	serviceName string,
 	method discovery.MethodSchema,
 	schema *discovery.ServiceSchema,
-	metadata ServiceMetadata,
 	options Options,
 ) *featureEntry {
 	qualified := serviceName
-	// The policy answers once per method: an entry decides its own initial
-	// exposure, and both its allowance and its exposure come from here.
-	allowed := options.Policy.AllowFeature(serviceName, method.Name)
+	// The policy answers once per method, over the operation's identifier and
+	// what its contract says invoking it does.
+	allowed := options.Policy.Allows(api.OperationFacts{
+		ID:          featureID(serviceName, method.Name),
+		SideEffects: contractSideEffects(schema.Documentation, method.Name),
+	})
 	entry := &featureEntry{
 		feature: Feature{
 			ID:              featureID(qualified, method.Name),
@@ -250,14 +253,15 @@ func reflectedEntry(
 			Allowed:         allowed,
 			// A streaming method has no unary invocation, so it is listed and
 			// describable but never offered as a tool.
-			Callable: !method.ClientStreaming && !method.ServerStreaming,
+			Callable:    !method.ClientStreaming && !method.ServerStreaming,
+			SideEffects: contractSideEffects(schema.Documentation, method.Name),
 			// The entry decides its own initial exposure, because what a
 			// source can say about it differs: a reflected method knows only
 			// the policy, while a catalog operation also knows what the
 			// catalog decided. An operation that cannot be called is never
 			// exposed, whatever decided that.
-			Exposed:      allowed && !method.ClientStreaming && !method.ServerStreaming && options.InitialExposure == ExposeAllowedFeatures,
-			Capabilities: append([]string(nil), metadata.Capabilities...),
+			Exposed: allowed && !method.ClientStreaming && !method.ServerStreaming &&
+				options.InitialExposure == ExposeAllowedFeatures,
 		},
 		// The endpoint that serves a service is what tells two operations with
 		// the same short name apart, so it is carried with the entry.
@@ -379,31 +383,19 @@ func invokeProto(
 	return encoded, nil
 }
 
-func policyForSource(source Source, serviceNames []string) FeaturePolicy {
-	metadataSource, ok := source.(interface {
-		ServiceMetadata(string) (ServiceMetadata, bool)
-	})
-	if !ok {
-		return DenyAllFeatures()
+// contractSideEffects returns what a contract says invoking a method does.
+//
+// The documentation a reflection read resolved is where that lives: the descriptor
+// set a contract's build embedded, because a generated Go descriptor has no source
+// locations. A method whose contract said nothing has no side effects here, which
+// is the unclassified case a policy has to be told about rather than infer.
+func contractSideEffects(documentation *shareddocs.Service, methodName string) []api.SideEffect {
+	method := documentationMethod(documentation, methodName)
+	if method == nil {
+		return nil
 	}
-	services := make([]ServiceMetadata, 0, len(serviceNames))
-	for _, name := range serviceNames {
-		if metadata, found := metadataSource.ServiceMetadata(name); found {
-			services = append(services, metadata)
-		}
-	}
-	return PolicyFromServices(services)
-}
-
-func serviceMetadata(source Source, serviceName string) ServiceMetadata {
-	if metadataSource, ok := source.(interface {
-		ServiceMetadata(string) (ServiceMetadata, bool)
-	}); ok {
-		if metadata, found := metadataSource.ServiceMetadata(serviceName); found {
-			return metadata
-		}
-	}
-	return ServiceMetadata{}
+	effects, _ := api.SideEffects(method.Annotations)
+	return effects
 }
 
 func documentationMethod(service *shareddocs.Service, methodName string) *shareddocs.Method {
@@ -429,7 +421,7 @@ func (s *Server) Features() []Feature {
 	for _, id := range s.order {
 		entry := s.entries[id]
 		feature := entry.feature
-		feature.Capabilities = append([]string(nil), feature.Capabilities...)
+		feature.SideEffects = append([]api.SideEffect(nil), feature.SideEffects...)
 		result = append(result, feature)
 	}
 	return result
@@ -449,9 +441,8 @@ func (s *Server) Services() []ServiceSummary {
 		summary, ok := byName[entry.feature.Service]
 		if !ok {
 			summary = &ServiceSummary{
-				Name:         entry.feature.Service,
-				Description:  entry.serviceDescription,
-				Capabilities: append([]string(nil), entry.feature.Capabilities...),
+				Name:        entry.feature.Service,
+				Description: entry.serviceDescription,
 			}
 			byName[entry.feature.Service] = summary
 			order = append(order, entry.feature.Service)
@@ -465,7 +456,7 @@ func (s *Server) Services() []ServiceSummary {
 	result := make([]ServiceSummary, 0, len(order))
 	for _, name := range order {
 		summary := byName[name]
-		summary.Capabilities = append([]string(nil), summary.Capabilities...)
+
 		result = append(result, *summary)
 	}
 	return result

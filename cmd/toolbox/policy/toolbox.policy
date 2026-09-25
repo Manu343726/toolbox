@@ -1,0 +1,31 @@
+# The default policy for a Toolbox host.
+#
+# A host registers every subsystem it runs and describes each one from the
+# contract that subsystem serves. What an agent may then call is not a property of
+# that registration: it is this document, and a deployment that wants a different
+# answer supplies a different one.
+#
+# This default grants every read in the deployment and nothing that changes state.
+# It is deliberately the narrower half. Granting writes means naming the
+# deployments and actors that may change something, which is a decision somebody
+# has to make rather than a default somebody has to accept.
+#
+# A policy is a list of rules. Each line is a decision, a pattern over operation
+# identifiers, and optionally the classes of operation it applies to. Patterns are
+# matched most specific first and the first match decides, so a narrow rule can
+# carve an exception out of a broad one:
+#
+#   allow knowledge/**      read write
+#   deny  registry/**       write
+#
+# "*" matches one segment of an identifier and a trailing "**" matches the rest,
+# so "knowledge/**" is every operation of the knowledge API. An identifier is
+# "<api>/<service>/<method>": the API is part of it because three subsystems serve
+# the same contract, and naming one provider has to be possible.
+#
+# The classes are read, write, and unclassified. An operation whose contract
+# declared nothing is unclassified, and it is not a read: a rule that names no
+# class is a statement about every operation, which is how a deployment
+# deliberately trusts one.
+
+allow *  read

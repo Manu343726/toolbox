@@ -51,15 +51,6 @@ type Descriptor struct {
 	// ExcludeServices drops services by full protobuf name, such as the
 	// reflection services a server always exposes.
 	ExcludeServices []string
-	// Documentation supplies the comments a contract was written with.
-	//
-	// A generated Go descriptor omits source locations, so a service read over
-	// reflection arrives with no comments at all — and with them, no declared side
-	// effects. Every contract in this framework embeds its descriptor set, which
-	// was generated with source info and is registered into the process-wide
-	// documentation catalog, so this is where a reader gets them. Empty falls back
-	// to whatever the reflected descriptor carries.
-	Documentation *shareddocs.Catalog
 	// HTTPClient performs reflection reads. The zero value uses a bounded client.
 	HTTPClient *http.Client
 	// Clients supplies pre-built reflection clients, keyed by endpoint, for a
@@ -72,7 +63,6 @@ func NewDescriptor(options Descriptor) *Descriptor {
 	reader := &Descriptor{
 		APIID:           strings.TrimSpace(options.APIID),
 		ExcludeServices: append([]string(nil), options.ExcludeServices...),
-		Documentation:   options.Documentation,
 		HTTPClient:      options.HTTPClient,
 		Clients:         make(map[string]*discovery.Client, len(options.Clients)),
 	}
@@ -263,7 +253,13 @@ func (d *Descriptor) FromEndpoint(ctx context.Context, endpoint string) (api.API
 		}
 		if schema.Descriptor != nil {
 			services = append(services, schema.Descriptor)
-			documented[name] = d.documentationFor(name, schema.Descriptor)
+			// The schema already resolved the service's documentation, preferring the
+			// descriptor set a contract's build embedded over the reflected
+			// descriptor — which carries no source locations at all, and with them no
+			// declared side effects. Reading it from here rather than resolving it
+			// again is what keeps the reflection path and the catalog path agreeing on
+			// what an operation does.
+			documented[name] = schema.Documentation
 		}
 	}
 	if len(services) == 0 {
@@ -347,22 +343,6 @@ func (d *Descriptor) build(
 		return api.API{}, api.WrapError(api.KindInvalid, err, "normalize the described API")
 	}
 	return normalized, nil
-}
-
-// documentationFor returns the documentation for one service.
-//
-// A reader supplied with a documentation catalog prefers it, because a generated
-// Go descriptor omits source locations and a contract's comments live in the
-// descriptor set its build embedded. Without one, the reflected descriptor is all
-// there is, and a service read that way arrives with no declared side effects —
-// which is the safe direction, but leaves every operation unclassified.
-func (d *Descriptor) documentationFor(name string, service protoreflect.ServiceDescriptor) *shareddocs.Service {
-	if d != nil && d.Documentation != nil {
-		if documented, err := d.Documentation.Get(name); err == nil {
-			return &documented
-		}
-	}
-	return shareddocs.ExtractServiceDocumentation(service)
 }
 
 func (d *Descriptor) clientFor(endpoint string) *discovery.Client {

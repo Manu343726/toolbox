@@ -69,7 +69,7 @@ func TestNewFromAPICatalogGeneratesToolsFromDescriptions(t *testing.T) {
 		func(_ context.Context, call api.Call) (api.Result, error) {
 			return api.Result{Status: 200, Body: json.RawMessage(`{"name":"rex"}`)}, nil
 		},
-	), APICatalogOptions{})
+	), APICatalogOptions{Options: Options{Policy: APIPolicy()}})
 	require.NoError(t, err)
 
 	features := server.Features()
@@ -80,7 +80,8 @@ func TestNewFromAPICatalogGeneratesToolsFromDescriptions(t *testing.T) {
 	assert.Equal(t, "getPet", feature.Method)
 	assert.Equal(t, "pets__get_pet", feature.ToolName)
 	assert.Equal(t, "Fetch one pet", feature.Description)
-	assert.Equal(t, []string{"pet.read"}, feature.Capabilities)
+	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, feature.SideEffects,
+		"the feature reports what the description says invoking it does")
 	assert.True(t, feature.Allowed)
 	assert.True(t, feature.Callable)
 	assert.True(t, feature.Exposed, "the default starts with allowed operations exposed")
@@ -91,7 +92,7 @@ func TestNewFromAPICatalogGeneratesToolsFromDescriptions(t *testing.T) {
 }
 
 func TestNewFromAPICatalogBuildsArgumentSchemaFromParameters(t *testing.T) {
-	server, err := NewFromAPICatalog(context.Background(), staticCatalogForTest(), nil, APICatalogOptions{})
+	server, err := NewFromAPICatalog(context.Background(), staticCatalogForTest(), nil, APICatalogOptions{Options: Options{Policy: APIPolicy()}})
 	require.NoError(t, err)
 
 	entry, err := server.lookupFeature("shop.pets/getPet")
@@ -108,7 +109,7 @@ func TestNewFromAPICatalogBuildsArgumentSchemaFromParameters(t *testing.T) {
 }
 
 func TestNewFromAPICatalogWithoutInvokerIsIntrospectableNotCallable(t *testing.T) {
-	server, err := NewFromAPICatalog(context.Background(), staticCatalogForTest(), nil, APICatalogOptions{})
+	server, err := NewFromAPICatalog(context.Background(), staticCatalogForTest(), nil, APICatalogOptions{Options: Options{Policy: APIPolicy()}})
 	require.NoError(t, err)
 
 	features := server.Features()
@@ -124,7 +125,7 @@ func TestNewFromAPICatalogInvokesRegisteredOperation(t *testing.T) {
 			received = call
 			return api.Result{Status: 200, ContentType: "application/json", Body: json.RawMessage(`{"name":"rex"}`)}, nil
 		},
-	), APICatalogOptions{})
+	), APICatalogOptions{Options: Options{Policy: APIPolicy()}})
 	require.NoError(t, err)
 
 	result, err := server.callFeature(context.Background(), "shop.pets/getPet", json.RawMessage(`{"petId":"7"}`))
@@ -147,7 +148,7 @@ func TestNewFromAPICatalogRespectsExposureLifecycle(t *testing.T) {
 		func(context.Context, api.Call) (api.Result, error) {
 			return api.Result{Body: json.RawMessage(`{}`)}, nil
 		},
-	), APICatalogOptions{Options: Options{InitialExposure: ExposeNoFeatures}})
+	), APICatalogOptions{Options: Options{Policy: APIPolicy(), InitialExposure: ExposeNoFeatures}})
 	require.NoError(t, err)
 
 	assert.False(t, server.Features()[0].Exposed)
@@ -172,7 +173,7 @@ func TestNewFromAPICatalogDeniesWhatPolicyRejects(t *testing.T) {
 		context.Background(),
 		staticCatalogForTest(),
 		api.InvokerFunc(func(context.Context, api.Call) (api.Result, error) { return api.Result{}, nil }),
-		APICatalogOptions{Options: Options{Policy: DenyAllFeatures()}},
+		APICatalogOptions{Options: Options{Policy: api.DenyAll()}},
 	)
 	require.NoError(t, err)
 
@@ -201,7 +202,7 @@ func TestNewFromAPICatalogRejectsStreamingAndUnboundOperations(t *testing.T) {
 	catalog := &api.StaticCatalog{RegisteredAPIs: []api.API{normalized}}
 	server, err := NewFromAPICatalog(context.Background(), catalog, api.InvokerFunc(
 		func(context.Context, api.Call) (api.Result, error) { return api.Result{}, nil },
-	), APICatalogOptions{})
+	), APICatalogOptions{Options: Options{Policy: APIPolicy()}})
 	require.NoError(t, err)
 
 	features := server.Features()
@@ -215,7 +216,7 @@ func TestNewFromAPICatalogRejectsStreamingAndUnboundOperations(t *testing.T) {
 }
 
 func TestNewFromAPICatalogRejectsMissingCatalog(t *testing.T) {
-	_, err := NewFromAPICatalog(context.Background(), nil, nil, APICatalogOptions{})
+	_, err := NewFromAPICatalog(context.Background(), nil, nil, APICatalogOptions{Options: Options{Policy: APIPolicy()}})
 	require.Error(t, err)
 }
 

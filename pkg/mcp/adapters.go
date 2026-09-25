@@ -42,10 +42,7 @@ func NewFromResolver(ctx context.Context, resolver core.Resolver, serviceNames [
 			return nil, fmt.Errorf("resolve MCP service %q: %w", serviceName, err)
 		}
 		key := endpoint.Name + "\x00" + endpoint.URL
-		metadata := ServiceMetadata{
-			Name:         serviceName,
-			Capabilities: append([]string(nil), endpoint.Capabilities...),
-		}
+		metadata := ServiceMetadata{Name: serviceName}
 		if existing, ok := byEndpoint[key]; ok {
 			existing.Services = append(existing.Services, metadata)
 			continue
@@ -97,21 +94,27 @@ func newFromSubsystemServices(ctx context.Context, server *subsystem.Server, req
 	for _, name := range requested {
 		wanted[name] = true
 	}
-	metadata := make([]ServiceMetadata, 0, len(server.Services()))
+	names := make([]string, 0, len(server.Services()))
 	for _, service := range server.Services() {
 		if len(wanted) > 0 && !wanted[service.Name] {
 			continue
 		}
-		metadata = append(metadata, ServiceMetadata{
-			Name:         service.Name,
-			Capabilities: append([]string(nil), service.Capabilities...),
-		})
+		names = append(names, service.Name)
 	}
-	if len(requested) > 0 && len(metadata) != len(requested) {
+	if len(requested) > 0 && len(names) != len(requested) {
 		return nil, fmt.Errorf("one or more requested services are not mounted by subsystem %q", server.Descriptor().SubsystemName)
 	}
-	if options.Policy == nil {
-		options.Policy = PolicyFromServices(metadata)
+	metadata := make([]ServiceMetadata, 0, len(names))
+	for _, name := range names {
+		metadata = append(metadata, ServiceMetadata{Name: name})
+	}
+	// A standalone subsystem's MCP is that subsystem's own surface, and the
+	// composition that launched it is the deployment — so it states the policy
+	// rather than leaving the gateway to guess one. A gateway with no policy
+	// exposes nothing, which is right for a host serving many subsystems and wrong
+	// for a command serving exactly the one the user asked for.
+	if options.Policy.Len() == 0 && options.InitialExposure == ExposeAllowedFeatures {
+		options.Policy = APIPolicy()
 	}
 	endpoint := ServiceEndpoint{
 		Name:     server.Descriptor().SubsystemName,
@@ -129,7 +132,6 @@ func newFromSubsystemServices(ctx context.Context, server *subsystem.Server, req
 // descriptors. This is used by the combined host's global `mcp` command.
 func NewFromDescriptors(ctx context.Context, descriptors []*subsystem.Descriptor, options Options) (*Server, error) {
 	endpoints := make([]ServiceEndpoint, 0, len(descriptors))
-	allMetadata := make([]ServiceMetadata, 0)
 	for _, descriptor := range descriptors {
 		if descriptor == nil {
 			continue
@@ -139,21 +141,18 @@ func NewFromDescriptors(ctx context.Context, descriptors []*subsystem.Descriptor
 		}
 		metadata := make([]ServiceMetadata, 0, len(descriptor.ServiceNames))
 		for _, serviceName := range descriptor.ServiceNames {
-			metadata = append(metadata, ServiceMetadata{
-				Name:         serviceName,
-				Capabilities: append([]string(nil), descriptor.Capabilities...),
-			})
+			metadata = append(metadata, ServiceMetadata{Name: serviceName})
 		}
-		allMetadata = append(allMetadata, metadata...)
 		endpoints = append(endpoints, ServiceEndpoint{
 			Name:     descriptor.SubsystemName,
 			URL:      descriptor.Endpoint,
 			Services: metadata,
 		})
 	}
-	if options.Policy == nil {
-		options.Policy = PolicyFromServices(allMetadata)
-	}
+	// Nothing is derived from the descriptors here. A host serves many subsystems
+	// at once, so which of their operations an agent may call is the deployment's
+	// decision and the composition supplies it; a gateway with no policy exposes
+	// introspection only.
 	source, err := NewEndpointSource(endpoints...)
 	if err != nil {
 		return nil, err
