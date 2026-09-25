@@ -3,6 +3,8 @@
 Status: accepted<br>
 Date: 2026-09-25
 Supersedes nothing. Extends [ADR-0004](0004-api-introspection-and-providers.md).
+The "thin provider" rule stands; the capability manifest this record describes is
+replaced by [ADR-0008](0008-authorization-by-name-and-side-effect.md).
 
 ## Context
 
@@ -84,8 +86,8 @@ catalog directly:
    nothing about what a deployment authorizes — so the join happens at registration.
 3. Store the description, and expose the operations a declared capability covers.
 
-Nothing is written per subsystem, and nothing is exposed that no capability covers.
-A subsystem whose services are all platform plumbing is skipped, with a reason.
+Nothing is written per subsystem, and nothing is exposed that the deployment's
+policy does not permit.
 
 The MCP gateway can then build its surface from that catalog instead of from
 reflection. Both surfaces name the same operations identically, so switching the

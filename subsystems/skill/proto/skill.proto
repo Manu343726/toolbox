@@ -29,7 +29,9 @@ message Skill {
   string description = 4;
   // Instruction body or a reference to a packaged instruction.
   string instructions = 5;
-  // Capability references required by the skill.
+  // Names the skill requires, such as the tools it calls. They are the
+  // deployment's own identifiers: this framework does not define a vocabulary
+  // here, so a skill names what it needs and a deployment decides what that means.
   repeated string required_capabilities = 6;
   // Policy references required by the skill.
   repeated string policy_refs = 7;

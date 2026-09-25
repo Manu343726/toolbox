@@ -16,8 +16,8 @@ runtime dependency, or reviewing whether a design preserves composability.
 - Do not import another feature subsystem from implementation code.
 - Put reusable behavior in a public root package such as `pkg/core`,
   `pkg/discovery`, `pkg/subsystem`, `pkg/docs`, or `pkg/cli`.
-- Represent cross-subsystem dependencies as capabilities or service references,
-  not Go package references.
+- Represent cross-subsystem dependencies as service references or declared
+  dependencies, not Go package references.
 
 ## Runtime checklist
 
@@ -26,7 +26,9 @@ runtime dependency, or reviewing whether a design preserves composability.
 - Use generated clients with `core.Bind` for known contracts.
 - Use dynamic discovery only when the contract is not linked.
 - Fail clearly when a required service is unavailable.
-- Make service metadata, capabilities, side effects, and dependencies explicit.
+- Declare what invoking a method does in its own comment, with
+  `@toolbox.side-effects`, and leave anything undeclared unclassified.
+- Make service metadata, declared dependencies, and provider records explicit.
 - Ensure the subsystem can run standalone without the combined host.
 
 ## Review questions

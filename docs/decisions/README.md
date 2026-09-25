@@ -10,6 +10,7 @@ implicitly while implementing features.
 - [ADR-0005: Reusable packages behind thin provider subsystems](0005-reusable-packages-behind-thin-providers.md)
 - [ADR-0006: Model Context Protocol as a format and a target](0006-mcp-as-a-format-and-target.md)
 - [ADR-0007: One rule for every feature](0007-one-rule-for-every-feature.md)
+- [ADR-0008: Authorization by name and side effect](0008-authorization-by-name-and-side-effect.md)
 
 An ADR is accepted when the decision is implemented, documented, and covered by
 tests. A proposal that changes one of these boundaries should add a new ADR and

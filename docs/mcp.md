@@ -26,8 +26,8 @@ tools       tools       tool
 ```
 
 Reflection is used to discover schemas and to invoke unknown unary methods. It
-is not the authorization mechanism. `mcp.FeaturePolicy` is the explicit
-boundary that decides which reflected methods may be exposed or called.
+is not the authorization mechanism. An `api.Policy` is the explicit boundary that
+decides which operations may be exposed or called, and the deployment supplies it.
 
 ## Feature model
 
@@ -37,15 +37,17 @@ A feature is one reflected RPC method:
 - generated tool name: `<short-service>__<method>`, for example
   `workflow__get_workflow`
 - protobuf input and output descriptors
-- documentation extracted from protobuf comments
-- service capability metadata
+- documentation extracted from protobuf comments, including the side effects the
+  comment declared
 - streaming and callable flags
 - allowed and exposed state
 
-A service with explicit capabilities is eligible for method exposure. A service
-without capabilities is denied by default. External sources can provide a
-`ServiceMetadata.AllowedMethods` list to narrow a service to an explicit
-method allow-list.
+An operation is eligible for exposure when the deployment's policy permits it. The
+policy is a document of rules over operation identifiers and effect classes; the
+zero policy permits nothing, and `APIPolicy()` permits everything for a composition
+that has decided its surface — a standalone subsystem command serving the one
+subsystem the user asked for. See
+[`decisions/0008-authorization-by-name-and-side-effect.md`](decisions/0008-authorization-by-name-and-side-effect.md).
 
 Only unary methods become generated tools. Streaming methods remain visible in
 introspection with `callable: false` and produce a clear error if an agent tries
@@ -58,7 +60,7 @@ is empty:
 
 | Tool | Purpose |
 |---|---|
-| `list_services` | List represented services, feature counts, exposure totals, and capabilities |
+| `list_services` | List represented services, feature counts, and exposure totals |
 | `list_features` | List allowed features, including hidden ones; optionally include policy-denied methods |
 | `describe_feature` | Return input/output JSON Schema, metadata, exposure state, and documentation |
 | `read_feature_documentation` | Read feature documentation without exposing the generated tool |
@@ -170,7 +172,7 @@ model can be read from and rendered into:
 - **Read a server.** `mcp.Describe(ctx, endpoint, options)` reads a live server's
   own tool list into a description, the way a gRPC endpoint is read out of its
   reflection. A third-party MCP server is registered in the catalog like anything
-  else, exposed by a declared capability, and called through an invoker.
+  else, classified by what its tool annotations say, and called through an invoker.
 - **Read a manifest.** `mcp.DescribeDocument` reads a published manifest, so an API
   published earlier — or carried in a configuration file — can be registered with no
   server running.
@@ -181,11 +183,12 @@ model can be read from and rendered into:
 - **Call a tool.** `mcp.Invoker` calls one, keeping a protocol session per endpoint
   rather than reopening a conversation per call.
 
-A tool manifest states no authorization facts. Capabilities stay empty unless the
-server declared the `x-toolbox-capabilities` extension, so a third-party MCP server
-is not a fully exposed tool surface the moment it is registered — an operation
-nobody declared a capability for is described, not exposed. What a tool *does* say
-about its consequences is carried as side effects, from its annotations.
+A tool manifest states what calling a tool does, in the annotations the protocol
+already defines for that, and nothing about who may call it. So a third-party MCP
+server is not a fully exposed tool surface the moment it is registered: a tool whose
+`readOnlyHint` is set is classified as a read and a policy that grants reads covers
+it, and a tool that declares nothing arrives unclassified, which a read grant does
+not cover.
 
 The provider subsystem `subsystems/apimcp` serves all three contracts for a
 deployment that needs them addressable. Its serving face refuses, and says why:
@@ -276,15 +279,17 @@ source, err := mcp.NewEndpointSource(mcp.ServiceEndpoint{
     Name: "workflow",
     URL:  "http://127.0.0.1:9000",
     Services: []mcp.ServiceMetadata{{
-        Name:         "toolbox.workflow.v1.WorkflowService",
-        Capabilities: []string{"workflow.definition.read"},
+        Name: "toolbox.workflow.v1.WorkflowService",
     }},
 })
 if err != nil {
     return err
 }
 bridge, err := mcp.New(ctx, source, mcp.Options{
-    Policy:          mcp.AllowAllFeatures(),
+    // A remote aggregate needs a policy the operator chose. The zero policy is
+    // deny-everything, which is the right default for an endpoint this process did
+    // not start.
+    Policy:          mcp.APIPolicy(),
     InitialExposure: mcp.ExposeNoFeatures,
 })
 ```
@@ -299,11 +304,12 @@ footprints are a planned enhancement.
 
 - A reflected method is not callable until the feature policy allows it.
 - `call_rpc` checks the same policy and exposure state as generated tools.
-- Mutating methods should be declared in service capabilities and later in a
+- Mutating methods are classified in the contract's own comment
   method-level policy layer with required permissions and approval metadata.
 - MCP exposure does not replace the subsystem's own authentication,
   authorization, policy, or audit checks.
-- Do not expose a remote endpoint with `AllowAllFeatures` unless it is trusted.
+- Do not expose a remote endpoint with `APIPolicy()` unless it is trusted, and
+  prefer a document that names what is permitted over one that permits everything.
 - Keep generated MCP bound to loopback or protect the HTTP endpoint with the
   deployment's authentication and origin controls.
 
@@ -313,9 +319,12 @@ footprints are a planned enhancement.
   explicitly.
 - HTTP exposure state is process-wide until per-session MCP servers are added.
 - Exposure is not persisted across restarts.
-- The default capability policy is service-level; use
-  `ServiceMetadata.AllowedMethods` or a custom `FeaturePolicy` for
-  method-level authorization.
+- The default policy is the zero policy, which permits nothing. A host reads one
+  from `cmd/toolbox/policy/toolbox.policy` unless `--policy` supplies another, and
+  the policy subsystem is where a centrally held document will live.
+- There is no per-actor authorization on this path. A policy decides what a
+  deployment exposes; a decision about *who* may do it at call time is the policy
+  subsystem's `Evaluate`, which is not wired into the gateway yet.
 - Tool annotations such as destructive/read-only hints are not inferred from
   provider or subsystem metadata yet.
 - Authentication, secret propagation, and durable exposure policy belong to

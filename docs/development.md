@@ -64,7 +64,7 @@ GOWORK=off make -C subsystems/workflow test
 
 ## Adding a subsystem
 
-1. Choose a stable subsystem name and capability namespace.
+1. Choose a stable subsystem name and a versioned contract package.
 2. Create `subsystems/<name>/` with its own `go.mod` and Makefile.
 3. Add one or more versioned `.proto` files under `subsystems/<name>/proto/`.
 4. Generate Go and ConnectRPC code through `make proto`.
@@ -109,8 +109,9 @@ metadata. Keep implementation state private to the subsystem.
 
 For side effects:
 
-- declare capabilities and required permissions;
-- classify mutating/external actions;
+- declare required permissions, and classify what an invocation does in the
+  contract's own comment;
+- evaluate policy before invocation;
 - evaluate policy before invocation;
 - use canonical ConnectRPC errors;
 - propagate context deadlines and cancellation.
@@ -140,19 +141,22 @@ names, flags, help comments, request construction, output, and errors.
 ## Adding MCP exposure
 
 `pkg/cliapp` automatically adds an `mcp` subcommand to every standalone
-subsystem command. It uses `pkg/mcp` to reflect the mounted services, derive a
-feature policy from explicit service capabilities, and serve MCP over stdio.
+subsystem command. It uses `pkg/mcp` to reflect the mounted services, authorize
+them with the deployment's policy, and serve MCP over stdio. A standalone command
+serving the one subsystem the user asked for states that whole surface is
+available; a host serving many subsystems reads a policy document, because
+"everything" is not a decision several subsystems can share.
 No RPC-specific MCP code belongs in a subsystem command.
 
 When adding a subsystem:
 
-1. Declare the service capabilities used by the MCP feature policy.
+1. Classify each method in its own comment, with `@toolbox.side-effects`. A method
+   that declares nothing is unclassified, and a policy that grants reads will not
+   cover it. See [`docs/policy.md`](policy.md).
 2. Keep streaming methods documented; they remain introspectable but are not
    generated as unary tools.
 3. Test the generated command tree and the MCP vertical slice when the contract
    changes.
-4. Use `mcp.ServiceMetadata.AllowedMethods` or a custom `FeaturePolicy` when
-   service-level capabilities are too broad.
 
 The combined host's `toolbox mcp` command aggregates the descriptors of the
 selected subsystems. Use `--component` for subsystem selection and `--service`

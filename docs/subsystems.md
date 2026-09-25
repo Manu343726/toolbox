@@ -9,8 +9,8 @@ composition; they are not yet production storage or AI execution engines.
 | Subsystem | Service contract | Current responsibility | Programmatic entrypoint | Maturity |
 |---|---|---|---|---|
 | `workflow` | `toolbox.workflow.v1.WorkflowService` | Store, list, retrieve, and validate versioned workflow definitions | `workflow.New(workflow.Options{})` | Reference CRUD/validation |
-| `agent` | `toolbox.agent.v1.AgentService` | Store versioned provider-neutral agent profiles and capability references | `agent.New(agent.Options{})` | Reference CRUD |
-| `skill` | `toolbox.skill.v1.SkillService` | Store versioned reusable skills and required capability/policy references | `skill.New(skill.Options{})` | Reference CRUD |
+| `agent` | `toolbox.agent.v1.AgentService` | Store versioned provider-neutral agent profiles and tool references | `agent.New(agent.Options{})` | Reference CRUD |
+| `skill` | `toolbox.skill.v1.SkillService` | Store versioned reusable skills and the names they require | `skill.New(skill.Options{})` | Reference CRUD |
 | `prompt` | `toolbox.prompt.v1.PromptService` | Store versioned templates and render simple variables | `prompt.New(prompt.Options{})` | Reference CRUD/rendering |
 | `knowledge` | `toolbox.knowledge.v1.KnowledgeService` | Store sources and perform deterministic metadata search | `knowledge.New(knowledge.Options{})` | Reference metadata search |
 | `model` | `toolbox.model.v1.ModelService` | List provider-neutral models and invoke a deterministic reference provider | `model.New(model.Options{})` | Reference provider |
@@ -29,9 +29,10 @@ composition; they are not yet production storage or AI execution engines.
 ## Provider subsystems
 
 A provider subsystem implements one of the framework's three extension contracts. It
-owns no feature contract of its own, and it declares what it does through the
-capabilities it advertises, so a deployment can find it without the framework
-knowing it exists.
+owns no feature contract of its own, and it declares what it does by exporting
+`[]api.Provider` records — which formats it reads, which representations it
+renders, which transports it reaches — so a deployment can find it without the
+framework knowing it exists.
 
 A provider subsystem holds no behaviour. The work lives in a reusable root package —
 `pkg/protocontract` for protobuf contracts, `pkg/openapi` for OpenAPI documents, and
@@ -137,8 +138,8 @@ over the contracts.
 - A feature subsystem may import root foundation packages.
 - A feature subsystem must not import another feature subsystem.
 - The combined host may import all built-in modules to compose them.
-- Runtime dependencies are represented by registry capabilities and service
-  references, not Go imports.
+- Runtime dependencies are represented by registry service references and declared
+  dependencies, not Go imports.
 - A third-party service can replace a built-in service if it exposes the same
   contract and metadata through ConnectRPC/reflection/registry.
 - `pkg/cliapp` adds an `mcp` command to each standalone subsystem automatically.

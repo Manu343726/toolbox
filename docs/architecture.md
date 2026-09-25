@@ -160,7 +160,7 @@ SDK behavior.
 | `pkg/cli`       | Cobra command generator driven by reflected methods and documentation            |
 | `pkg/cliapp`    | Shared standalone-command runner; adds the automatic `mcp` subcommand to every subsystem command |
 | `pkg/mcp`       | MCP gateway built from a reflected source: feature catalog, exposure state, policy gating, introspection tools, stdio and HTTP transports |
-| `pkg/host`      | Composes independently built subsystem factories in one process; aggregates their descriptors for the combined MCP; derives the API provider set from started subsystems' capabilities |
+| `pkg/host`      | Composes independently built subsystem factories in one process; registers what it runs in a catalog; holds the API provider directory a deployment fills |
 | `pkg/api`       | Standard, provider-neutral description of an API: `API`, `Service`, `Operation`, `Schema`, `Server`, plus indexed format and transport descriptors and the framework's own extension contract. Also the framework's Go interfaces — `Catalog`, `Registrar`, `Invoker`, `ExposureSource` — and the failure classification every provider reports |
 | `pkg/protocontract` | Reads a protobuf service contract, from a FileDescriptorSet or a live endpoint's reflection, and calls the operations it declares. A plain Go package: no transport, no service registration |
 | `pkg/openapi`   | Reads, renders, serves, and calls APIs described by OpenAPI 3.x documents, with no transport of its own |
@@ -205,11 +205,18 @@ enumerates.
 
 Three contracts form the extension surface, each implemented by a subsystem:
 
-| Contract              | Direction                                    | Capability prefix  |
+| Contract              | Direction                                    | Provider record    |
 | --------------------- | -------------------------------------------- | ------------------ |
-| `ApiParserService`    | description document → standard description   | `api.parse.<fmt>`  |
-| `ApiAdapterService`   | standard description → target representation  | `api.render.<tgt>` |
-| `ApiInvokerService`   | operation + server → live response            | `api.invoke.<tr>`  |
+| `ApiParserService`    | description document → standard description   | `Formats`          |
+| `ApiAdapterService`   | standard description → target representation  | `Targets`          |
+| `ApiInvokerService`   | operation + server → live response            | `Transports`       |
+
+A provider declares itself. Each provider subsystem exports `[]api.Provider` records
+saying which formats it reads, which representations it renders, and which
+transports it reaches, and the composition hands those records to the provider
+directory. The role a provider plays is a field of its record rather than something
+recognized from a string, so a format a user adds is claimed by whoever implements
+it and by nothing that has to learn its name.
 
 An adapter reads only the standard description, so rendering a protobuf contract
 as an OpenAPI document is the same operation as the reverse. An adapter also
@@ -219,10 +226,9 @@ alongside the description. The OpenAPI provider reserves paths for the target's
 Swagger UI and a downloadable schema, and refuses a base path that would collide
 with a path it generates.
 
-Providers are discovered from the capabilities a started subsystem declares, and
-bound by provider identifier through the generated framework clients. A provider is
-never bound by service name, because several providers serve the same contract on
-purpose and a name cannot tell them apart.
+Providers are bound by provider identifier through the generated framework clients. A
+provider is never bound by service name, because several providers serve the same
+contract on purpose and a name cannot tell them apart.
 
 The catalog subsystem — `subsystems/apitools` — stores servers, API descriptions,
 the indexed format and transport descriptors, and operation exposure, and routes
@@ -241,20 +247,20 @@ process can reach it; a host that has both in one process calls the package. See
 ### Automatic exposure of a host's own subsystems
 
 A host can register what it runs in the catalog, with nothing written per subsystem:
-
 1. Each started subsystem's contract is read from the subsystem itself.
-2. The capabilities its manifest declared are attached to the services they belong
-   to, because a contract cannot state them.
-3. The description is stored and bound to the subsystem's endpoint.
-4. The operations a declared capability covers are exposed. An operation no
-   capability covers is not a tool, and an operation the catalog's policy refuses
-   is reported rather than forced.
+2. The description is stored and bound to the subsystem's endpoint. What invoking an
+   operation does comes from the contract itself, read out of the descriptor set
+   its build embedded.
+3. The operations the deployment's policy permits are exposed. The policy is a
+   document, and the zero policy permits nothing, so a host nobody stated a policy
+   for registers and describes every subsystem it runs while offering none of their
+   operations. An operation the catalog refuses is reported rather than forced.
 
 Every started subsystem is registered whole. Nothing is left out because of what it
 happens to serve: health, the registry, and the framework's own extension contracts
 are services like any other, and a provider subsystem exists to serve the extension
-contracts. Whether an agent gets one is decided by whether it declared a capability
-and whether the deployment exposes it, never by a list of service names. A
+contracts. Whether an agent gets one is decided by what the contract says invoking
+it does and by the deployment's policy, never by a list of service names. A
 deployment that wants a service out of the catalog says so by name.
 
 The MCP gateway can build its tool surface from that catalog, naming the same
@@ -267,20 +273,60 @@ alone, so a name an agent already learned does not change.
 The Model Context Protocol is itself one of these formats, in the same package that
 serves it: a live MCP server is read through its own tool list, a published manifest
 is read as a document, and a description is rendered as a manifest. Reading a server
-states no capabilities, so a third-party MCP server's operations stay unexposable
-until a deployment declares what it authorizes.
+states only what its tools do, in the annotations the protocol already defines for
+that, and nothing about who may call them. A tool that declares nothing arrives
+unclassified, which a read-granting policy does not cover.
 
 See [`decisions/0004-api-introspection-and-providers.md`](decisions/0004-api-introspection-and-providers.md)
 for the decision and its consequences.
+
+### What a deployment permits
+
+Two facts, kept apart, and a decision made from them.
+
+A **contract** says what invoking a method does, in its own comment:
+
+```proto
+// @toolbox.side-effects read_only
+rpc GetPet(GetPetRequest) returns (Pet);
+```
+
+A **policy** says which of those a deployment permits:
+
+```text
+allow *                              read
+deny  registry/**                    write read unclassified
+allow  knowledge/**                  write read unclassified
+```
+
+Each line is a decision, a pattern over operation identifiers, and the effect
+classes it applies to. `*` matches one segment and a trailing `**` matches the
+rest; the identifier is `<api>/<service>/<method>`, so naming one provider of a
+shared contract is possible. The most specific matching rule decides, so a broad
+grant and a narrow refusal coexist and neither depends on the order they were
+written in. Nothing matched is a refusal, and the empty policy refuses everything:
+`AllowAll` is written down, because "no policy" and "every policy" must never be
+the same value.
+
+An operation whose contract declared nothing is unclassified, and unclassified is
+its own class rather than a read. A rule naming the read class does not cover it; a
+rule naming no class does, which is how a deployment deliberately trusts one.
+
+The default is a document — `cmd/toolbox/policy/toolbox.policy`, which grants every
+read and nothing that changes state — because a deployment's answer to "what may an
+agent call" should be something a person wrote and can replace, not a value hidden
+in a constructor. `--policy` supplies another one.
+
+See [`decisions/0008-authorization-by-name-and-side-effect.md`](decisions/0008-authorization-by-name-and-side-effect.md).
 
 ## 8. MCP gateway
 
 The public `pkg/mcp` package turns a reflected ConnectRPC source into an MCP
 server. It uses protobuf reflection for schemas and dynamic unary invocation,
-but keeps authorization in an explicit `FeaturePolicy`:
+but keeps authorization in the deployment's policy:
 
 ```text
-reflected service + explicit capability policy
+reflected service + the deployment's policy
                 │
                 ▼
         feature catalog (service/method)
@@ -304,13 +350,15 @@ one instance over all selected host descriptors. Introspection tools remain
 available when the initial feature surface is empty, allowing an agent to
 list, read documentation for, expose, and hide individual methods.
 
-Every service a subsystem serves is a candidate. A tool appears because a
-capability was declared for it and the deployment exposed it, not because of
-what its service is called, so a health check and a provider's extension
-contract are treated exactly like a feature subsystem's own operations. Only
-the protocol's reflection services are left out, because they provide no
-capability to expose. See [`decisions/0007-one-rule-for-every-feature.md`](decisions/0007-one-rule-for-every-feature.md)
-and [`docs/mcp.md`](mcp.md) for the tool contract and deployment commands.
+Every service a subsystem serves is a candidate. A tool appears because the
+contract says what invoking it does and the deployment's policy covers that, not
+because of what its service is called, so a health check and a provider's
+extension contract are treated exactly like a feature subsystem's own operations.
+Only the protocol's reflection services are left out, because they provide nothing
+to expose. See
+[`decisions/0007-one-rule-for-every-feature.md`](decisions/0007-one-rule-for-every-feature.md)
+and [`decisions/0008-authorization-by-name-and-side-effect.md`](decisions/0008-authorization-by-name-and-side-effect.md)
+for the tool contract and the deployment commands.
 
 ## 9. Composition modes
 
@@ -373,7 +421,7 @@ feature's database directly. Cross-subsystem state is exchanged through:
 - artifact references;
 - explicit events;
 - registry metadata;
-- policy and capability declarations.
+- policy documents.
 
 The current reference stores are in-memory. Persistence interfaces and SQLite
 adapters are planned work.
@@ -384,12 +432,13 @@ A third-party subsystem is compatible when it:
 
 1. serves a ConnectRPC contract from its own module;
 2. exposes gRPC reflection;
-3. publishes a registry descriptor with capabilities and dependencies;
+3. publishes a registry descriptor with its services and dependencies;
 4. follows the same metadata and error conventions;
 5. can be resolved through `core.Resolver`.
 
-Reflection alone is insufficient for agent exposure. A service must explicitly
-declare tool capabilities, side effects, permissions, and policy requirements.
+Reflection alone is insufficient for agent exposure. A contract must state what
+invoking each method does, and a policy must permit it. A method that states
+nothing is unclassified, and no policy that grants reads covers it.
 
 ## 12. Architectural constraints
 

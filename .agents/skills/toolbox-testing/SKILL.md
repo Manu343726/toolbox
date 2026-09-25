@@ -16,7 +16,7 @@ Every subsystem must have tests for:
 - input validation and invalid protobuf fields;
 - not-found and duplicate/conflict paths;
 - ConnectRPC error-code mapping;
-- capability, policy, or permission metadata;
+- declared side effects, policy evaluation, or permission metadata;
 - shutdown, expiry, or cancellation when lifecycle state is involved.
 
 Shared foundation packages need focused unit tests plus integration tests when

@@ -46,7 +46,7 @@ Every subsystem should cover the following where applicable:
 | Store/state | create, replace, version selection, filtering, deterministic ordering |
 | Handler | valid request, invalid request, not found, duplicate/conflict |
 | RPC boundary | response values and canonical ConnectRPC status codes |
-| Metadata | capabilities, permissions, side effects, dependencies |
+| Metadata | declared side effects, permissions, dependencies |
 | Lifecycle | startup, readiness, cancellation, shutdown, expiry |
 | Concurrency | race-safe access and watcher behavior |
 | Integration | reflection, typed calls, dynamic calls, generated CLI where relevant |

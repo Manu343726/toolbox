@@ -64,12 +64,12 @@ Read these before making architectural changes:
    calls are for unknown external contracts and must not replace typed contracts
    when a generated client is available.
 
-7. **Reflection does not authorize a method as an agent tool.** Capabilities,
-   side effects, permissions, and approval requirements must be explicit in the
-   subsystem manifest or a policy layer. Registering an API, describing a
-   subsystem, or starting a gateway never exposes an operation on its own: only a
-   declared capability authorizes one, and a policy that refuses it is reported
-   rather than overridden.
+7. **Reflection does not authorize an operation as an agent tool.** A contract
+   states what invoking a method does, in its own comment; a policy states who may
+   invoke it. Those are separate facts and neither is derived from the other.
+   Registering an API, describing a subsystem, or starting a gateway never exposes
+   an operation on its own: only a policy permits one, and a policy that refuses it
+   is reported rather than overridden. The empty policy permits nothing.
 
 8. **Provider-specific code stays behind a subsystem boundary.** Core workflow,
    agent, skill, and knowledge contracts must not contain OpenAI, Anthropic, or
@@ -198,10 +198,11 @@ SQLite files, or temporary artifacts to Git.
 - Use context deadlines and propagate cancellation through outbound calls.
 - Return canonical ConnectRPC error codes (`InvalidArgument`, `NotFound`,
   `Unavailable`, `PermissionDenied`, and so on).
-- Validate identifiers, endpoints, capability names, and policy references at
+- Validate identifiers, endpoints, policy patterns, and policy references at
   subsystem boundaries.
-- Keep side effects behind explicit capabilities. Mutating or external actions
-  must be distinguishable in manifests and policy evaluation.
+- Keep side effects declared in the contract that has them. A method states what
+  invoking it does with `@toolbox.side-effects`; a method that declares nothing is
+  unclassified, and unclassified is not a read.
 - Do not log secrets, tokens, or full sensitive request payloads.
 - Prefer immutable definitions and explicit versions for domain resources.
 - Streaming methods must be represented in descriptors and tested explicitly;
@@ -219,7 +220,7 @@ Minimum expectations for a subsystem:
   and deterministic ordering.
 - Handler tests: valid requests, invalid requests, not-found behavior, and
   ConnectRPC error-code assertions.
-- Boundary tests: validation and capability/policy metadata.
+- Boundary tests: validation, declared side effects, and policy evaluation.
 - Concurrency tests when shared state, watchers, or lifecycle code is involved.
 - Integration tests for public foundation packages when behavior crosses
   reflection, generated handlers, typed clients, or MCP transports.

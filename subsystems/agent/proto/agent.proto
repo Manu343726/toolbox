@@ -29,7 +29,7 @@ message AgentProfile {
   repeated string instruction_refs = 4;
   // Skill references available to the agent.
   repeated string skill_refs = 5;
-  // Tool capability references available to the agent.
+  // Tools available to the agent, named as the tool subsystem names them.
   repeated string tool_refs = 6;
   // Knowledge source references available to the agent.
   repeated string knowledge_refs = 7;

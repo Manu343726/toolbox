@@ -2,6 +2,11 @@
 
 Status: accepted<br>
 Date: 2026-09-25
+Partly superseded by
+[ADR-0008](0008-authorization-by-name-and-side-effect.md), which replaces the
+capability vocabulary this record introduced as the unit of authorization. The
+three extension contracts, the provider directory, and the standard description
+stand.
 
 ## Context
 
