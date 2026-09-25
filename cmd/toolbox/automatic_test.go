@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	apimodel "github.com/Manu343726/toolbox/pkg/api"
+	"github.com/Manu343726/toolbox/pkg/config"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
 	apitoolsv1 "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1"
 	apitoolsv1connect "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1/apitoolsv1connect"
@@ -18,7 +20,7 @@ import (
 // subsystem's own contract, and the gateway offers the subsystem's operations as
 // tools.
 func TestAutomaticExposureOfSubsystems(t *testing.T) {
-	h, catalog, err := buildHost("")
+	h, catalog, err := buildHost(config.Config{})
 	require.NoError(t, err)
 	// Health and registry are started on purpose: their services declare
 	// capabilities, so the uniform rule has to hold for them too.
@@ -56,6 +58,25 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	assert.Positive(t, registered, "at least one subsystem contributes tools")
 	for _, warning := range seed.Warnings {
 		assert.NotContains(t, warning, "stays hidden", "no declared operation is left unexposed: %v", warning)
+	}
+
+	// The registry serves a change stream, and a streaming operation is described,
+	// registered, and never a unary tool. It is not a warning: the catalog invokes
+	// unary operations only, and that is a shape rather than a refusal.
+	described, err := catalog.service.Catalog().APIs(t.Context())
+	require.NoError(t, err)
+	var registry *apimodel.API
+	for index := range described {
+		if described[index].ID == "registry" {
+			registry = &described[index]
+		}
+	}
+	require.NotNil(t, registry, "the registry is an ordinary registered API")
+	_, streamed := registry.Operation("registry/toolbox.registry.v1.RegistryService/WatchServices")
+	assert.True(t, streamed, "a streaming operation is still part of the description")
+	for _, warning := range seed.Warnings {
+		assert.NotContains(t, warning, "WatchServices",
+			"a method that cannot be a unary tool is skipped, not reported as refused: %v", warning)
 	}
 
 	// The catalog answers, over ConnectRPC, about what it holds. A caller reaches
@@ -117,7 +138,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 // TestReflectionAndCatalogAgreeOnToolNames guards the promise that switching the
 // source of the tool surface does not rename anything an agent already uses.
 func TestReflectionAndCatalogAgreeOnToolNames(t *testing.T) {
-	h, catalog, err := buildHost("")
+	h, catalog, err := buildHost(config.Config{})
 	require.NoError(t, err)
 	require.NoError(t, h.Select("knowledge", "apigrpc"))
 	require.NoError(t, h.Start(context.Background()))

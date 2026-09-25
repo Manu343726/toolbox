@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
+	"github.com/Manu343726/toolbox/pkg/config"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
 	apitoolsv1 "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1"
 	apitoolsv1connect "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1/apitoolsv1connect"
@@ -59,7 +60,7 @@ func startThirdPartyServer(t *testing.T) string {
 // its declared capability, and called through an invoker.
 func TestThirdPartyMCPServerBecomesACatalogAPI(t *testing.T) {
 	weather := startThirdPartyServer(t)
-	h, catalog, err := buildHost("")
+	h, catalog, err := buildHost(config.Config{})
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -133,7 +134,7 @@ func TestAnMCPServerWhoseToolDeclaresNothingIsNotExposed(t *testing.T) {
 	bare := httptest.NewServer(handler)
 	defer bare.Close()
 
-	h, catalog, err := buildHost("")
+	h, catalog, err := buildHost(config.Config{})
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -156,7 +157,7 @@ func TestAnMCPServerWhoseToolDeclaresNothingIsNotExposed(t *testing.T) {
 }
 
 func TestMCPIsAnIndexedFormatAndTransport(t *testing.T) {
-	h, _, err := buildHost("")
+	h, _, err := buildHost(config.Config{})
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))
@@ -200,7 +201,7 @@ func TestGatewayServesADescriptionAsToolsWithoutAnMCPServer(t *testing.T) {
 	// MCP server can be offered to an agent through the in-process gateway — with no
 	// second protocol hop, because the description is already a description.
 	weather := startThirdPartyServer(t)
-	h, catalog, err := buildHost("")
+	h, catalog, err := buildHost(config.Config{})
 	require.NoError(t, err)
 	require.NoError(t, h.Select("apitools", "apimcp"))
 	require.NoError(t, h.Start(context.Background()))

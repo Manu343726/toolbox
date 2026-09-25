@@ -183,6 +183,13 @@ func (h *Host) registerOne(
 	operations := stored.Operations()
 	exposed := 0
 	for _, operation := range operations {
+		// A streaming operation is described and registered, and it is never a
+		// unary tool. It is skipped here rather than asked about, because asking
+		// produces a refusal that reads like a policy problem when it is really a
+		// shape — and a warning on every start trains people to ignore warnings.
+		if operation.Streaming.Streaming() {
+			continue
+		}
 		// The deployment's policy answers here, over two facts the description
 		// already carries: what the operation is called, and what its contract says
 		// invoking it does. Nothing is exposed that the policy does not permit, and

@@ -12,9 +12,9 @@ implicitly while implementing features.
 - [ADR-0007: One rule for every feature](0007-one-rule-for-every-feature.md)
 - [ADR-0008: Authorization by name and side effect](0008-authorization-by-name-and-side-effect.md)
 - [ADR-0009: Cross-subsystem calls](0009-cross-subsystem-calls.md)
-- [ADR-0010: The core, and running it as a daemon](0010-core-and-daemon.md) — *proposed; four decisions outstanding*
+- [ADR-0010: The core, and running it as a daemon](0010-core-and-daemon.md)
 
-An ADR is *proposed* until its outstanding decisions are answered; only then is it
-accepted. An ADR is accepted when the decision is implemented, documented, and
-covered by tests. A proposal that changes one of these boundaries should add a new ADR and
+An ADR is *proposed* while its outstanding decisions are open, and *accepted* once
+they are answered; acceptance is a claim about the decision, and implementation
+follows it. A proposal that changes one of these boundaries should add a new ADR and
 update the affected subsystem and feature documents.

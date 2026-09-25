@@ -18,9 +18,66 @@ service RegistryService {
   // @toolbox.side-effects read_only
   // GetService returns one registration by subsystem name.
   rpc GetService(GetServiceRequest) returns (GetServiceResponse);
+  // WatchServices streams registry changes as they happen.
+  //
+  // A registry a deployment can add to and remove from at runtime is only useful
+  // to a client that learns about it while it runs. Polling answers the question
+  // eventually and costs a round trip per attempt; a stream answers it once. A
+  // resolver watching this stops resolving from a stale table, and a subsystem
+  // watching it learns that a peer it depends on has gone before its next call
+  // fails rather than after.
+  //
+  // The stream opens with a sync event carrying every current registration, so a
+  // client is useful immediately rather than after the next change.
+  //
+  // A client that stops reading is disconnected rather than allowed to fall
+  // behind: a silently dropped deregistration is worse than a broken stream,
+  // because the client would go on believing a subsystem is still there.
+  //
+  // @toolbox.side-effects read_only
+  rpc WatchServices(WatchServicesRequest) returns (stream RegistryEvent);
   // @toolbox.side-effects read_only
   // ListServices returns registrations matching the supplied filters.
   rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+}
+
+// RegistryEventType states what happened to a registration.
+enum RegistryEventType {
+  // No event type was supplied.
+  REGISTRY_EVENT_TYPE_UNSPECIFIED = 0;
+  // The current set of registrations, sent once when a watch opens.
+  REGISTRY_EVENT_TYPE_SYNC = 1;
+  // A subsystem registered.
+  REGISTRY_EVENT_TYPE_REGISTERED = 2;
+  // An existing registration was replaced, which is how a subsystem that moved to
+  // a new endpoint announces itself.
+  REGISTRY_EVENT_TYPE_UPDATED = 3;
+  // A lease was extended. It carries no change in reachability, and a client that
+  // only cares about membership may ignore it.
+  REGISTRY_EVENT_TYPE_HEARTBEAT = 4;
+  // A registration was removed, either by an explicit deregistration or by a lease
+  // lapsing.
+  REGISTRY_EVENT_TYPE_DEREGISTERED = 5;
+}
+
+// WatchServicesRequest asks for registry changes.
+message WatchServicesRequest {
+  // Report only changes to this subsystem. Empty reports every subsystem.
+  string subsystem_name = 1;
+  // Skip the opening sync event. It is false by default, because a client that
+  // learns nothing until the next change is a client that cannot answer a question
+  // asked in the meantime.
+  bool skip_initial_sync = 2;
+}
+
+// RegistryEvent is one change to the registry.
+message RegistryEvent {
+  // What happened.
+  RegistryEventType type = 1;
+  // The registration this event is about. Absent on a sync event.
+  ServiceDescriptor descriptor = 2;
+  // Every active registration. On a sync event only.
+  repeated ServiceDescriptor services = 3;
 }
 
 // RegistryStatus is the lifecycle state of a registered subsystem.

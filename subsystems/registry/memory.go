@@ -196,6 +196,11 @@ func (m *Memory) List(name string, requiredCapabilities []string, includeExpired
 }
 
 // Watch returns a buffered event channel. Call CloseWatch when finished.
+//
+// The buffer is how much change a watcher may fall behind by before it is
+// disconnected. A watcher whose channel closes while it still expects events was
+// disconnected for falling behind, and its caller should resynchronise — re-read
+// the current set — rather than carry on with a partial picture.
 func (m *Memory) Watch(buffer int) chan Event {
 	if buffer < 1 {
 		buffer = 1
@@ -208,37 +213,65 @@ func (m *Memory) Watch(buffer int) chan Event {
 }
 
 // CloseWatch removes a watcher created by Watch.
+//
+// Closing a watcher that was already disconnected for falling behind is not an
+// error: the channel is closed exactly once, and this call is a no-op then.
 func (m *Memory) CloseWatch(ch chan Event) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, watching := m.watchers[ch]; !watching {
+		return
+	}
 	delete(m.watchers, ch)
 	close(ch)
-	m.mu.Unlock()
 }
 
+// removeExpired drops registrations whose lease lapsed, and reports each one.
+//
+// A lapsed lease is a removal, and a watcher that was not told would go on
+// resolving a subsystem that is gone. That is the whole reason a watch exists, so
+// expiry publishes rather than sweeping silently.
 func (m *Memory) removeExpired() {
 	now := m.now().UnixNano()
+	expired := make([]*registryv1.ServiceDescriptor, 0)
 	m.mu.Lock()
 	for name, entry := range m.entries {
 		if entry.GetLeaseExpiresAtUnixNano() != 0 && now >= entry.GetLeaseExpiresAtUnixNano() {
 			delete(m.entries, name)
+			expired = append(expired, entry)
 		}
 	}
 	m.mu.Unlock()
+	sort.Slice(expired, func(i, j int) bool {
+		return expired[i].GetSubsystemName() < expired[j].GetSubsystemName()
+	})
+	for _, entry := range expired {
+		m.publish(Event{Type: EventDeregistered, Descriptor: cloneDescriptor(entry)})
+	}
 }
 
+// publish delivers an event to every watcher.
+//
+// A watcher that cannot keep up is disconnected rather than skipped. Dropping an
+// event is the one outcome nobody should choose: a missed deregistration leaves a
+// client resolving an endpoint that is gone, and the client has no way to notice it
+// missed anything. Closing the channel tells it to resynchronise, which it can do
+// correctly.
 func (m *Memory) publish(event Event) {
-	m.mu.RLock()
-	watchers := make([]chan Event, 0, len(m.watchers))
+	m.mu.Lock()
+	lagging := make([]chan Event, 0)
 	for watcher := range m.watchers {
-		watchers = append(watchers, watcher)
-	}
-	m.mu.RUnlock()
-	for _, watcher := range watchers {
 		select {
 		case watcher <- event:
 		default:
+			lagging = append(lagging, watcher)
 		}
 	}
+	for _, watcher := range lagging {
+		delete(m.watchers, watcher)
+		close(watcher)
+	}
+	m.mu.Unlock()
 }
 
 func validateDescriptor(descriptor *registryv1.ServiceDescriptor) error {
