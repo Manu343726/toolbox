@@ -6,10 +6,13 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/knowledge/knowledg
 
 // KnowledgeService stores sources and exposes provider-neutral retrieval.
 service KnowledgeService {
+  // @toolbox.side-effects create update
   // PutSource creates or replaces a knowledge source.
   rpc PutSource(PutSourceRequest) returns (PutSourceRequestResponse);
+  // @toolbox.side-effects read_only
   // GetSource returns one source.
   rpc GetSource(GetSourceRequest) returns (GetSourceResponse);
+  // @toolbox.side-effects read_only
   // Search retrieves relevant passages from the knowledge base.
   rpc Search(SearchRequest) returns (SearchResponse);
 }

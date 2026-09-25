@@ -40,6 +40,11 @@ var (
 type Service struct {
 	Name        string
 	Description string
+	// Annotations are the machine-readable lines the service's comment declared.
+	// They are separate from Description because they are not prose: the CLI and
+	// an MCP client read Description, and a package that owns a vocabulary reads
+	// these.
+	Annotations AnnotationSet
 	Methods     []Method
 }
 
@@ -47,6 +52,7 @@ type Service struct {
 type Method struct {
 	Name            string
 	Description     string
+	Annotations     AnnotationSet
 	InputType       string
 	OutputType      string
 	ClientStreaming bool
@@ -190,16 +196,22 @@ func ExtractServiceDocumentation(service protoreflect.ServiceDescriptor) *Servic
 		return nil
 	}
 	file := service.ParentFile()
+	prose, annotations := ParseAnnotations(commentAt(file, servicePath(service)))
 	doc := &Service{
 		Name:        string(service.FullName()),
-		Description: commentAt(file, servicePath(service)),
+		Description: prose,
+		Annotations: annotations,
 		Methods:     make([]Method, 0, service.Methods().Len()),
 	}
 	for i := 0; i < service.Methods().Len(); i++ {
 		method := service.Methods().Get(i)
+		methodProse, methodAnnotations := ParseAnnotations(
+			commentAt(file, append(servicePath(service), fieldMethod, int32(method.Index()))),
+		)
 		methodDoc := Method{
 			Name:            string(method.Name()),
-			Description:     commentAt(file, append(servicePath(service), fieldMethod, int32(method.Index()))),
+			Description:     methodProse,
+			Annotations:     methodAnnotations,
 			InputType:       string(method.Input().FullName()),
 			OutputType:      string(method.Output().FullName()),
 			ClientStreaming: method.IsStreamingClient(),

@@ -21,63 +21,85 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv
 // and transport identifiers are open: the service indexes the descriptors it is
 // given, so a format contributed by a user is discoverable like any other.
 service ApiToolsService {
+  // @toolbox.side-effects create update
   // RegisterServer registers or replaces a server that hosts APIs.
   rpc RegisterServer(RegisterServerRequest) returns (RegisterServerResponse);
+  // @toolbox.side-effects read_only
   // GetServer returns one registered server.
   rpc GetServer(GetServerRequest) returns (GetServerResponse);
+  // @toolbox.side-effects read_only
   // ListServers returns registered servers matching the supplied filters.
   rpc ListServers(ListServersRequest) returns (ListServersResponse);
+  // @toolbox.side-effects delete
   // DeleteServer removes a server, unbinding the APIs it hosts when forced.
   rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
+  // @toolbox.side-effects create update
   // RegisterApiFormat indexes a description format descriptor, so discovery can
   // answer which formats this deployment understands.
   rpc RegisterApiFormat(RegisterApiFormatRequest) returns (RegisterApiFormatResponse);
+  // @toolbox.side-effects read_only
   // ListApiFormats returns the indexed format descriptors merged with the
   // formats advertised by the available parser providers.
   rpc ListApiFormats(ListApiFormatsRequest) returns (ListApiFormatsResponse);
+  // @toolbox.side-effects create update
   // RegisterApiTransport indexes a transport descriptor.
   rpc RegisterApiTransport(RegisterApiTransportRequest) returns (RegisterApiTransportResponse);
+  // @toolbox.side-effects read_only
   // ListApiTransports returns the indexed transport descriptors merged with the
   // transports advertised by the available adapter providers.
   rpc ListApiTransports(ListApiTransportsRequest) returns (ListApiTransportsResponse);
+  // @toolbox.side-effects read_only
   // ListProviders lists the parser and adapter subsystems available in this
   // deployment.
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  // @toolbox.side-effects read_only
   // ParseApi interprets a description document through a parser provider
   // without storing the result.
   rpc ParseApi(ParseApiRequest) returns (ParseApiResponse);
+  // @toolbox.side-effects read_only
   // RenderApi renders a description into a target representation through an
   // adapter provider, returning the target's schema files.
   rpc RenderApi(RenderApiRequest) returns (RenderApiResponse);
+  // @toolbox.side-effects external
   // ServeApi asks an adapter provider to serve a registered API in a target
   // format, tunneling to the API's server, and registers the served surface as a
   // server of its own.
   rpc ServeApi(ServeApiRequest) returns (ServeApiResponse);
+  // @toolbox.side-effects update
   // StopApi stops one adapted surface and removes the server it registered.
   rpc StopApi(StopApiRequest) returns (StopApiResponse);
+  // @toolbox.side-effects create update
   // RegisterApi interprets a description document through a parser provider and
   // stores the resulting API.
   rpc RegisterApi(RegisterApiRequest) returns (RegisterApiResponse);
+  // @toolbox.side-effects create update
   // RegisterApiDescriptor stores an API that is already described, without
   // involving a parser provider.
   rpc RegisterApiDescriptor(RegisterApiDescriptorRequest) returns (RegisterApiDescriptorResponse);
+  // @toolbox.side-effects read_only
   // GetApi returns one registered API description.
   rpc GetApi(GetApiRequest) returns (GetApiResponse);
+  // @toolbox.side-effects read_only
   // ListApis returns registered APIs matching the supplied filters.
   rpc ListApis(ListApisRequest) returns (ListApisResponse);
+  // @toolbox.side-effects delete
   // DeleteApi removes a registered API and its exposure state.
   rpc DeleteApi(DeleteApiRequest) returns (DeleteApiResponse);
+  // @toolbox.side-effects read_only
   // DescribeOperation returns the parameters, schemas, security, and side
   // effects of one operation.
   rpc DescribeOperation(DescribeOperationRequest) returns (DescribeOperationResponse);
+  // @toolbox.side-effects update
   // ExposeOperation makes one allowed operation visible and callable.
   rpc ExposeOperation(ExposeOperationRequest) returns (ExposeOperationResponse);
+  // @toolbox.side-effects update
   // HideOperation removes one operation from the exposed surface without
   // removing it from the catalog.
   rpc HideOperation(HideOperationRequest) returns (HideOperationResponse);
   // OperationExposure reports the current footprint: allowed, exposed, hidden,
   // and denied operations.
   rpc OperationExposure(OperationExposureRequest) returns (OperationExposureResponse);
+  // @toolbox.side-effects external
   // CallOperation executes one exposed operation through an adapter provider.
   rpc CallOperation(CallOperationRequest) returns (CallOperationResponse);
 }

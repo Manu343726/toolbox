@@ -6,10 +6,13 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/agent/agentv1;agen
 
 // AgentService stores provider-neutral agent profiles.
 service AgentService {
+  // @toolbox.side-effects create update
   // PutAgent creates or replaces an agent profile.
   rpc PutAgent(PutAgentRequest) returns (PutAgentResponse);
+  // @toolbox.side-effects read_only
   // GetAgent returns one agent profile.
   rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+  // @toolbox.side-effects read_only
   // ListAgents returns stored agent profiles.
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
 }

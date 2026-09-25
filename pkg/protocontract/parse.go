@@ -51,6 +51,15 @@ type Descriptor struct {
 	// ExcludeServices drops services by full protobuf name, such as the
 	// reflection services a server always exposes.
 	ExcludeServices []string
+	// Documentation supplies the comments a contract was written with.
+	//
+	// A generated Go descriptor omits source locations, so a service read over
+	// reflection arrives with no comments at all — and with them, no declared side
+	// effects. Every contract in this framework embeds its descriptor set, which
+	// was generated with source info and is registered into the process-wide
+	// documentation catalog, so this is where a reader gets them. Empty falls back
+	// to whatever the reflected descriptor carries.
+	Documentation *shareddocs.Catalog
 	// HTTPClient performs reflection reads. The zero value uses a bounded client.
 	HTTPClient *http.Client
 	// Clients supplies pre-built reflection clients, keyed by endpoint, for a
@@ -63,6 +72,7 @@ func NewDescriptor(options Descriptor) *Descriptor {
 	reader := &Descriptor{
 		APIID:           strings.TrimSpace(options.APIID),
 		ExcludeServices: append([]string(nil), options.ExcludeServices...),
+		Documentation:   options.Documentation,
 		HTTPClient:      options.HTTPClient,
 		Clients:         make(map[string]*discovery.Client, len(options.Clients)),
 	}
@@ -216,7 +226,7 @@ func (d *Descriptor) FromDescriptorSet(document []byte) (api.API, []string, erro
 		Kind:     SourceKindDescriptorSet,
 		Digest:   hex.EncodeToString(digest[:]),
 		Location: SourceKindDescriptorSet,
-	})
+	}, nil)
 	if err != nil {
 		return api.API{}, nil, err
 	}
@@ -240,6 +250,7 @@ func (d *Descriptor) FromEndpoint(ctx context.Context, endpoint string) (api.API
 		return api.API{}, nil, api.WrapError(api.KindUnavailable, err, "list services of %q", endpoint)
 	}
 	services := make([]protoreflect.ServiceDescriptor, 0, len(names))
+	documented := make(map[string]*shareddocs.Service, len(names))
 	warnings := make([]string, 0)
 	for _, name := range names {
 		if d.excluded(name) {
@@ -252,13 +263,14 @@ func (d *Descriptor) FromEndpoint(ctx context.Context, endpoint string) (api.API
 		}
 		if schema.Descriptor != nil {
 			services = append(services, schema.Descriptor)
+			documented[name] = d.documentationFor(name, schema.Descriptor)
 		}
 	}
 	if len(services) == 0 {
 		return api.API{}, warnings, api.Errorf(api.KindInvalid, "endpoint %q exposes no describable service", endpoint)
 	}
 	sort.Slice(services, func(i, j int) bool { return services[i].FullName() < services[j].FullName() })
-	described, err := d.build(services, nil, api.Source{Kind: SourceKindReflection, Location: endpoint})
+	described, err := d.build(services, nil, api.Source{Kind: SourceKindReflection, Location: endpoint}, documented)
 	if err != nil {
 		return api.API{}, warnings, err
 	}
@@ -301,6 +313,10 @@ func (d *Descriptor) build(
 	services []protoreflect.ServiceDescriptor,
 	fileSet *descriptorpb.FileDescriptorSet,
 	source api.Source,
+	// documented supplies the comments for services whose reflected descriptor
+	// carries none, keyed by fully-qualified service name. A nil map reads every
+	// comment from the descriptor itself.
+	documented map[string]*shareddocs.Service,
 ) (api.API, error) {
 	if len(services) == 0 {
 		return api.API{}, api.Errorf(api.KindInvalid, "the contract declares no service")
@@ -320,7 +336,7 @@ func (d *Descriptor) build(
 		target.Source.Kind = SourceKindDescriptorSet
 	}
 	for _, service := range services {
-		built, err := buildService(service, fileSet)
+		built, err := buildService(service, fileSet, documented[string(service.FullName())])
 		if err != nil {
 			return api.API{}, err
 		}
@@ -331,6 +347,22 @@ func (d *Descriptor) build(
 		return api.API{}, api.WrapError(api.KindInvalid, err, "normalize the described API")
 	}
 	return normalized, nil
+}
+
+// documentationFor returns the documentation for one service.
+//
+// A reader supplied with a documentation catalog prefers it, because a generated
+// Go descriptor omits source locations and a contract's comments live in the
+// descriptor set its build embedded. Without one, the reflected descriptor is all
+// there is, and a service read that way arrives with no declared side effects —
+// which is the safe direction, but leaves every operation unclassified.
+func (d *Descriptor) documentationFor(name string, service protoreflect.ServiceDescriptor) *shareddocs.Service {
+	if d != nil && d.Documentation != nil {
+		if documented, err := d.Documentation.Get(name); err == nil {
+			return &documented
+		}
+	}
+	return shareddocs.ExtractServiceDocumentation(service)
 }
 
 func (d *Descriptor) clientFor(endpoint string) *discovery.Client {
@@ -364,12 +396,24 @@ func BoundedClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout}
 }
 
-func buildService(service protoreflect.ServiceDescriptor, fileSet *descriptorpb.FileDescriptorSet) (api.Service, error) {
+func buildService(
+	service protoreflect.ServiceDescriptor,
+	fileSet *descriptorpb.FileDescriptorSet,
+	supplied *shareddocs.Service,
+) (api.Service, error) {
 	documentation := shareddocs.ExtractServiceDocumentation(service)
+	if supplied != nil {
+		documentation = supplied
+	}
 	built := api.Service{
 		Name:        string(service.FullName()),
 		Title:       string(service.Name()),
 		Description: documentation.Description,
+		// A service's own annotations classify every method it declares, so a
+		// uniformly read-only service says so once. A method's annotations
+		// override them, which is the same rule a nearer declaration follows
+		// everywhere else in the framework.
+		SideEffects: sideEffectsOf(documentation, nil),
 	}
 	methods := service.Methods()
 	names := make([]string, 0, methods.Len())
@@ -397,32 +441,49 @@ func buildOperation(
 	documentation *shareddocs.Service,
 ) (api.Operation, error) {
 	summary := ""
+	var annotations shareddocs.AnnotationSet
 	if documentation != nil {
 		for i := range documentation.Methods {
 			if documentation.Methods[i].Name == string(method.Name()) {
 				summary = documentation.Methods[i].Description
+				annotations = documentation.Methods[i].Annotations
 				break
 			}
 		}
 	}
-	// A protobuf contract carries no capabilities, side effects, or security
-	// declarations. Leaving them empty is deliberate: a policy then refuses the
-	// operation until a deployment declares what it authorizes, rather than
-	// treating a method as safe because it is a function. A deployment that
-	// describes its own subsystems attaches the capabilities it declared when it
-	// registers the description.
+	// Every ConnectRPC method is a POST, so nothing about the transport says what
+	// invoking one does. A method states that in its own comment, and a method that
+	// states nothing stays unclassified: a policy then refuses it unless it is told
+	// otherwise, rather than treating a method as safe because it is a function.
 	operation := api.Operation{
-		Name:     string(method.Name()),
-		Method:   string(method.Name()),
-		Summary:  summary,
-		Request:  api.SchemaForMessage(method.Input()),
-		Response: api.SchemaForMessage(method.Output()),
+		Name:        string(method.Name()),
+		Method:      string(method.Name()),
+		Summary:     summary,
+		Request:     api.SchemaForMessage(method.Input()),
+		Response:    api.SchemaForMessage(method.Output()),
+		SideEffects: sideEffectsOf(documentation, annotations),
 		Streaming: api.Streaming{
 			Client: method.IsStreamingClient(),
 			Server: method.IsStreamingServer(),
 		},
 	}
 	return operation, nil
+}
+
+// sideEffectsOf resolves the side effects a method declares, falling back to the
+// ones its service declared. A method that declares its own overrides the service
+// rather than adding to it, so a read-only service with one writing method is
+// classified correctly.
+func sideEffectsOf(documentation *shareddocs.Service, method shareddocs.AnnotationSet) []api.SideEffect {
+	if documentation == nil {
+		return nil
+	}
+	declared := method
+	if _, present := declared.Lookup(api.AnnotationSideEffects); !present {
+		declared = documentation.Annotations.Merge(declared)
+	}
+	effects, _ := api.SideEffects(declared)
+	return effects
 }
 
 // Slug derives an API identifier from a protobuf service name.

@@ -6,14 +6,19 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/registry/registryv
 
 // RegistryService stores and resolves running subsystem registrations.
 service RegistryService {
+  // @toolbox.side-effects create update
   // Register adds or replaces a subsystem registration.
   rpc Register(RegisterRequest) returns (RegisterResponse);
+  // @toolbox.side-effects read_only
   // Heartbeat extends the lease for an existing registration.
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // @toolbox.side-effects delete
   // Deregister removes a subsystem registration.
   rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+  // @toolbox.side-effects read_only
   // GetService returns one registration by subsystem name.
   rpc GetService(GetServiceRequest) returns (GetServiceResponse);
+  // @toolbox.side-effects read_only
   // ListServices returns registrations matching the supplied filters.
   rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
 }

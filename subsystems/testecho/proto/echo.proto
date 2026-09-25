@@ -8,6 +8,7 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/testecho/echov1;ec
 service EchoService {
   // Echo returns a response containing the supplied message.
   rpc Echo(EchoRequest) returns (EchoResponse);
+  // @toolbox.side-effects external
   // StreamEcho demonstrates a server-streaming method.
   rpc StreamEcho(EchoRequest) returns (stream EchoResponse);
 }

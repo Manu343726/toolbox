@@ -6,12 +6,16 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/workflow/workflowv
 
 // WorkflowService stores and validates portable workflow definitions.
 service WorkflowService {
+  // @toolbox.side-effects create update
   // PutWorkflow creates or replaces a workflow definition.
   rpc PutWorkflow(PutWorkflowRequest) returns (PutWorkflowResponse);
+  // @toolbox.side-effects read_only
   // GetWorkflow returns one workflow definition.
   rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  // @toolbox.side-effects read_only
   // ListWorkflows returns stored workflow definitions.
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  // @toolbox.side-effects read_only
   // ValidateWorkflow checks a definition without storing it.
   rpc ValidateWorkflow(ValidateWorkflowRequest) returns (ValidateWorkflowResponse);
 }

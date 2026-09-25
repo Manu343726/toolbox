@@ -6,6 +6,7 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/health/healthv1;he
 
 // HealthService reports subsystem readiness.
 service HealthService {
+  // @toolbox.side-effects read_only
   // Check returns the current health of the requested component.
   rpc Check(CheckRequest) returns (CheckResponse);
 }

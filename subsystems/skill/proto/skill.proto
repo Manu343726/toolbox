@@ -6,10 +6,13 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/skill/skillv1;skil
 
 // SkillService stores reusable, versioned skills and prompt resources.
 service SkillService {
+  // @toolbox.side-effects create update
   // PutSkill creates or replaces a skill.
   rpc PutSkill(PutSkillRequest) returns (PutSkillResponse);
+  // @toolbox.side-effects read_only
   // GetSkill returns one skill.
   rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+  // @toolbox.side-effects read_only
   // ListSkills returns stored skills.
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
 }

@@ -6,8 +6,10 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/model/modelv1;mode
 
 // ModelService exposes provider-neutral model capabilities.
 service ModelService {
+  // @toolbox.side-effects read_only
   // ListModels returns models available through registered providers.
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  // @toolbox.side-effects external
   // Generate produces a response using a provider-neutral request.
   rpc Generate(GenerateRequest) returns (GenerateResponse);
 }

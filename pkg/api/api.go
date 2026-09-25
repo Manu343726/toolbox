@@ -299,6 +299,10 @@ type Service struct {
 	Title string
 	// Description is the human-readable service description.
 	Description string
+	// SideEffects are the effects every operation of this service declares,
+	// unless the operation declares its own. A protobuf contract uses this to
+	// classify a uniformly read-only service once instead of on every method.
+	SideEffects []SideEffect
 	// Capabilities are the explicit capabilities this service grants.
 	Capabilities []string
 	// Operations are the callable operations of the service, in description
@@ -468,6 +472,7 @@ func (o Operation) Clone() Operation {
 // Clone returns a deep copy of the service.
 func (s Service) Clone() Service {
 	clone := s
+	clone.SideEffects = append([]SideEffect(nil), s.SideEffects...)
 	clone.Capabilities = append([]string(nil), s.Capabilities...)
 	clone.Operations = make([]Operation, 0, len(s.Operations))
 	for i := range s.Operations {

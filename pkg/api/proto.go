@@ -335,6 +335,7 @@ func (s Service) ToProto() *apiv1.ApiService {
 		Name:         s.Name,
 		Title:        s.Title,
 		Description:  s.Description,
+		SideEffects:  append([]string(nil), s.SideEffects...),
 		Capabilities: append([]string(nil), s.Capabilities...),
 	}
 	for _, operation := range s.Operations {
@@ -354,6 +355,7 @@ func ServiceFromProto(message *apiv1.ApiService) (Service, error) {
 		Name:         message.GetName(),
 		Title:        message.GetTitle(),
 		Description:  message.GetDescription(),
+		SideEffects:  append([]SideEffect(nil), message.GetSideEffects()...),
 		Capabilities: append([]string(nil), message.GetCapabilities()...),
 	}
 	for _, operation := range message.GetOperations() {

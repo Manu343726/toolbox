@@ -5,9 +5,12 @@ package toolbox.policy.v1;
 option go_package = "github.com/Manu343726/toolbox/subsystems/policy/policyv1;policyv1";
 
 // PolicyService evaluates versioned domain rules and approval requirements.
+// @toolbox.side-effects read_only
 service PolicyService {
+  // @toolbox.side-effects read_only
   // Evaluate checks an action against a policy snapshot.
   rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+  // @toolbox.side-effects read_only
   // ListPolicies returns available policy snapshots.
   rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
 }

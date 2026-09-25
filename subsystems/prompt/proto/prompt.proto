@@ -6,12 +6,16 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/prompt/promptv1;pr
 
 // PromptService stores reusable, provider-neutral prompt templates.
 service PromptService {
+  // @toolbox.side-effects create update
   // PutPrompt creates or replaces a prompt template.
   rpc PutPrompt(PutPromptRequest) returns (PutPromptResponse);
+  // @toolbox.side-effects read_only
   // GetPrompt returns one prompt template.
   rpc GetPrompt(GetPromptRequest) returns (GetPromptResponse);
+  // @toolbox.side-effects read_only
   // ListPrompts returns stored prompt templates.
   rpc ListPrompts(ListPromptsRequest) returns (ListPromptsResponse);
+  // @toolbox.side-effects read_only
   // RenderPrompt renders a template with string variables.
   rpc RenderPrompt(RenderPromptRequest) returns (RenderPromptResponse);
 }

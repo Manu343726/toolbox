@@ -6,8 +6,10 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/tool/toolv1;toolv1
 
 // ToolService exposes explicitly declared capabilities for agent use.
 service ToolService {
+  // @toolbox.side-effects read_only
   // ListTools returns tools exposed by this subsystem.
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  // @toolbox.side-effects external
   // InvokeTool executes a declared tool after policy checks.
   rpc InvokeTool(InvokeToolRequest) returns (InvokeToolResponse);
 }

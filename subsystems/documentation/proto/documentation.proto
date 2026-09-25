@@ -6,9 +6,12 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/documentation/docu
 
 // DocumentationService exposes protobuf-derived documentation for CLI and
 // agent clients.
+// @toolbox.side-effects read_only
 service DocumentationService {
+  // @toolbox.side-effects read_only
   // GetDocumentation returns documentation for one fully-qualified service.
   rpc GetDocumentation(GetDocumentationRequest) returns (GetDocumentationResponse);
+  // @toolbox.side-effects read_only
   // ListDocumentation returns all matching service documentation.
   rpc ListDocumentation(ListDocumentationRequest) returns (ListDocumentationResponse);
 }

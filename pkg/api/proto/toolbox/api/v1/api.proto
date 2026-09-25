@@ -280,6 +280,10 @@ message ApiService {
   string title = 3;
   // Human-readable service description.
   string description = 4;
+  // Side effects every operation of this service declares, unless the operation
+  // declares its own. A service that does not state them leaves its operations
+  // unclassified, which a policy has to be told to trust rather than infer.
+  repeated string side_effects = 7;
   // Explicit capabilities this service grants.
   repeated string capabilities = 5;
   // Callable operations, in description order.
@@ -622,6 +626,7 @@ message StopApiResponse {
 // interprets one description language into the standard API model.
 // Implementing this service is all a user needs to integrate a new API format.
 service ApiParserService {
+  // @toolbox.side-effects read_only
   // ParseApi interprets one description document into the standard model.
   rpc ParseApi(ParseApiRequest) returns (ParseApiResponse);
 }
@@ -638,10 +643,13 @@ service ApiParserService {
 // Implementing this service is all a user needs to publish an API in a format
 // they did not write the description in.
 service ApiAdapterService {
+  // @toolbox.side-effects read_only
   // RenderApi returns the target API's schema files for a description.
   rpc RenderApi(RenderApiRequest) returns (RenderApiResponse);
+  // @toolbox.side-effects external
   // ServeApi serves an adapted API and tunnels it to the original server.
   rpc ServeApi(ServeApiRequest) returns (ServeApiResponse);
+  // @toolbox.side-effects update
   // StopApi stops one adapted surface started by ServeApi.
   rpc StopApi(StopApiRequest) returns (StopApiResponse);
 }
@@ -652,6 +660,7 @@ service ApiAdapterService {
 // produces something to deploy or publish, while invoking an operation is what a
 // live call needs.
 service ApiInvokerService {
+  // @toolbox.side-effects external
   // InvokeApi executes one operation of a registered API.
   rpc InvokeApi(InvokeApiRequest) returns (InvokeApiResponse);
 }
