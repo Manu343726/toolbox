@@ -38,8 +38,21 @@ func TestAllModeRegistersEndpoints(t *testing.T) {
 
 func TestRootCommandFlags(t *testing.T) {
 	command := newRootCommand()
-	assert.NotNil(t, command.Flags().Lookup("component"))
-	assert.NotNil(t, command.Flags().Lookup("all"))
+	// Persistent, because every subcommand resolves the same four things. A local
+	// root flag is invisible to a subcommand, which a user meets as "flag accessed
+	// but not defined" on `toolbox mcp` rather than as anything a test would
+	// otherwise notice.
+	for _, name := range []string{"component", "all", "policy", "core", "port", "scope"} {
+		assert.NotNil(t, command.PersistentFlags().Lookup(name), "%s is a persistent flag", name)
+	}
+
+	// And the path a user actually takes: parse them on the subcommand. An inherited
+	// flag only reaches a command's own flag set during parsing, so a static check
+	// would pass while the command still failed at run time — which is exactly how
+	// this broke.
+	parsed := newRootCommand()
+	parsed.SetArgs([]string{"mcp", "--core", "core.internal:7000", "--port", "7100", "--scope", "acme", "--help"})
+	require.NoError(t, parsed.Execute(), "every flag is reachable from the subcommand")
 }
 
 func TestRootCommandIncludesAggregatedMCP(t *testing.T) {

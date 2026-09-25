@@ -72,8 +72,8 @@ governed like everything else, so a restricted document stays restricted.
 An assistant that cannot act is a suggestion engine. Toolbox gives assistants a
 declared set of actions against your real systems — each one described, each one
 subject to policy, and the consequential ones able to require approval before
-they run. Capabilities are added once and become available to every assistant
-that is allowed to use them.
+they run. An action is added once and becomes available to every assistant allowed
+to use it, and to no assistant that is not.
 
 *Removes:* bespoke tool wiring per project, and the ambiguity of what an
 assistant is allowed to do.
@@ -121,10 +121,13 @@ reachable by your agent runtime over the Model Context Protocol. Adopting more
 later is additive — it does not replace or invalidate what you already run, and
 nothing you adopted has to be rewritten when you do.
 
-This is why each capability is an independent service rather than a module
-inside a monolith: a capability you did not want should cost you nothing to
-leave out. See [`docs/architecture.md`](docs/architecture.md) for how the
-composition modes implement this.
+This is why each capability is an independent service rather than a module inside a
+monolith: a capability you did not want should cost you nothing to leave out. A
+capability may call another one — it resolves the peer and makes a typed RPC, so
+the caller loads and starts whether or not the peer is running — but it never links
+another one's implementation into its own process, which is what would make the two
+not separately deployable. See [`docs/architecture.md`](docs/architecture.md) and
+[`docs/decisions/0009-cross-subsystem-calls.md`](docs/decisions/0009-cross-subsystem-calls.md).
 
 ## What is in the toolbox
 
@@ -137,7 +140,7 @@ composition modes implement this.
 | Knowledge      | The sources assistants may search                          | One current body of reference material                            |
 | Models         | The models available to the team                           | Work stays portable across providers and budgets                  |
 | Tools          | Declared actions, each with its own requirements            | What an assistant can actually do                                 |
-| Policies       | What is allowed, and what needs approval                   | Limits enforced by the system, not requested in a prompt          |
+| Policies       | The document deciding what an agent may call, and what needs approval | Limits enforced by the system, not requested in a prompt          |
 | Health         | Whether each part is ready                                 | Assistants and people do not rely on something unavailable        |
 
 ## A day in the environment
@@ -159,48 +162,77 @@ those assets. Nobody rewrote a rule.
 
 ## Getting started
 
-Build the toolbox:
+Build it:
 
 ```sh
 make build
 ```
 
-Run it:
+Run the whole environment:
 
 ```sh
 ./bin/toolbox --all
 ```
 
-Connect an assistant to it. Any agent runtime that speaks the Model Context
-Protocol can use the toolbox directly:
+Connect an assistant. Any agent runtime that speaks the Model Context Protocol can
+use the toolbox directly, over stdio:
 
 ```sh
 ./bin/toolbox mcp --all
 ```
 
-Start with a smaller surface when you want the assistant to request what it
-needs as it goes:
+That gives the assistant a tool for every operation the default policy permits —
+which is **every read, and nothing that changes state**. A write is not missing by
+accident: it is a decision your deployment makes, and it says so in a file you can
+read and edit:
+
+```sh
+./bin/toolbox mcp --all --policy ./ops.policy
+```
+
+```text
+# Every read in the deployment.
+allow *                read
+
+# …and the writes this team is allowed to make.
+allow  knowledge/**    write
+deny   registry/**     write
+```
+
+A policy is a pattern over operation names and a class of what invoking the
+operation does. Nothing matched is a refusal, and the file you were given has one
+line, which is why nothing is exposed that nobody decided. [`docs/policy.md`](docs/policy.md)
+is the format.
+
+Start with an empty surface and let the assistant ask for what it needs as it goes:
 
 ```sh
 ./bin/toolbox mcp --all --minimal
 ```
 
-Or adopt just the capabilities you want — either from the host:
+Take only the capabilities you want — from the host:
 
 ```sh
 ./bin/toolbox mcp --component knowledge
 ./bin/toolbox mcp --component knowledge --component policy
 ```
 
-…or run a single capability on its own, with no host at all:
+…or run one on its own, with no host at all:
 
 ```sh
 ./bin/knowledge mcp
 ```
 
-Then read [`docs/feature-spec.md`](docs/feature-spec.md) — it describes what
-each part of the product must do, and where the current implementation stands
-against it.
+Point the toolbox at a core it did not start, with a fixed address every command
+agrees on — a flag, the environment, or a project file:
+
+```sh
+./bin/toolbox mcp --core core.internal:9180
+TOOLBOX_CORE=core.internal:9180 ./bin/toolbox mcp
+```
+
+Then read [`docs/feature-spec.md`](docs/feature-spec.md) — what each part of the
+product must do, and where the implementation stands against it.
 
 ## Who it is for
 
@@ -213,10 +245,24 @@ against it.
 
 ## Status
 
-Early and actively developed. The foundation works end to end today; the
-included knowledge, tool, agent and workflow capabilities are working reference
-implementations rather than finished products. The current state is written up
-in [`docs/status.md`](docs/status.md) and the plan in
+Early and actively developed. What works end to end today:
+
+- every capability is served over ConnectRPC, described by gRPC reflection, and
+  usable by an agent over the Model Context Protocol;
+- any API you already have can be read into one standard description — a service
+  contract, an OpenAPI document, or the tools a third-party MCP server already
+  publishes — and published back out in a format you did not write it in;
+- what an agent may call is a policy document you can read, edit, and keep under
+  version control.
+
+The daemon mode is designed and being built: a long-lived core that subsystems
+join by registering with it, serving one MCP to every client instead of a
+subprocess per session. See
+[`docs/decisions/0010-core-and-daemon.md`](docs/decisions/0010-core-and-daemon.md).
+
+The included knowledge, tool, agent and workflow capabilities are working
+reference implementations rather than finished products. The current state is
+written up in [`docs/status.md`](docs/status.md) and the plan in
 [`docs/todos.md`](docs/todos.md).
 
 ## Documentation
@@ -233,6 +279,7 @@ Engineering detail:
 
 - [Architecture](docs/architecture.md) — boundaries, runtime layers, composition, constraints
 - [MCP gateway](docs/mcp.md) — agent tooling, exposure control, client setup
+- [Policy](docs/policy.md) — the document deciding what an agent may call
 - [Development guide](docs/development.md) — build, contracts, code generation
 - [Testing guide](docs/testing.md) — test layers and required checks
 - [Protocol conventions](docs/protocol.md) and [decisions](docs/decisions/README.md)

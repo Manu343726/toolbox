@@ -57,7 +57,11 @@ func newRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		RunE:          runServe,
 	}
-	flags := root.Flags()
+	// Persistent, because every subcommand resolves the same four things: which
+	// subsystems, which policy, which core, and which workspace. A local flag on the
+	// root is invisible to a subcommand, so `toolbox mcp --all` would read a flag it
+	// never had.
+	flags := root.PersistentFlags()
 	flags.StringSlice("component", nil, "Subsystem names to launch; repeatable or comma-separated")
 	flags.Bool("all", false, "Launch all built-in subsystems")
 	flags.String("policy", "", "Path to a policy document deciding which operations may be exposed; the default grants every read and nothing that changes state")
