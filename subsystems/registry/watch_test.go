@@ -19,7 +19,11 @@ import (
 // these tests run against a served registry and a generated client rather than
 // against the store.
 
-func serve(t *testing.T) (*registry.Memory, registryv1connect.RegistryServiceClient) {
+// serve starts a real registry over a real endpoint and returns its store, its
+// address, and a generated client for it. A watch is only worth having if a client
+// on the other end of a socket gets it, so the tests run against this rather than
+// against the store.
+func serve(t *testing.T) (*registry.Memory, string, registryv1connect.RegistryServiceClient) {
 	t.Helper()
 	store := registry.NewMemory(registry.MemoryOptions{})
 	path, handler := registryv1connect.NewRegistryServiceHandler(registry.NewService(store))
@@ -30,7 +34,22 @@ func serve(t *testing.T) (*registry.Memory, registryv1connect.RegistryServiceCli
 	require.NoError(t, err)
 	require.NoError(t, server.Start(t.Context()))
 	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
-	return store, registryv1connect.NewRegistryServiceClient(http.DefaultClient, server.Endpoint())
+	return store, server.Endpoint(), registryv1connect.NewRegistryServiceClient(http.DefaultClient, server.Endpoint())
+}
+
+// serveStore starts a registry over a store the test built itself, for the cases
+// that need a store with its own clock or lease.
+func serveStore(t *testing.T, store *registry.Memory) (*registry.Memory, string, registryv1connect.RegistryServiceClient) {
+	t.Helper()
+	path, handler := registryv1connect.NewRegistryServiceHandler(registry.NewService(store))
+	server, err := subsystem.NewServer(subsystem.Config{
+		Name:     "registry",
+		Services: []subsystem.Service{{Name: registryv1connect.RegistryServiceName, Path: path, Handler: handler}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, server.Start(t.Context()))
+	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
+	return store, server.Endpoint(), registryv1connect.NewRegistryServiceClient(http.DefaultClient, server.Endpoint())
 }
 
 func descriptor(name, endpoint string) *registryv1.ServiceDescriptor {
@@ -44,7 +63,7 @@ func descriptor(name, endpoint string) *registryv1.ServiceDescriptor {
 func TestAWatchOpensWithWhatIsAlreadyRegistered(t *testing.T) {
 	// A client that learns nothing until the next change cannot answer a question
 	// asked in the meantime, so the stream opens with the current set.
-	store, client := serve(t)
+	store, _, client := serve(t)
 	_, err := store.Register(descriptor("first", "http://127.0.0.1:9001"), time.Minute)
 	require.NoError(t, err)
 	_, err = store.Register(descriptor("second", "http://127.0.0.1:9002"), time.Minute)
@@ -66,7 +85,7 @@ func TestAWatchOpensWithWhatIsAlreadyRegistered(t *testing.T) {
 }
 
 func TestAWatchReportsChangesAsTheyHappen(t *testing.T) {
-	store, client := serve(t)
+	store, _, client := serve(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -104,17 +123,9 @@ func TestALapsedLeaseIsReportedAsARemoval(t *testing.T) {
 		DefaultLease: time.Millisecond,
 		Now:          func() time.Time { return now },
 	})
-	path, handler := registryv1connect.NewRegistryServiceHandler(registry.NewService(store))
-	server, err := subsystem.NewServer(subsystem.Config{
-		Name:     "registry",
-		Services: []subsystem.Service{{Name: registryv1connect.RegistryServiceName, Path: path, Handler: handler}},
-	})
-	require.NoError(t, err)
-	require.NoError(t, server.Start(t.Context()))
-	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
-	client := registryv1connect.NewRegistryServiceClient(http.DefaultClient, server.Endpoint())
+	_, _, client := serveStore(t, store)
 
-	_, err = store.Register(descriptor("doomed", "http://127.0.0.1:9004"), time.Millisecond)
+	_, err := store.Register(descriptor("doomed", "http://127.0.0.1:9004"), time.Millisecond)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -137,7 +148,7 @@ func TestALapsedLeaseIsReportedAsARemoval(t *testing.T) {
 }
 
 func TestAWatchCanBeNarrowedToOneSubsystem(t *testing.T) {
-	store, client := serve(t)
+	store, _, client := serve(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -161,7 +172,7 @@ func TestAWatchCanBeNarrowedToOneSubsystem(t *testing.T) {
 }
 
 func TestAWatchEndsWhenTheClientGoesAway(t *testing.T) {
-	_, client := serve(t)
+	_, _, client := serve(t)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	stream, err := client.WatchServices(ctx, connect.NewRequest(&registryv1.WatchServicesRequest{}))
