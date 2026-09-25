@@ -5,7 +5,7 @@ export PATH := $(HOME)/go/bin:$(PATH)
 SUBSYSTEMS := $(sort $(notdir $(wildcard subsystems/*)))
 BIN_DIR := bin
 
-.PHONY: all build test test-short fmt vet clean proto-tools host
+.PHONY: all build test test-short fmt vet clean proto-tools host check-tests
 
 all: build
 
@@ -22,14 +22,22 @@ build:
 host:
 	@$(MAKE) -C cmd/toolsbox build
 
-test:
+check-tests:
+	@for subsystem in $(SUBSYSTEMS); do \
+		if [ -z "$$(find subsystems/$$subsystem -maxdepth 1 -name '*_test.go' -print -quit)" ]; then \
+			echo "subsystem $$subsystem has no unit tests" >&2; \
+			exit 1; \
+		fi; \
+	done
+
+test: check-tests
 	@for subsystem in $(SUBSYSTEMS); do \
 		$(MAKE) -C subsystems/$$subsystem test; \
 	done
 	@$(MAKE) -C cmd/toolsbox test
 	@go test -count=1 ./...
 
-test-short:
+test-short: check-tests
 	@for subsystem in $(SUBSYSTEMS); do \
 		$(MAKE) -C subsystems/$$subsystem test-short; \
 	done

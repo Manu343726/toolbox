@@ -1,0 +1,195 @@
+# Toolsbox agent instructions
+
+## Project purpose
+
+Toolsbox is a provider-neutral Go framework for composable AI-assisted workflows.
+The framework is made of independent ConnectRPC subsystems. Each subsystem owns
+its implementation, protobuf contract, generated clients, tests, and standalone
+command.
+
+Read these before making architectural changes:
+
+- `README.md` — repository layout and public packages.
+- `docs/architecture.md` — subsystem boundaries and runtime flows.
+- The relevant subsystem's `proto/`, implementation, and tests.
+- The relevant skill in `.agents/skills/`.
+
+## Non-negotiable architecture rules
+
+1. **A subsystem is an independent project.** Its canonical layout is:
+
+   ```text
+   subsystems/<name>/
+   ├── proto/<name>.proto
+   ├── <name>.go
+   ├── *_test.go
+   ├── docs_embed.go
+   ├── Makefile
+   ├── go.mod
+   └── cmd/<name>/main.go
+   ```
+
+2. **Every subsystem owns its own protobuf file and generated Go package.** Do
+   not create a framework-wide aggregate `.proto` file. Do not move another
+   subsystem's contract into a shared feature package.
+
+3. **Feature packages must not import one another.** A workflow may call an
+   agent service, but it must do so through ConnectRPC, discovery, and the core
+   client packages. Go imports between feature subsystems are architectural
+   coupling and require an explicit design discussion.
+
+4. **Shared foundation code belongs in the root public packages.** Use
+   `pkg/subsystem`, `pkg/core`, `pkg/discovery`, `pkg/docs`, `pkg/cli`, and
+   `pkg/cliapp` instead of copying SDK behavior into subsystems.
+
+5. **The registry resolves endpoints; reflection describes schemas.** Keep
+   endpoint discovery and protobuf reflection separate. Do not use a
+   compile-time map of feature endpoints as the runtime linking mechanism.
+
+6. **Known contracts use generated, type-safe clients.** Resolve first, then
+   construct the generated client with `core.Bind` or the generated constructor.
+   If resolution fails, fail before constructing or calling the client. Dynamic
+   calls are for unknown external contracts and must not replace typed contracts
+   when a generated client is available.
+
+7. **Reflection does not authorize a method as an agent tool.** Capabilities,
+   side effects, permissions, and approval requirements must be explicit in the
+   subsystem manifest or a policy layer.
+
+8. **Provider-specific code stays behind a subsystem boundary.** Core workflow,
+   agent, skill, and knowledge contracts must not contain OpenAI, Anthropic, or
+   other provider-specific request/response types.
+
+## Development workflow
+
+1. Read the relevant subsystem and architecture documentation.
+2. Load the matching project skill from `.agents/skills/`.
+3. Keep changes scoped to one subsystem unless a public foundation API is being
+   intentionally changed.
+4. Update protobuf comments and documentation when public behavior changes.
+5. Add or update unit tests in the same change as behavior changes.
+6. Run the subsystem's Makefile targets, then the root workspace checks.
+7. Inspect `git diff`, ensure generated files and binaries are not staged, commit,
+   and push to the configured remotes.
+
+Useful commands:
+
+```sh
+make test                 # all subsystems, host, and root packages
+make test-short           # fast workspace test suite
+make build                # standalone subsystem binaries and combined host
+make vet                  # vet all modules
+make fmt                  # format all hand-written Go files
+make host                 # build only cmd/toolsbox
+
+cd subsystems/<name>
+make proto                # regenerate local protobuf artifacts
+make test
+make build
+```
+
+For a true independent-module check, disable the workspace when appropriate:
+
+```sh
+GOWORK=off make -C subsystems/<name> test
+```
+
+Never use direct `go build` or `go run` as a substitute for a Makefile target.
+Do not add generated `*.pb.go`, `*.connect.go`, descriptor `.pb` files, binaries,
+SQLite files, or temporary artifacts to Git.
+
+## Protobuf and ConnectRPC rules
+
+- Put the subsystem's contract in `subsystems/<name>/proto/`.
+- Use a stable package and API version, for example
+  `package toolsbox.workflow.v1`.
+- Use a fully qualified `go_package` that points inside that subsystem module.
+- Document every service, RPC, message, field, enum, and enum value. These
+  comments are the source for generated CLI help and documentation.
+- Use enums for fixed option sets, `repeated` for multi-value fields, and
+  sub-messages to group related options. Do not use comma-separated option
+  strings.
+- Use `int32`/`int64` for numeric values and timestamps where appropriate;
+  reserve strings for genuinely textual or opaque identifiers.
+- Generate code with the subsystem Makefile. Generated Go is ignored by design.
+- The descriptor set must be generated with `--include_source_info`; the public
+  `pkg/docs` parser depends on source locations for comments.
+- Preserve API compatibility within a major API version. Additive changes are
+  preferred; breaking changes require a new package/version and migration notes.
+
+## Service implementation rules
+
+- Keep implementation state private to the subsystem. Do not expose shared
+  databases or mutable package globals as an integration API.
+- Use context deadlines and propagate cancellation through outbound calls.
+- Return canonical ConnectRPC error codes (`InvalidArgument`, `NotFound`,
+  `Unavailable`, `PermissionDenied`, and so on).
+- Validate identifiers, endpoints, capability names, and policy references at
+  subsystem boundaries.
+- Keep side effects behind explicit capabilities. Mutating or external actions
+  must be distinguishable in manifests and policy evaluation.
+- Do not log secrets, tokens, or full sensitive request payloads.
+- Prefer immutable definitions and explicit versions for domain resources.
+- Streaming methods must be represented in descriptors and tested explicitly;
+  dynamic unary invocation must reject streaming methods clearly until a
+  streaming client is implemented.
+
+## Testing requirements
+
+Every feature and every bug fix must include meaningful tests using
+`github.com/stretchr/testify/assert` and/or `require`.
+
+Minimum expectations for a subsystem:
+
+- Store/state tests: successful writes, replacement/version behavior, filtering,
+  and deterministic ordering.
+- Handler tests: valid requests, invalid requests, not-found behavior, and
+  ConnectRPC error-code assertions.
+- Boundary tests: validation and capability/policy metadata.
+- Concurrency tests when shared state, watchers, or lifecycle code is involved.
+- Integration tests for public foundation packages when behavior crosses
+  reflection, generated handlers, or typed clients.
+
+Use table-driven tests for input matrices. Test error paths, not only happy
+paths. Avoid sleeps and timing-dependent assertions; inject clocks or use
+bounded channels/contexts. Tests must be deterministic and must pass when the
+subsystem is tested independently with `GOWORK=off`.
+
+Required checks before completion:
+
+```sh
+make test
+make vet
+```
+
+For changes to shared concurrency/lifecycle code, also run:
+
+```sh
+go test -race ./...
+GOWORK=off make -C subsystems/<name> test
+```
+
+Do not weaken tests, skip tests, or replace assertions with logs to make a
+failure disappear.
+
+## Skills
+
+Project-specific skills live in `.agents/skills/`:
+
+- `toolsbox-architecture/SKILL.md` — subsystem boundaries and integration design.
+- `connectrpc-subsystem/SKILL.md` — protobuf, service, Makefile, and host work.
+- `toolsbox-testing/SKILL.md` — testify, unit, integration, and race-test rules.
+- `documentation-cli/SKILL.md` — descriptor documentation and generated CLI work.
+
+Load the relevant skill before editing files in its domain. Skills are
+instructions, not generated build artifacts; keep them concise and executable.
+
+## Git and change hygiene
+
+- Keep commits focused and descriptive.
+- Never stage generated code, binaries, descriptor files, databases, or logs.
+- Do not rewrite or discard unrelated user work.
+- Commit after a coherent change and push to all configured remotes. If a remote
+  is missing, report it rather than inventing a URL.
+- Update `README.md` or `docs/architecture.md` when public package boundaries,
+  module layout, or development commands change.
