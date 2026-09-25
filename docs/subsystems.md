@@ -136,7 +136,9 @@ over the contracts.
 ## Dependency rules
 
 - A feature subsystem may import root foundation packages.
-- A feature subsystem must not import another feature subsystem.
+- A feature subsystem may depend on another feature subsystem's contract and call
+  it over RPC after resolution. It must not import another subsystem's
+  implementation and call it in-process.
 - The combined host may import all built-in modules to compose them.
 - Runtime dependencies are represented by registry service references and declared
   dependencies, not Go imports.

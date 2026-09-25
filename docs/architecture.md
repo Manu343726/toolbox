@@ -166,7 +166,12 @@ SDK behavior.
 | `pkg/openapi`   | Reads, renders, serves, and calls APIs described by OpenAPI 3.x documents, with no transport of its own |
 
 A subsystem implements its own service and may import any of these packages. It
-must not import another feature subsystem.
+may also depend on another feature subsystem and call it: resolve the callee
+through a `core.Resolver`, then construct its generated client and make an RPC. What
+it must not do is import another subsystem's implementation and call it in-process,
+because that links the two lifecycles together and makes neither independently
+deployable. See
+[`decisions/0009-cross-subsystem-calls.md`](decisions/0009-cross-subsystem-calls.md).
 
 ## 6. Documentation and CLI flow
 
@@ -409,8 +414,17 @@ A capability moved between modes keeps its contract, policy, and documentation
 and is not migrated. Adding a subsystem to a running deployment does not change
 the contract, endpoint, or behavior of the subsystems already deployed; new
 cross-subsystem traffic appears only when a definition explicitly references the
-new capability. This is why a subsystem may not import another subsystem: doing
-so would make the cost of leaving one out non-zero.
+new capability.
+
+A cross-subsystem call is an RPC resolved at runtime, so a caller loads and starts
+whether or not its callee is present, and a deployment may leave the callee out.
+That is what keeps the cost of leaving a subsystem out at zero, and it is why a
+subsystem depends on another subsystem's *contract* rather than its
+implementation: importing the implementation would put the callee's state, storage,
+and lifecycle inside the caller's process, and the two would no longer be
+separately deployable. The residue is a build-time module dependency, which is real
+and is discussed in
+[`decisions/0009-cross-subsystem-calls.md`](decisions/0009-cross-subsystem-calls.md).
 
 ## 10. Data ownership and persistence
 

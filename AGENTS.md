@@ -33,10 +33,13 @@ Read these before making architectural changes:
    not create a framework-wide aggregate `.proto` file. Do not move another
    subsystem's contract into a shared feature package.
 
-3. **Feature packages must not import one another.** A workflow may call an
-   agent service, but it must do so through ConnectRPC, discovery, and the core
-   client packages. Go imports between feature subsystems are architectural
-   coupling and require an explicit design discussion.
+3. **A feature subsystem calls another over ConnectRPC, never in-process.** It
+   may depend on the callee's generated contract and construct the typed client
+   with `core.Bind` after resolving the endpoint, which is what lets a deployment
+   leave the callee out. It must not import another subsystem's implementation and
+   call it in-process: that links the two lifecycles and makes neither
+   independently deployable. See
+   `docs/decisions/0009-cross-subsystem-calls.md`.
 
 4. **Shared foundation code belongs in the root public packages.** Use
    `pkg/subsystem`, `pkg/core`, `pkg/discovery`, `pkg/docs`, `pkg/cli`,

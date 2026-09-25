@@ -1,6 +1,8 @@
 # ADR-0001: Independent subsystem modules
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by
+  [ADR-0009](0009-cross-subsystem-calls.md) (feature packages may depend on a
+  peer's *contract*; they may not import a peer's *implementation*)
 - **Date:** 2026-09-25
 
 ## Context
@@ -14,8 +16,9 @@ would make external replacement difficult.
 
 Every feature is an independent subsystem under `subsystems/<name>/` with its
 own Go module, Makefile, local proto contract, generated package,
-implementation, tests, and command. Feature implementation packages do not import
-one another. The combined host imports factories only for composition.
+implementation, tests, and command. A feature may depend on a peer's generated
+contract and call it over RPC; it does not import a peer's implementation and call
+it in-process. The combined host imports factories only for composition.
 
 ## Consequences
 
@@ -30,7 +33,9 @@ one another. The combined host imports factories only for composition.
 
 - One aggregate `platform.proto`: rejected because it couples unrelated feature
   contracts and makes independent versioning difficult.
-- Feature packages importing one another: rejected because it turns runtime
-  composition into compile-time coupling.
+- Feature packages importing a peer's *implementation*: rejected because it turns
+  runtime composition into compile-time coupling and links two lifecycles into one
+  process. Importing a peer's generated contract was wrongly rejected with it; see
+  [ADR-0009](0009-cross-subsystem-calls.md).
 - A plugin-only model with a shared global registry object: rejected because it
   obscures service boundaries and makes external implementations harder.

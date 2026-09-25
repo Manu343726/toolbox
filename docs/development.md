@@ -76,9 +76,34 @@ GOWORK=off make -C subsystems/workflow test
 10. Register the subsystem in the combined host only when it is a built-in.
 11. Update `docs/subsystems.md`, `docs/status.md`, and relevant API docs.
 
-A feature subsystem must not import another feature subsystem. If it needs a
-runtime dependency, inject or resolve a `core.Resolver` and call the generated
-client after resolution.
+A subsystem may call another subsystem. Resolve the callee with a
+`core.Resolver`, then construct its generated client with `core.Bind` and call it:
+
+```go
+resolver, err := core.NewRegistryResolver(registryEndpoint, nil)
+endpoint, err := resolver.Resolve(ctx, "toolbox.knowledge.v1.KnowledgeService")
+if err != nil {
+    return fmt.Errorf("knowledge is not available: %w", err)
+}
+client, err := core.Bind(ctx, core.NewClient(core.ClientOptions{Resolver: resolver}),
+    "toolbox.knowledge.v1.KnowledgeService", knowledgev1connect.NewKnowledgeServiceClient)
+if err != nil {
+    return fmt.Errorf("bind knowledge: %w", err)
+}
+response, err := client.Search(ctx, connect.NewRequest(&knowledgev1.SearchRequest{...}))
+```
+
+The call is an RPC, so the callee need not be running for the caller to load and a
+deployment may leave it out. What is forbidden is importing another subsystem's
+*implementation* and calling it in-process: that links its state, storage, and
+lifecycle into the caller's process, and the two stop being independently
+deployable.
+
+Depending on the callee's module is a **build** dependency, and it is the one cost
+this arrangement has. It is real — a subsystem whose contract moves forces its
+callers to rebuild. Two ways to avoid it: extract the contract into its own module,
+or depend on a shared contract module. See
+[`decisions/0009-cross-subsystem-calls.md`](decisions/0009-cross-subsystem-calls.md).
 
 ## Protobuf workflow
 
