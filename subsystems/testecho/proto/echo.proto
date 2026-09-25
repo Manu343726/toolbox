@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package toolsbox.testecho.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/testecho/echov1;echov1";
+
+// EchoService is a small service used to exercise discovery and CLI generation.
+service EchoService {
+  // Echo returns a response containing the supplied message.
+  rpc Echo(EchoRequest) returns (EchoResponse);
+  // StreamEcho demonstrates a server-streaming method.
+  rpc StreamEcho(EchoRequest) returns (stream EchoResponse);
+}
+
+// EchoMode controls response formatting in the test service.
+enum EchoMode {
+  // Use the default formatting behavior.
+  ECHO_MODE_UNSPECIFIED = 0;
+  // Preserve the input text.
+  ECHO_MODE_PLAIN = 1;
+  // Convert the input text to upper case.
+  ECHO_MODE_UPPER = 2;
+}
+
+// EchoRequest contains fields used to test CLI flag conversion.
+message EchoRequest {
+  // Text to echo.
+  string message = 1;
+  // Number of responses to produce for streaming calls.
+  int32 repeat = 2;
+  // Optional labels to echo.
+  repeated string tags = 3;
+  // Formatting mode.
+  EchoMode mode = 4;
+  // Whether the text should be upper-cased.
+  bool uppercase = 5;
+}
+
+// EchoResponse is the result of an echo operation.
+message EchoResponse {
+  // Echoed or transformed text.
+  string message = 1;
+  // Length of message in Unicode code points.
+  int32 length = 2;
+  // Labels associated with the response.
+  repeated string tags = 3;
+}

@@ -1,0 +1,55 @@
+module github.com/Manu343726/toolsbox/cmd/toolsbox
+
+go 1.27
+
+require (
+	connectrpc.com/connect v1.20.0
+	github.com/Manu343726/toolsbox v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/agent v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/documentation v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/health v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/knowledge v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/model v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/policy v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/prompt v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/registry v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/skill v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/tool v0.0.0
+	github.com/Manu343726/toolsbox/subsystems/workflow v0.0.0
+	github.com/spf13/cobra v1.10.2
+	github.com/stretchr/testify v1.12.1
+)
+
+require (
+	connectrpc.com/grpcreflect v1.3.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
+)
+
+replace github.com/Manu343726/toolsbox => ../..
+
+replace github.com/Manu343726/toolsbox/subsystems/agent => ../../subsystems/agent
+
+replace github.com/Manu343726/toolsbox/subsystems/documentation => ../../subsystems/documentation
+
+replace github.com/Manu343726/toolsbox/subsystems/health => ../../subsystems/health
+
+replace github.com/Manu343726/toolsbox/subsystems/knowledge => ../../subsystems/knowledge
+
+replace github.com/Manu343726/toolsbox/subsystems/model => ../../subsystems/model
+
+replace github.com/Manu343726/toolsbox/subsystems/policy => ../../subsystems/policy
+
+replace github.com/Manu343726/toolsbox/subsystems/prompt => ../../subsystems/prompt
+
+replace github.com/Manu343726/toolsbox/subsystems/registry => ../../subsystems/registry
+
+replace github.com/Manu343726/toolsbox/subsystems/skill => ../../subsystems/skill
+
+replace github.com/Manu343726/toolsbox/subsystems/tool => ../../subsystems/tool
+
+replace github.com/Manu343726/toolsbox/subsystems/workflow => ../../subsystems/workflow

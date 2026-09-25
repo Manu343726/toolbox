@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package toolsbox.tool.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/tool/toolv1;toolv1";
+
+// ToolService exposes explicitly declared capabilities for agent use.
+service ToolService {
+  // ListTools returns tools exposed by this subsystem.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  // InvokeTool executes a declared tool after policy checks.
+  rpc InvokeTool(InvokeToolRequest) returns (InvokeToolResponse);
+}
+
+// ToolDescriptor describes one tool and its side-effect classification.
+message ToolDescriptor {
+  // Stable tool name.
+  string name = 1;
+  // Human-readable description.
+  string description = 2;
+  // JSON schema for the tool input.
+  string input_schema_json = 3;
+  // Whether invocation changes state.
+  bool mutating = 4;
+  // Permission scope required by the tool.
+  string required_permission = 5;
+}
+
+// ListToolsRequest filters tools.
+message ListToolsRequest {
+  // Optional name prefix.
+  string name_prefix = 1;
+}
+
+// ListToolsResponse contains declared tools.
+message ListToolsResponse {
+  // Tool descriptors.
+  repeated ToolDescriptor tools = 1;
+}
+
+// InvokeToolRequest invokes a declared tool.
+message InvokeToolRequest {
+  // Tool name.
+  string name = 1;
+  // JSON arguments.
+  string arguments_json = 2;
+  // Optional idempotency key.
+  string idempotency_key = 3;
+}
+
+// InvokeToolResponse contains a tool result.
+message InvokeToolResponse {
+  // JSON result.
+  string result_json = 1;
+}

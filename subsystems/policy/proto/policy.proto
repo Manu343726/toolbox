@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package toolsbox.policy.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/policy/policyv1;policyv1";
+
+// PolicyService evaluates versioned domain rules and approval requirements.
+service PolicyService {
+  // Evaluate checks an action against a policy snapshot.
+  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+  // ListPolicies returns available policy snapshots.
+  rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
+}
+
+// PolicyAction describes an attempted capability invocation.
+message PolicyAction {
+  // Capability name.
+  string capability = 1;
+  // Optional resource or target identifier.
+  string resource = 2;
+  // Whether the action changes state.
+  bool mutating = 3;
+}
+
+// EvaluateRequest contains the action and policy context.
+message EvaluateRequest {
+  // Policy snapshot identifier.
+  string policy_id = 1;
+  // Action to evaluate.
+  PolicyAction action = 2;
+  // Optional workflow run identifier.
+  string run_id = 3;
+}
+
+// PolicyDecision is the result of evaluation.
+message PolicyDecision {
+  // Whether the action is allowed.
+  bool allowed = 1;
+  // Whether human approval is required.
+  bool approval_required = 2;
+  // Human-readable reason.
+  string reason = 3;
+}
+
+// EvaluateResponse contains one policy decision.
+message EvaluateResponse {
+  // Decision for the action.
+  PolicyDecision decision = 1;
+}
+
+// ListPoliciesRequest filters policy snapshots.
+message ListPoliciesRequest {
+  // Optional policy identifier prefix.
+  string id_prefix = 1;
+}
+
+// ListPoliciesResponse contains policy snapshot identifiers and versions.
+message ListPoliciesResponse {
+  // Policy identifiers.
+  repeated string policy_ids = 1;
+}

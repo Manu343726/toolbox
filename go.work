@@ -1,0 +1,18 @@
+go 1.27
+
+use (
+	.
+	./cmd/toolsbox
+	./subsystems/agent
+	./subsystems/documentation
+	./subsystems/health
+	./subsystems/knowledge
+	./subsystems/model
+	./subsystems/policy
+	./subsystems/prompt
+	./subsystems/registry
+	./subsystems/skill
+	./subsystems/testecho
+	./subsystems/tool
+	./subsystems/workflow
+)

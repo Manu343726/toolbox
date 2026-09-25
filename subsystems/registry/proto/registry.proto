@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package toolsbox.registry.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/registry/registryv1;registryv1";
+
+// RegistryService stores and resolves running subsystem registrations.
+service RegistryService {
+  // Register adds or replaces a subsystem registration.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // Heartbeat extends the lease for an existing registration.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Deregister removes a subsystem registration.
+  rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+  // GetService returns one registration by subsystem name.
+  rpc GetService(GetServiceRequest) returns (GetServiceResponse);
+  // ListServices returns registrations matching the supplied filters.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+}
+
+// RegistryStatus is the lifecycle state of a registered subsystem.
+enum RegistryStatus {
+  // No status was supplied.
+  REGISTRY_STATUS_UNSPECIFIED = 0;
+  // The subsystem is starting.
+  REGISTRY_STATUS_STARTING = 1;
+  // The subsystem is ready to serve requests.
+  REGISTRY_STATUS_SERVING = 2;
+  // The subsystem is not ready.
+  REGISTRY_STATUS_NOT_SERVING = 3;
+  // The subsystem is draining before shutdown.
+  REGISTRY_STATUS_DRAINING = 4;
+}
+
+// Capability is a semantic operation intentionally exposed by a subsystem.
+message Capability {
+  // Stable capability name, such as knowledge.search.
+  string name = 1;
+  // Human-readable capability description.
+  string description = 2;
+  // Permission scopes required to invoke the capability.
+  repeated string required_permissions = 3;
+}
+
+// ServiceDescriptor is the registry representation of one running subsystem.
+message ServiceDescriptor {
+  // Stable subsystem name, unique within a registry.
+  string subsystem_name = 1;
+  // Base HTTP endpoint exposing ConnectRPC services.
+  string endpoint = 2;
+  // Implementation version.
+  string implementation_version = 3;
+  // API contract version.
+  string api_version = 4;
+  // Fully-qualified protobuf service names mounted by the subsystem.
+  repeated string service_names = 5;
+  // Capabilities intentionally exposed by the subsystem.
+  repeated Capability capabilities = 6;
+  // Subsystem or capability dependencies.
+  repeated string dependencies = 7;
+  // Human-readable description.
+  string description = 8;
+  // Registration time as Unix nanoseconds since the epoch.
+  int64 registered_at_unix_nano = 9;
+  // Lease expiration as Unix nanoseconds since the epoch. Zero means no lease.
+  int64 lease_expires_at_unix_nano = 10;
+  // Current lifecycle status.
+  RegistryStatus status = 11;
+}
+
+// RegisterRequest registers a subsystem.
+message RegisterRequest {
+  // Descriptor to store.
+  ServiceDescriptor descriptor = 1;
+  // Lease duration in seconds. Zero uses the registry default.
+  int64 lease_seconds = 2;
+}
+
+// RegisterResponse acknowledges a registration.
+message RegisterResponse {
+  // Stored descriptor after defaults and timestamps are applied.
+  ServiceDescriptor descriptor = 1;
+}
+
+// HeartbeatRequest extends a registration lease.
+message HeartbeatRequest {
+  // Subsystem name whose lease should be extended.
+  string subsystem_name = 1;
+  // New lease duration in seconds. Zero uses the registry default.
+  int64 lease_seconds = 2;
+}
+
+// HeartbeatResponse returns the updated descriptor.
+message HeartbeatResponse {
+  // Updated descriptor.
+  ServiceDescriptor descriptor = 1;
+}
+
+// DeregisterRequest removes a registration.
+message DeregisterRequest {
+  // Subsystem name to remove.
+  string subsystem_name = 1;
+}
+
+// DeregisterResponse acknowledges removal.
+message DeregisterResponse {
+  // True when a registration was removed.
+  bool removed = 1;
+}
+
+// GetServiceRequest looks up one subsystem.
+message GetServiceRequest {
+  // Subsystem name to retrieve.
+  string subsystem_name = 1;
+}
+
+// GetServiceResponse contains one registration.
+message GetServiceResponse {
+  // Matching descriptor.
+  ServiceDescriptor descriptor = 1;
+}
+
+// ListServicesRequest filters registry entries.
+message ListServicesRequest {
+  // Return only this subsystem name when non-empty.
+  string subsystem_name = 1;
+  // Return only entries exposing all listed capabilities.
+  repeated string required_capabilities = 2;
+  // Include entries whose lease has expired.
+  bool include_expired = 3;
+}
+
+// ListServicesResponse contains matching registrations.
+message ListServicesResponse {
+  // Matching descriptors sorted by subsystem name.
+  repeated ServiceDescriptor services = 1;
+}

@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package toolsbox.documentation.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/documentation/documentationv1;documentationv1";
+
+// DocumentationService exposes protobuf-derived documentation for CLI and
+// agent clients.
+service DocumentationService {
+  // GetDocumentation returns documentation for one fully-qualified service.
+  rpc GetDocumentation(GetDocumentationRequest) returns (GetDocumentationResponse);
+  // ListDocumentation returns all matching service documentation.
+  rpc ListDocumentation(ListDocumentationRequest) returns (ListDocumentationResponse);
+}
+
+// GetDocumentationRequest requests one service.
+message GetDocumentationRequest {
+  // Fully-qualified protobuf service name.
+  string service_name = 1;
+}
+
+// GetDocumentationResponse contains one service's documentation.
+message GetDocumentationResponse {
+  // Documentation for the requested service.
+  ServiceDocumentation documentation = 1;
+}
+
+// ListDocumentationRequest filters documentation.
+message ListDocumentationRequest {
+  // Return only this service when non-empty.
+  string service_name = 1;
+}
+
+// ListDocumentationResponse contains matching documentation.
+message ListDocumentationResponse {
+  // Services sorted by fully-qualified name.
+  repeated ServiceDocumentation services = 1;
+}
+
+// DocumentationSet is documentation extracted from one proto file.
+message DocumentationSet {
+  // Proto package name.
+  string package = 1;
+  // File-level leading comment.
+  string description = 2;
+  // Services defined in the file.
+  repeated ServiceDocumentation services = 3;
+}
+
+// ServiceDocumentation documents one protobuf service.
+message ServiceDocumentation {
+  // Fully-qualified protobuf service name.
+  string name = 1;
+  // Leading service comment.
+  string description = 2;
+  // Methods exposed by the service.
+  repeated MethodDocumentation methods = 3;
+}
+
+// MethodDocumentation documents one RPC.
+message MethodDocumentation {
+  // RPC method name.
+  string name = 1;
+  // Leading method comment.
+  string description = 2;
+  // Fully-qualified input message name.
+  string input_type = 3;
+  // Fully-qualified output message name.
+  string output_type = 4;
+  // Whether the client streams requests.
+  bool client_streaming = 5;
+  // Whether the server streams responses.
+  bool server_streaming = 6;
+  // Top-level request parameters.
+  repeated ParameterDocumentation parameters = 7;
+}
+
+// ParameterDocumentation documents one request field.
+message ParameterDocumentation {
+  // Protobuf field name.
+  string name = 1;
+  // Leading field comment.
+  string description = 2;
+  // Scalar or fully-qualified type name.
+  string type_name = 3;
+  // Whether the field is repeated or a map.
+  bool repeated = 4;
+  // Whether the field has explicit presence.
+  bool required = 5;
+  // Default value, when protobuf defines one.
+  string default_value = 6;
+  // Nested message fields.
+  repeated ParameterDocumentation fields = 7;
+}

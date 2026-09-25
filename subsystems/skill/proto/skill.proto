@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package toolsbox.skill.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/skill/skillv1;skillv1";
+
+// SkillService stores reusable, versioned skills and prompt resources.
+service SkillService {
+  // PutSkill creates or replaces a skill.
+  rpc PutSkill(PutSkillRequest) returns (PutSkillResponse);
+  // GetSkill returns one skill.
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+  // ListSkills returns stored skills.
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+}
+
+// Skill is a reusable instruction and capability contract.
+message Skill {
+  // Stable skill identifier.
+  string id = 1;
+  // Skill version.
+  string version = 2;
+  // Human-readable name.
+  string name = 3;
+  // Human-readable description.
+  string description = 4;
+  // Instruction body or a reference to a packaged instruction.
+  string instructions = 5;
+  // Capability references required by the skill.
+  repeated string required_capabilities = 6;
+  // Policy references required by the skill.
+  repeated string policy_refs = 7;
+}
+
+// PutSkillRequest stores a skill.
+message PutSkillRequest {
+  // Skill to store.
+  Skill skill = 1;
+  // Reject replacement when true and the skill already exists.
+  bool fail_if_exists = 2;
+}
+
+// PutSkillResponse returns the stored skill.
+message PutSkillResponse {
+  // Stored skill.
+  Skill skill = 1;
+}
+
+// GetSkillRequest identifies a skill version.
+message GetSkillRequest {
+  // Skill identifier.
+  string id = 1;
+  // Optional version. Empty returns the latest version.
+  string version = 2;
+}
+
+// GetSkillResponse contains one skill.
+message GetSkillResponse {
+  // Matching skill.
+  Skill skill = 1;
+}
+
+// ListSkillsRequest filters stored skills.
+message ListSkillsRequest {
+  // Optional identifier prefix.
+  string id_prefix = 1;
+}
+
+// ListSkillsResponse contains stored skills.
+message ListSkillsResponse {
+  // Skills sorted by identifier and version.
+  repeated Skill skills = 1;
+}

@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package toolsbox.prompt.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/prompt/promptv1;promptv1";
+
+// PromptService stores reusable, provider-neutral prompt templates.
+service PromptService {
+  // PutPrompt creates or replaces a prompt template.
+  rpc PutPrompt(PutPromptRequest) returns (PutPromptResponse);
+  // GetPrompt returns one prompt template.
+  rpc GetPrompt(GetPromptRequest) returns (GetPromptResponse);
+  // ListPrompts returns stored prompt templates.
+  rpc ListPrompts(ListPromptsRequest) returns (ListPromptsResponse);
+  // RenderPrompt renders a template with string variables.
+  rpc RenderPrompt(RenderPromptRequest) returns (RenderPromptResponse);
+}
+
+// PromptTemplate is a versioned provider-neutral prompt.
+message PromptTemplate {
+  // Stable prompt identifier.
+  string id = 1;
+  // Template version.
+  string version = 2;
+  // Human-readable name.
+  string name = 3;
+  // Template body containing {{variable}} placeholders.
+  string template = 4;
+  // Declared variable names.
+  repeated string variables = 5;
+}
+
+// PutPromptRequest stores a prompt template.
+message PutPromptRequest {
+  // Template to store.
+  PromptTemplate prompt = 1;
+  // Reject replacement when true and the prompt already exists.
+  bool fail_if_exists = 2;
+}
+
+// PutPromptResponse returns the stored template.
+message PutPromptResponse {
+  // Stored template.
+  PromptTemplate prompt = 1;
+}
+
+// GetPromptRequest identifies a prompt version.
+message GetPromptRequest {
+  // Prompt identifier.
+  string id = 1;
+  // Optional version. Empty returns the latest version.
+  string version = 2;
+}
+
+// GetPromptResponse contains one template.
+message GetPromptResponse {
+  // Matching template.
+  PromptTemplate prompt = 1;
+}
+
+// ListPromptsRequest filters stored templates.
+message ListPromptsRequest {
+  // Optional identifier prefix.
+  string id_prefix = 1;
+}
+
+// ListPromptsResponse contains stored templates.
+message ListPromptsResponse {
+  // Templates sorted by identifier and version.
+  repeated PromptTemplate prompts = 1;
+}
+
+// RenderPromptRequest renders a stored template.
+message RenderPromptRequest {
+  // Prompt identifier.
+  string id = 1;
+  // Optional version. Empty renders the latest version.
+  string version = 2;
+  // Variable values keyed by variable name.
+  map<string, string> variables = 3;
+}
+
+// RenderPromptResponse contains the rendered text.
+message RenderPromptResponse {
+  // Rendered prompt text.
+  string text = 1;
+}

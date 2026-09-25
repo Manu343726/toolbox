@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package toolsbox.agent.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/agent/agentv1;agentv1";
+
+// AgentService stores provider-neutral agent profiles.
+service AgentService {
+  // PutAgent creates or replaces an agent profile.
+  rpc PutAgent(PutAgentRequest) returns (PutAgentResponse);
+  // GetAgent returns one agent profile.
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+  // ListAgents returns stored agent profiles.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+}
+
+// AgentProfile describes an agent without binding it to a model provider.
+message AgentProfile {
+  // Stable agent identifier.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // Profile version.
+  string version = 3;
+  // System instructions or prompt references.
+  repeated string instruction_refs = 4;
+  // Skill references available to the agent.
+  repeated string skill_refs = 5;
+  // Tool capability references available to the agent.
+  repeated string tool_refs = 6;
+  // Knowledge source references available to the agent.
+  repeated string knowledge_refs = 7;
+  // Policy references applied to every run.
+  repeated string policy_refs = 8;
+}
+
+// PutAgentRequest stores an agent profile.
+message PutAgentRequest {
+  // Profile to store.
+  AgentProfile profile = 1;
+  // Reject replacement when true and the profile already exists.
+  bool fail_if_exists = 2;
+}
+
+// PutAgentResponse returns the stored profile.
+message PutAgentResponse {
+  // Stored profile.
+  AgentProfile profile = 1;
+}
+
+// GetAgentRequest identifies an agent version.
+message GetAgentRequest {
+  // Agent identifier.
+  string id = 1;
+  // Optional version. Empty returns the latest version.
+  string version = 2;
+}
+
+// GetAgentResponse contains one agent profile.
+message GetAgentResponse {
+  // Matching profile.
+  AgentProfile profile = 1;
+}
+
+// ListAgentsRequest filters stored profiles.
+message ListAgentsRequest {
+  // Optional identifier prefix.
+  string id_prefix = 1;
+}
+
+// ListAgentsResponse contains stored profiles.
+message ListAgentsResponse {
+  // Profiles sorted by identifier and version.
+  repeated AgentProfile agents = 1;
+}

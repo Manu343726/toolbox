@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package toolsbox.workflow.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/workflow/workflowv1;workflowv1";
+
+// WorkflowService stores and validates portable workflow definitions.
+service WorkflowService {
+  // PutWorkflow creates or replaces a workflow definition.
+  rpc PutWorkflow(PutWorkflowRequest) returns (PutWorkflowResponse);
+  // GetWorkflow returns one workflow definition.
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  // ListWorkflows returns stored workflow definitions.
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  // ValidateWorkflow checks a definition without storing it.
+  rpc ValidateWorkflow(ValidateWorkflowRequest) returns (ValidateWorkflowResponse);
+}
+
+// WorkflowDefinition is the versioned, provider-neutral workflow document.
+message WorkflowDefinition {
+  // Stable workflow identifier.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // Definition version.
+  string version = 3;
+  // Human-readable description.
+  string description = 4;
+  // JSON-encoded workflow graph. The workflow service validates the graph
+  /// before accepting it; clients should not interpret provider-specific data.
+  string graph_json = 5;
+  // Policy or domain-pack references.
+  repeated string policy_refs = 6;
+}
+
+// PutWorkflowRequest stores a workflow definition.
+message PutWorkflowRequest {
+  // Definition to store.
+  WorkflowDefinition definition = 1;
+  // Reject replacement when true and a definition already exists.
+  bool fail_if_exists = 2;
+}
+
+// PutWorkflowResponse returns the stored definition.
+message PutWorkflowResponse {
+  // Stored definition.
+  WorkflowDefinition definition = 1;
+}
+
+// GetWorkflowRequest identifies a workflow version.
+message GetWorkflowRequest {
+  // Workflow identifier.
+  string id = 1;
+  // Optional version. Empty returns the latest version.
+  string version = 2;
+}
+
+// GetWorkflowResponse contains one workflow.
+message GetWorkflowResponse {
+  // Matching definition.
+  WorkflowDefinition definition = 1;
+}
+
+// ListWorkflowsRequest filters stored workflows.
+message ListWorkflowsRequest {
+  // Optional identifier prefix.
+  string id_prefix = 1;
+}
+
+// ListWorkflowsResponse contains stored workflows.
+message ListWorkflowsResponse {
+  // Definitions sorted by identifier and version.
+  repeated WorkflowDefinition workflows = 1;
+}
+
+// ValidateWorkflowRequest validates a candidate definition.
+message ValidateWorkflowRequest {
+  // Candidate definition.
+  WorkflowDefinition definition = 1;
+}
+
+// ValidationIssue describes one problem in a workflow definition.
+message ValidationIssue {
+  // Dotted path to the invalid field.
+  string path = 1;
+  // Human-readable issue description.
+  string message = 2;
+  // Whether the issue prevents execution.
+  bool fatal = 3;
+}
+
+// ValidateWorkflowResponse contains validation results.
+message ValidateWorkflowResponse {
+  // True when no fatal issue was found.
+  bool valid = 1;
+  // All issues found during validation.
+  repeated ValidationIssue issues = 2;
+}

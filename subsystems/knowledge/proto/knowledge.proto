@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package toolsbox.knowledge.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/knowledge/knowledgev1;knowledgev1";
+
+// KnowledgeService stores sources and exposes provider-neutral retrieval.
+service KnowledgeService {
+  // PutSource creates or replaces a knowledge source.
+  rpc PutSource(PutSourceRequest) returns (PutSourceRequestResponse);
+  // GetSource returns one source.
+  rpc GetSource(GetSourceRequest) returns (GetSourceResponse);
+  // Search retrieves relevant passages from the knowledge base.
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+// KnowledgeSource identifies a document collection or ingestion source.
+message KnowledgeSource {
+  // Stable source identifier.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // Source type, such as file, URL, or database.
+  string type = 3;
+  // Source-specific location.
+  string location = 4;
+  // Optional domain or policy tags.
+  repeated string tags = 5;
+}
+
+// PutSourceRequest stores a source.
+message PutSourceRequest {
+  // Source to store.
+  KnowledgeSource source = 1;
+}
+
+// PutSourceRequestResponse acknowledges a source write.
+message PutSourceRequestResponse {
+  // Stored source.
+  KnowledgeSource source = 1;
+}
+
+// GetSourceRequest identifies a source.
+message GetSourceRequest {
+  // Source identifier.
+  string id = 1;
+}
+
+// GetSourceResponse contains one source.
+message GetSourceResponse {
+  // Matching source.
+  KnowledgeSource source = 1;
+}
+
+// SearchRequest queries the knowledge base.
+message SearchRequest {
+  // Search text.
+  string query = 1;
+  // Maximum number of passages to return.
+  int32 limit = 2;
+  // Optional source or tag filters.
+  repeated string tags = 3;
+}
+
+// SearchPassage is one retrieved knowledge passage.
+message SearchPassage {
+  // Source identifier.
+  string source_id = 1;
+  // Passage text.
+  string text = 2;
+  // Provider-neutral relevance score when available.
+  double score = 3;
+}
+
+// SearchResponse contains retrieved passages.
+message SearchResponse {
+  // Matching passages.
+  repeated SearchPassage passages = 1;
+}

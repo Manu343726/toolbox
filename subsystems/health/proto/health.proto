@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package toolsbox.health.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/health/healthv1;healthv1";
+
+// HealthService reports subsystem readiness.
+service HealthService {
+  // Check returns the current health of the requested component.
+  rpc Check(CheckRequest) returns (CheckResponse);
+}
+
+// HealthStatus describes a component lifecycle state.
+enum HealthStatus {
+  // No status was supplied.
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  // The component is initializing.
+  HEALTH_STATUS_STARTING = 1;
+  // The component is ready to serve requests.
+  HEALTH_STATUS_SERVING = 2;
+  // The component cannot currently serve requests.
+  HEALTH_STATUS_NOT_SERVING = 3;
+  // The component is shutting down.
+  HEALTH_STATUS_DRAINING = 4;
+}
+
+// CheckRequest identifies the component to inspect.
+message CheckRequest {
+  // Component name. Empty checks the server itself.
+  string component_name = 1;
+}
+
+// CheckResponse contains component health.
+message CheckResponse {
+  // Current lifecycle status.
+  HealthStatus status = 1;
+  // Human-readable status detail.
+  string message = 2;
+  // Component version.
+  string version = 3;
+}

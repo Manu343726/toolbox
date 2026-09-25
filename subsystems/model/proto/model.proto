@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package toolsbox.model.v1;
+
+option go_package = "github.com/Manu343726/toolsbox/subsystems/model/modelv1;modelv1";
+
+// ModelService exposes provider-neutral model capabilities.
+service ModelService {
+  // ListModels returns models available through registered providers.
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  // Generate produces a response using a provider-neutral request.
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+}
+
+// ModelDescriptor describes one available model.
+message ModelDescriptor {
+  // Stable model identifier.
+  string id = 1;
+  // Provider name, kept outside workflow and agent contracts.
+  string provider = 2;
+  // Human-readable model name.
+  string display_name = 3;
+  // Maximum context size in tokens when known.
+  int32 context_window = 4;
+  // Whether the model supports tool calls.
+  bool supports_tools = 5;
+}
+
+// ListModelsRequest filters the model catalog.
+message ListModelsRequest {
+  // Optional provider filter.
+  string provider = 1;
+}
+
+// ListModelsResponse contains available models.
+message ListModelsResponse {
+  // Model descriptors.
+  repeated ModelDescriptor models = 1;
+}
+
+// GenerateRequest is a provider-neutral generation request.
+message GenerateRequest {
+  // Model identifier.
+  string model_id = 1;
+  // User or system prompt text.
+  string prompt = 2;
+  // Optional sampling temperature.
+  double temperature = 3;
+  // Optional maximum output tokens.
+  int32 max_output_tokens = 4;
+}
+
+// GenerateResponse contains generated text.
+message GenerateResponse {
+  // Model identifier that produced the response.
+  string model_id = 1;
+  // Generated text.
+  string text = 2;
+}
