@@ -188,6 +188,23 @@ Calls should propagate request, trace, run, actor, workspace, and policy
 metadata. Authentication and authorization metadata must not be smuggled through
 untyped request fields.
 
+### MCP exposure
+
+Every ConnectRPC service can be projected into an MCP server. Reflection
+supplies the service schema, documentation, and unary invocation mechanics.
+An explicit feature policy supplies authorization. The MCP surface must
+support:
+
+1. generated tools for allowed unary methods;
+2. introspection tools for listing services and features;
+3. feature documentation and schema inspection;
+4. runtime expose/hide operations that change the tool surface;
+5. a generic `call_rpc` tool subject to the same policy and exposure gate;
+6. independent per-service MCPs and one aggregated MCP over discovered
+   services;
+7. automatic `mcp` subcommands on standalone subsystem commands and the
+   combined host.
+
 ## 6. Functional requirements
 
 | ID | Requirement | Current state |
@@ -208,6 +225,10 @@ untyped request fields.
 | F-014 | Production persistence and migrations | Not implemented |
 | F-015 | Streaming client invocation | Not implemented |
 | F-016 | Authentication, authorization, and secret management | Not implemented |
+| F-017 | MCP generation from reflected ConnectRPC services | Implemented for unary methods |
+| F-018 | MCP introspection and runtime feature exposure | Implemented |
+| F-019 | Independent and aggregated MCP deployment | Implemented |
+| F-020 | Session-isolated MCP exposure over HTTP | Not implemented |
 
 ## 7. Quality requirements
 
@@ -219,6 +240,10 @@ untyped request fields.
 - Generated artifacts are reproducible from proto and Makefiles.
 - Errors use canonical ConnectRPC status codes.
 - No provider-specific types leak into provider-neutral feature contracts.
+- MCP feature exposure is concurrency-safe and does not bypass the feature
+  policy through the generic RPC tool.
+- MCP schema generation and introspection are covered by in-memory protocol
+  tests and a real reflection integration test.
 
 ## 8. Acceptance criteria for the foundation milestone
 
@@ -231,6 +256,10 @@ The foundation is complete when:
 - an unresolved service fails before typed client construction;
 - the CLI can generate unary commands from reflection and documentation;
 - the combined host can launch one or all built-in subsystems;
+- a standalone subsystem can launch an independent MCP and the host can launch
+  an aggregated MCP;
+- MCP introspection can list, document, expose, hide, and call allowed unary
+  features;
 - all subsystem tests and root checks pass.
 
 The current repository satisfies this foundation milestone. Production workflow

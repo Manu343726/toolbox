@@ -5,16 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolsbox/pkg/cli"
+	"github.com/Manu343726/toolsbox/pkg/cliapp"
 	"github.com/Manu343726/toolsbox/pkg/core"
 	"github.com/Manu343726/toolsbox/pkg/discovery"
 	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
+	toolsboxmcp "github.com/Manu343726/toolsbox/pkg/mcp"
 	"github.com/Manu343726/toolsbox/pkg/subsystem"
 	testecho "github.com/Manu343726/toolsbox/subsystems/testecho"
 	echov1 "github.com/Manu343726/toolsbox/subsystems/testecho/echov1"
 	"github.com/Manu343726/toolsbox/subsystems/testecho/echov1/echov1connect"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -105,6 +109,158 @@ func TestGeneratedCLIUsesReflectedSchema(t *testing.T) {
 	root.SetArgs([]string{"echo", "echo", "--help"})
 	require.NoError(t, root.Execute())
 	assert.Contains(t, help.String(), "Text to echo")
+}
+
+func TestStandaloneCommandAutomaticallyIncludesMCP(t *testing.T) {
+	var output bytes.Buffer
+	err := cliapp.Run(context.Background(), cliapp.Options{
+		Name:        testecho.Name,
+		Description: "Reference echo subsystem",
+		Factory: func() (*subsystem.Server, error) {
+			return testecho.New(testecho.Options{})
+		},
+		Output: &output,
+		Args:   []string{"mcp", "--help"},
+	})
+	// Run has no args here, so the generated root prints its help.
+	require.NoError(t, err)
+	assert.Contains(t, output.String(), "mcp")
+	assert.Contains(t, output.String(), "Launch a Model Context Protocol server")
+	assert.Contains(t, output.String(), "--service")
+}
+
+func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
+	server, err := testechoServer(t)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, server.Shutdown(context.Background())) }()
+
+	singleService, err := toolsboxmcp.NewFromSubsystemService(context.Background(), server, "toolsbox.testecho.v1.EchoService", toolsboxmcp.Options{})
+	require.NoError(t, err)
+	assert.Len(t, singleService.Features(), 2)
+	_, err = toolsboxmcp.NewFromSubsystemService(context.Background(), server, "missing.v1.Service", toolsboxmcp.Options{})
+	assert.Error(t, err)
+
+	resolved, err := toolsboxmcp.NewFromResolver(context.Background(), core.NewStaticResolver(core.Endpoint{
+		Name:         "echo",
+		URL:          server.Endpoint(),
+		ServiceNames: []string{"toolsbox.testecho.v1.EchoService"},
+		Capabilities: []string{"testecho.echo"},
+	}), []string{"toolsbox.testecho.v1.EchoService"}, toolsboxmcp.Options{})
+	require.NoError(t, err)
+	assert.Len(t, resolved.Features(), 2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bridge, err := toolsboxmcp.NewFromSubsystem(ctx, server, toolsboxmcp.Options{
+		Name:            "testecho-mcp",
+		InitialExposure: toolsboxmcp.ExposeAllowedFeatures,
+	})
+	require.NoError(t, err)
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- bridge.Run(ctx, serverTransport) }()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer func() { _ = session.Close() }()
+
+	tools, err := session.ListTools(ctx, nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		names = append(names, tool.Name)
+	}
+	assert.Contains(t, names, toolsboxmcp.ToolListFeatures)
+	assert.Contains(t, names, toolsboxmcp.ToolExposeFeature)
+	assert.Contains(t, names, toolsboxmcp.ToolCallRPC)
+	assert.Contains(t, names, "echo__echo")
+	assert.NotContains(t, names, "echo__stream_echo")
+
+	result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "echo__echo",
+		Arguments: map[string]any{"message": "mcp", "uppercase": true},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "MCP")
+
+	featureID := "toolsbox.testecho.v1.EchoService/Echo"
+	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      toolsboxmcp.ToolHideFeature,
+		Arguments: map[string]any{"feature": featureID},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	tools, err = session.ListTools(ctx, nil)
+	require.NoError(t, err)
+	assert.NotContains(t, toolNames(tools.Tools), "echo__echo")
+
+	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: toolsboxmcp.ToolCallRPC,
+		Arguments: map[string]any{
+			"service": "toolsbox.testecho.v1.EchoService",
+			"method":  "Echo",
+			"request": map[string]any{"message": "hidden"},
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "hidden")
+
+	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      toolsboxmcp.ToolExposeFeature,
+		Arguments: map[string]any{"feature": featureID},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: toolsboxmcp.ToolCallRPC,
+		Arguments: map[string]any{
+			"service": "toolsbox.testecho.v1.EchoService",
+			"method":  "Echo",
+			"request": map[string]any{"message": "again"},
+		},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "again")
+
+	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      toolsboxmcp.ToolReadFeatureDocumentation,
+		Arguments: map[string]any{"feature": featureID},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "Text to echo")
+
+	cancel()
+	select {
+	case err := <-serverErr:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("MCP server did not stop after context cancellation")
+	}
+}
+
+func resultText(t *testing.T, result *sdkmcp.CallToolResult) string {
+	t.Helper()
+	if result == nil {
+		return ""
+	}
+	for _, content := range result.Content {
+		if text, ok := content.(*sdkmcp.TextContent); ok {
+			return text.Text
+		}
+	}
+	return ""
+}
+
+func toolNames(tools []*sdkmcp.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return names
 }
 
 func testechoServer(t *testing.T) (*subsystem.Server, error) {

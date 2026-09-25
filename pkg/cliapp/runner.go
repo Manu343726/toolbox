@@ -11,9 +11,26 @@ import (
 
 	"github.com/Manu343726/toolsbox/pkg/cli"
 	"github.com/Manu343726/toolsbox/pkg/discovery"
+	toolsboxmcp "github.com/Manu343726/toolsbox/pkg/mcp"
 	"github.com/Manu343726/toolsbox/pkg/subsystem"
 	"github.com/spf13/cobra"
 )
+
+// MCPOptions configures the automatically generated `mcp` subcommand.
+type MCPOptions struct {
+	// Policy optionally overrides the feature policy derived from subsystem
+	// service capabilities.
+	Policy toolsboxmcp.FeaturePolicy
+	// InitialExposure controls whether generated feature tools are present
+	// immediately. The zero value exposes all allowed unary features.
+	InitialExposure toolsboxmcp.InitialExposure
+	// IncludeInfrastructure exposes health, registry, documentation, and
+	// reflection services in the MCP catalog.
+	IncludeInfrastructure bool
+	// ServiceName optionally restricts the generated MCP to one mounted
+	// service. Empty includes every service on the subsystem.
+	ServiceName string
+}
 
 // Options configures a standalone subsystem command.
 type Options struct {
@@ -29,6 +46,11 @@ type Options struct {
 	IncludeInfrastructure bool
 	// Output receives generated command output. Defaults to os.Stdout.
 	Output io.Writer
+	// Args optionally supplies command arguments for programmatic callers and
+	// tests. Nil uses the process arguments in normal command mains.
+	Args []string
+	// MCP configures the automatically generated `mcp` subcommand.
+	MCP MCPOptions
 }
 
 // Run starts a subsystem and executes its generated command tree.
@@ -73,11 +95,63 @@ func Run(ctx context.Context, options Options) error {
 		},
 	}
 	root.AddCommand(serveCommand)
+	mcpCommand := &cobra.Command{
+		Use:   "mcp",
+		Short: "Launch an MCP server generated from this subsystem",
+		Long:  "Launch a Model Context Protocol server over stdio. The server reflects this subsystem's RPC services, exposes unary methods as tools, and provides introspection and exposure tools.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			minimal, err := cmd.Flags().GetBool("minimal")
+			if err != nil {
+				return err
+			}
+			includeInfrastructure, err := cmd.Flags().GetBool("include-infrastructure")
+			if err != nil {
+				return err
+			}
+			serviceName, err := cmd.Flags().GetString("service")
+			if err != nil {
+				return err
+			}
+			if serviceName == "" {
+				serviceName = options.MCP.ServiceName
+			}
+			initialExposure := options.MCP.InitialExposure
+			if minimal {
+				initialExposure = toolsboxmcp.ExposeNoFeatures
+			}
+			mcpOptions := toolsboxmcp.Options{
+				Name:                  options.Name,
+				Description:           options.Description,
+				Policy:                options.MCP.Policy,
+				InitialExposure:       initialExposure,
+				IncludeInfrastructure: includeInfrastructure || options.MCP.IncludeInfrastructure,
+			}
+			var bridge *toolsboxmcp.Server
+			if serviceName != "" {
+				bridge, err = toolsboxmcp.NewFromSubsystemService(cmd.Context(), server, serviceName, mcpOptions)
+			} else {
+				bridge, err = toolsboxmcp.NewFromSubsystem(cmd.Context(), server, mcpOptions)
+			}
+			if err != nil {
+				return err
+			}
+			return bridge.ServeStdio(cmd.Context())
+		},
+	}
+	mcpFlags := mcpCommand.Flags()
+	mcpFlags.Bool("minimal", false, "Start with only introspection tools; expose RPC features explicitly")
+	mcpFlags.Bool("include-infrastructure", false, "Include health, registry, documentation, and reflection services")
+	mcpFlags.String("service", "", "Expose only one mounted service by fully-qualified protobuf name")
+	root.AddCommand(mcpCommand)
 	if options.Output != nil {
 		root.SetOut(options.Output)
 		root.SetErr(options.Output)
 	}
 	root.SetContext(ctx)
+	if options.Args != nil {
+		root.SetArgs(options.Args)
+	}
 	return root.Execute()
 }
 

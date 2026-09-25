@@ -80,6 +80,27 @@ names alone.
 - Record the exact workflow, agent, skill, prompt, model, and policy versions in
   a run record.
 
+## MCP exposure
+
+The MCP gateway uses the official Model Context Protocol Go SDK. A reflected
+RPC method is a candidate feature, but it becomes a tool only when an explicit
+`FeaturePolicy` allows it. Exposure changes the `tools/list` surface and emits
+`notifications/tools/list_changed`; it is not a replacement for authorization.
+
+The always-on MCP management surface is:
+
+- `list_services`
+- `list_features`
+- `describe_feature`
+- `read_feature_documentation`
+- `expose_feature`
+- `hide_feature`
+- `feature_exposure`
+- `call_rpc`
+
+`call_rpc` uses the same policy and exposure gate as generated tools. Streaming
+methods are introspectable but explicitly rejected by the unary gateway.
+
 ## Documentation
 
 Comments in `.proto` files are the source of generated service documentation

@@ -7,5 +7,6 @@ repository. Load the skill that matches the task before editing code.
 - [ConnectRPC subsystems](connectrpc-subsystem/SKILL.md)
 - [Toolsbox testing](toolsbox-testing/SKILL.md)
 - [Documentation and CLI](documentation-cli/SKILL.md)
+- [Toolsbox MCP gateway](toolsbox-mcp/SKILL.md)
 
 The skills supplement the repository `AGENTS.md`; they do not replace it.

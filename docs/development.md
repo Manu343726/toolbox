@@ -137,6 +137,27 @@ Do not hand-write RPC flags in a subsystem command. Use `pkg/cliapp` and let
 `pkg/cli` discover the service through reflection. Add CLI tests for command
 names, flags, help comments, request construction, output, and errors.
 
+## Adding MCP exposure
+
+`pkg/cliapp` automatically adds an `mcp` subcommand to every standalone
+subsystem command. It uses `pkg/mcp` to reflect the mounted services, derive a
+feature policy from explicit service capabilities, and serve MCP over stdio.
+No RPC-specific MCP code belongs in a subsystem command.
+
+When adding a subsystem:
+
+1. Declare the service capabilities used by the MCP feature policy.
+2. Keep streaming methods documented; they remain introspectable but are not
+   generated as unary tools.
+3. Test the generated command tree and the MCP vertical slice when the contract
+   changes.
+4. Use `mcp.ServiceMetadata.AllowedMethods` or a custom `FeaturePolicy` when
+   service-level capabilities are too broad.
+
+The combined host's `toolsbox mcp` command aggregates the descriptors of the
+selected subsystems. Use `--component` for subsystem selection and `--service`
+for fully-qualified service selection.
+
 ## Dependencies and modules
 
 The root foundation module is public and reusable. Subsystem modules use local

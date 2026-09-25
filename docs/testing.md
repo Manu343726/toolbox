@@ -8,7 +8,8 @@ Toolsbox uses a layered test strategy:
 2. **Handler tests** for protobuf request validation and ConnectRPC error codes.
 3. **Integration tests** for generated handlers, reflection, discovery, typed
    clients, and generated CLI commands.
-4. **Race tests** for shared lifecycle, registry, watcher, and host code.
+4. **Race tests** for shared lifecycle, registry, watcher, host, and MCP
+   exposure code.
 5. **Independent-module tests** with `GOWORK=off` to verify subsystem boundaries.
 
 ## Required checks
@@ -92,6 +93,28 @@ by weakening its expected behavior.
 
 When foundation behavior changes, update this vertical slice before adding
 feature-specific workarounds.
+
+## MCP gateway tests
+
+The `pkg/mcp` tests use the official MCP SDK in-memory transport. They cover:
+
+- generated feature tools and input/output JSON Schema;
+- always-available introspection tools;
+- minimal versus full initial exposure;
+- `tools/list` changes after expose/hide;
+- generated and generic `call_rpc` invocation;
+- hidden-feature and policy-denial call gates;
+- documentation retrieval;
+- streaming rejection;
+- concurrent exposure mutation under `-race`.
+
+The real reflection/MCP integration slice lives in `subsystems/testecho`:
+
+```sh
+go test ./pkg/mcp
+go test -race ./pkg/mcp
+GOWORK=off make -C subsystems/testecho test
+```
 
 ## Concurrency tests
 

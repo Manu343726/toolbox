@@ -2,7 +2,8 @@
 
 **Status date:** 2026-09-25<br>
 **Branch:** `main`<br>
-**Implementation baseline:** `58f5f46 docs: add project agent guidelines and skills`
+**Pre-MCP implementation baseline:** `58f5f46 docs: add project agent guidelines and skills`<br>
+**MCP implementation:** added in the current change
 
 ## Summary
 
@@ -20,13 +21,14 @@ the feature services are currently reference implementations.
   documentation, CLI generation, command running, and host composition.
 - `go.work` workspace for local multi-module development.
 - Combined `cmd/toolsbox` host for one-subsystem and all-subsystem modes.
-- Project `AGENTS.md` and four task-specific skills under `.agents/skills/`.
+- Project `AGENTS.md` and five task-specific skills under `.agents/skills/`.
 
 ### Project documentation
 
 - Documentation index and feature specification.
 - Expanded architecture and subsystem catalog.
 - Development, testing, and protocol conventions.
+- MCP gateway design and deployment documentation.
 - Current status, prioritized roadmap, and accepted architecture decisions.
 
 ### Runtime foundation
@@ -41,6 +43,9 @@ the feature services are currently reference implementations.
   context.
 - Source-info descriptor documentation extraction.
 - Schema-driven Cobra CLI generation.
+- `pkg/mcp` MCP gateway built on the official Go MCP SDK.
+- Runtime feature exposure, documentation introspection, and generic `call_rpc`.
+- Independent subsystem MCP commands and an aggregated host `mcp` command.
 - Graceful server startup and shutdown.
 
 ### Reference subsystems
@@ -77,6 +82,7 @@ make test-short
 make vet
 make build
 go test -race ./...
+go test -race ./pkg/mcp
 GOWORK=off make -C subsystems/agent test
 ```
 
@@ -97,6 +103,9 @@ combined host registration.
 - Policy rules and approval signaling are intentionally minimal.
 - Dynamic invocation supports unary methods only; streaming invocation is
   rejected until a streaming client exists.
+- MCP exposure is implemented for unary methods; HTTP exposure is currently
+  process-wide rather than session-isolated.
+- MCP exposure is in-memory and is not persisted across restarts.
 - External process supervision, remote registry bootstrap, authentication,
   authorization, secret management, and TLS policy are not complete.
 - Generated artifacts require a Makefile target in a fresh checkout.

@@ -101,6 +101,7 @@ composition; they are not yet production storage or AI execution engines.
 | `pkg/core` | Resolver/client abstraction, metadata propagation, dynamic calls, typed binding |
 | `pkg/docs` | Neutral documentation model and source-info descriptor parser |
 | `pkg/cli` | Cobra commands and typed flags generated from reflected schemas |
+| `pkg/mcp` | MCP servers generated from reflected services, with introspection and exposure control |
 | `pkg/cliapp` | Shared standalone command runner |
 | `pkg/host` | Explicit composition of subsystem factories |
 
@@ -113,3 +114,7 @@ composition; they are not yet production storage or AI execution engines.
   references, not Go imports.
 - A third-party service can replace a built-in service if it exposes the same
   contract and metadata through ConnectRPC/reflection/registry.
+- `pkg/cliapp` adds an `mcp` command to each standalone subsystem automatically.
+  The combined host adds `toolsbox mcp` for an aggregated MCP.
+- MCP feature exposure is separate from reflection: only policy-allowed unary
+  methods can become generated tools or be reached through `call_rpc`.

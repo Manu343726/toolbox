@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolsbox/pkg/host"
+	toolsboxmcp "github.com/Manu343726/toolsbox/pkg/mcp"
 	"github.com/Manu343726/toolsbox/pkg/subsystem"
 	agent "github.com/Manu343726/toolsbox/subsystems/agent"
 	documentation "github.com/Manu343726/toolsbox/subsystems/documentation"
@@ -50,7 +52,124 @@ func newRootCommand() *cobra.Command {
 	flags := root.Flags()
 	flags.StringSlice("component", nil, "Subsystem names to launch; repeatable or comma-separated")
 	flags.Bool("all", false, "Launch all built-in subsystems")
+
+	mcpCommand := &cobra.Command{
+		Use:   "mcp",
+		Short: "Launch an aggregated MCP server for discovered subsystems",
+		Long:  "Launch one Model Context Protocol server over stdio containing the reflected services of the selected built-in subsystems.",
+		Args:  cobra.NoArgs,
+		RunE:  runMCP,
+	}
+	mcpFlags := mcpCommand.Flags()
+	mcpFlags.StringSlice("component", nil, "Subsystem names to expose; repeatable or comma-separated")
+	mcpFlags.Bool("all", false, "Expose all built-in subsystems")
+	mcpFlags.Bool("minimal", false, "Start with only introspection tools")
+	mcpFlags.Bool("include-infrastructure", false, "Include health, registry, documentation, and reflection services")
+	mcpFlags.StringSlice("service", nil, "Only expose these fully-qualified services; repeatable or comma-separated")
+	root.AddCommand(mcpCommand)
 	return root
+}
+
+func runMCP(cmd *cobra.Command, _ []string) error {
+	components, err := cmd.Flags().GetStringSlice("component")
+	if err != nil {
+		return err
+	}
+	all, err := cmd.Flags().GetBool("all")
+	if err != nil {
+		return err
+	}
+	if all && len(components) > 0 {
+		return fmt.Errorf("--all cannot be combined with --component")
+	}
+	minimal, err := cmd.Flags().GetBool("minimal")
+	if err != nil {
+		return err
+	}
+	includeInfrastructure, err := cmd.Flags().GetBool("include-infrastructure")
+	if err != nil {
+		return err
+	}
+	serviceFilter, err := cmd.Flags().GetStringSlice("service")
+	if err != nil {
+		return err
+	}
+	if !all && len(components) == 0 {
+		all = true
+	}
+
+	h, err := buildHost()
+	if err != nil {
+		return err
+	}
+	if !all {
+		if err := h.Select(components...); err != nil {
+			return err
+		}
+	}
+	if err := h.Start(cmd.Context()); err != nil {
+		return err
+	}
+	defer func() { _ = h.Shutdown(context.Background()) }()
+	if err := registerStartedSubsystems(cmd.Context(), h); err != nil {
+		return err
+	}
+	initialExposure := toolsboxmcp.ExposeAllowedFeatures
+	if minimal {
+		initialExposure = toolsboxmcp.ExposeNoFeatures
+	}
+	descriptors := h.Descriptors()
+	if len(serviceFilter) > 0 {
+		descriptors, err = filterDescriptorsByService(descriptors, serviceFilter)
+		if err != nil {
+			return err
+		}
+	}
+	bridge, err := toolsboxmcp.NewFromDescriptors(cmd.Context(), descriptors, toolsboxmcp.Options{
+		Name:                  "toolsbox",
+		Description:           "Aggregated Model Context Protocol server for Toolsbox subsystems.",
+		InitialExposure:       initialExposure,
+		IncludeInfrastructure: includeInfrastructure,
+	})
+	if err != nil {
+		return err
+	}
+	return bridge.ServeStdio(cmd.Context())
+}
+
+func filterDescriptorsByService(descriptors []*subsystem.Descriptor, serviceNames []string) ([]*subsystem.Descriptor, error) {
+	wanted := make(map[string]bool, len(serviceNames))
+	for _, name := range serviceNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("service name cannot be empty")
+		}
+		wanted[name] = true
+	}
+	found := make(map[string]bool, len(wanted))
+	result := make([]*subsystem.Descriptor, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor == nil {
+			continue
+		}
+		clone := *descriptor
+		clone.ServiceNames = make([]string, 0, len(descriptor.ServiceNames))
+		for _, name := range descriptor.ServiceNames {
+			if wanted[name] {
+				clone.ServiceNames = append(clone.ServiceNames, name)
+				found[name] = true
+			}
+		}
+		if len(clone.ServiceNames) > 0 {
+			result = append(result, &clone)
+		}
+	}
+	for name := range wanted {
+		if !found[name] {
+			return nil, fmt.Errorf("service %q is not provided by the selected subsystems", name)
+		}
+	}
+	return result, nil
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {

@@ -174,7 +174,39 @@ The documentation service and CLI are separate concerns:
 
 Subsystem commands do not hand-write RPC-specific Cobra methods or flags.
 
-## 6. Composition modes
+## 6. MCP gateway
+
+The public `pkg/mcp` package turns a reflected ConnectRPC source into an MCP
+server. It uses protobuf reflection for schemas and dynamic unary invocation,
+but keeps authorization in an explicit `FeaturePolicy`:
+
+```text
+reflected service + explicit capability policy
+                │
+                ▼
+        feature catalog (service/method)
+                │
+       ┌────────┴────────┐
+       ▼                 ▼
+always-on introspection   generated RPC tools
+       │                 │
+       └──── exposure ───┘
+                │
+                ▼
+        call_rpc / generated call
+                │
+                ▼
+       ConnectRPC endpoint
+```
+
+Each generated MCP instance owns its feature-exposure state. A subsystem
+command creates an instance for its mounted services; `toolsbox mcp` creates
+one instance over all selected host descriptors. Introspection tools remain
+available when the initial feature surface is empty, allowing an agent to
+list, read documentation for, expose, and hide individual methods. See
+[`docs/mcp.md`](mcp.md) for the tool contract and deployment commands.
+
+## 7. Composition modes
 
 ### Standalone mode
 
@@ -205,7 +237,7 @@ The host starts all built-in modules. Each module still registers and resolves
 services through the same runtime interfaces. The combined process is a
 composition convenience, not a privileged integration path.
 
-## 7. Data ownership and persistence
+## 8. Data ownership and persistence
 
 Each subsystem owns its state and persistence. No feature should query another
 feature's database directly. Cross-subsystem state is exchanged through:
@@ -219,7 +251,7 @@ feature's database directly. Cross-subsystem state is exchanged through:
 The current reference stores are in-memory. Persistence interfaces and SQLite
 adapters are planned work.
 
-## 8. Extension model
+## 9. Extension model
 
 A third-party subsystem is compatible when it:
 
@@ -232,7 +264,7 @@ A third-party subsystem is compatible when it:
 Reflection alone is insufficient for agent exposure. A service must explicitly
 declare tool capabilities, side effects, permissions, and policy requirements.
 
-## 9. Architectural constraints
+## 10. Architectural constraints
 
 - No framework-wide aggregate feature proto.
 - No feature-to-feature implementation imports.
@@ -243,7 +275,7 @@ declare tool capabilities, side effects, permissions, and policy requirements.
   compatibility decision.
 - No generated artifacts in source control.
 
-## 10. Related documents
+## 11. Related documents
 
 - [Feature specification](feature-spec.md)
 - [Subsystem catalog](subsystems.md)
@@ -252,4 +284,5 @@ declare tool capabilities, side effects, permissions, and policy requirements.
 - [Current status](status.md)
 - [TODO and roadmap](todos.md)
 - [Protocol conventions](protocol.md)
+- [MCP gateway](mcp.md)
 - [Architecture decisions](decisions/README.md)

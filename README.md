@@ -39,6 +39,7 @@ roadmap, and architecture decisions.
 - `pkg/core` — endpoint resolver plus service-to-service calls. Known services can use generated, type-safe Connect clients through `core.Bind`; unknown services use dynamic calls.
 - `pkg/docs` — public protobuf documentation parser. Descriptor sets generated with source information preserve comments for CLI help and documentation services.
 - `pkg/cli` — public Cobra command generator driven by reflected protobuf schemas.
+- `pkg/mcp` — MCP gateway generated from reflected ConnectRPC services, with introspection and runtime feature exposure.
 - `pkg/cliapp` — shared standalone-command runner used by every subsystem command.
 - `pkg/host` — composes independently-built subsystem factories in one process.
 
@@ -92,6 +93,26 @@ Run all built-in subsystems and register their endpoints in the in-process regis
 ```
 
 The host is only a composition layer. Subsystem packages do not import one another; cross-subsystem calls go through ConnectRPC, discovery, and the resolver/client packages.
+
+## MCP gateway
+
+Every standalone subsystem command automatically includes an `mcp` subcommand:
+
+```sh
+./bin/workflow mcp
+./bin/workflow mcp --minimal
+```
+
+The generated MCP reflects the subsystem's RPC services, turns allowed unary methods into tools, and provides `list_features`, `describe_feature`, `expose_feature`, `hide_feature`, and a generic `call_rpc` tool. Reflection supplies schemas; an explicit feature policy controls authorization. Use `--minimal` to start with only the introspection tools and grow the tool footprint on demand.
+
+The combined host exposes all selected built-in subsystems as one MCP:
+
+```sh
+./bin/toolsbox mcp --all
+./bin/toolsbox mcp --component workflow --component agent
+```
+
+See [`docs/mcp.md`](docs/mcp.md) for the feature model, tool schemas, exposure semantics, and programmatic adapters.
 
 ## Protocol generation
 

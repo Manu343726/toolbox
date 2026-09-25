@@ -4,6 +4,18 @@ Todos are ordered by dependency and user value. `P0` blocks a dependable
 end-to-end workflow; `P1` makes the platform production-oriented; `P2` expands
 the ecosystem.
 
+## Delivered — MCP foundation
+
+- [x] Add `pkg/mcp` on the official Go MCP SDK.
+- [x] Generate unary RPC tools from reflected protobuf descriptors.
+- [x] Add JSON Schema input/output generation and protobuf documentation.
+- [x] Add always-on list/describe/expose/hide/exposure/documentation tools.
+- [x] Add a policy-gated generic `call_rpc` tool.
+- [x] Add independent subsystem and aggregated host MCP adapters.
+- [x] Add automatic subsystem `mcp` commands and the host `toolsbox mcp`
+      command.
+- [x] Add in-memory MCP protocol tests and a real `testecho` integration slice.
+
 ## P0 — governed workflow execution
 
 ### Define run context and event contracts
@@ -99,6 +111,17 @@ and tools participated in a run.
 - [ ] Add mTLS or signed service identity.
 - [ ] Add secret references without exposing secret values in requests/logs.
 - [ ] Add policy checks to discovery, documentation, registry, and tool paths.
+
+### MCP production hardening
+
+- [ ] Add per-session MCP exposure for Streamable HTTP connections.
+- [ ] Persist exposure and tool-footprint policy where appropriate.
+- [ ] Add method-level capability, permission, mutating, and approval metadata.
+- [ ] Add MCP tool annotations and approval elicitation.
+- [ ] Add authentication, authorization, and secret propagation to MCP calls.
+- [ ] Add conformance tests against multiple MCP clients.
+- [ ] Add streaming MCP tool invocation or an explicit streaming feature
+      contract.
 
 ### Streaming
 

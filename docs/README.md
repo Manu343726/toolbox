@@ -12,7 +12,8 @@ This directory is the canonical project documentation for Toolsbox.
 6. [Current development status](status.md) — implemented work, validation, limitations, and next milestone.
 7. [TODO and roadmap](todos.md) — prioritized work with acceptance criteria.
 8. [Protocol conventions](protocol.md) — RPC naming, metadata, errors, versioning, and documentation conventions.
-9. [Architecture decisions](decisions/README.md) — accepted decisions and their consequences.
+9. [MCP gateway](mcp.md) — generated MCP tools, introspection, exposure control, and deployment commands.
+10. [Architecture decisions](decisions/README.md) — accepted decisions and their consequences.
 
 ## Documentation ownership
 
