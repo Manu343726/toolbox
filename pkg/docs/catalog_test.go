@@ -3,7 +3,7 @@ package docs_test
 import (
 	"testing"
 
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"

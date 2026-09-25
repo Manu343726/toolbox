@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "timeout": {
+      "startup": 120000,
+      "catalog": 60000,
+      "execution": 600000
+    },
+    "servers": {
+      "toolbox": {
+        "type": "local",
+        "command": [
+          "sh",
+          "-c",
+          "exec scripts/toolbox-mcp.sh --all"
+        ],
+        "cwd": "."
+      },
+      "debug-mcp": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@debugmcp/mcp-debugger@0.24.2",
+          "stdio"
+        ],
+        "cwd": ".",
+        "timeout": {
+          "startup": 120000,
+          "catalog": 60000,
+          "execution": 600000
+        }
+      }
+    }
+  },
+  "references": {
+    "toolbox-docs": {
+      "path": "./docs",
+      "description": "Toolbox architecture, subsystem contracts, MCP gateway usage, testing, status, and roadmap. Read docs/mcp.md and docs/testing.md before exercising services through MCP."
+    }
+  }
+}

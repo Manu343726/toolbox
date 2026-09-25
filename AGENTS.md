@@ -1,8 +1,8 @@
-# Toolsbox agent instructions
+# Toolbox agent instructions
 
 ## Project purpose
 
-Toolsbox is a provider-neutral Go framework for composable AI-assisted workflows.
+Toolbox is a provider-neutral Go framework for composable AI-assisted workflows.
 The framework is made of independent ConnectRPC subsystems. Each subsystem owns
 its implementation, protobuf contract, generated clients, tests, and standalone
 command.
@@ -72,6 +72,40 @@ Read these before making architectural changes:
    combined host composes its aggregated MCP through `pkg/host` and
    `pkg/mcp`. Do not hand-write RPC-specific MCP tools in a subsystem.
 
+## OpenCode MCP sessions
+
+The project `opencode.json` registers two local MCP servers for OpenCode
+sessions started in this repository:
+
+- `toolbox` — the aggregated Toolbox gateway, started by
+  `scripts/toolbox-mcp.sh --all`;
+- `debug-mcp` — the headless `debugmcp/mcp-debugger` server, pinned to the npm
+  version in the project configuration.
+
+The `toolbox-docs` reference exposes `docs/` to agents. Read `docs/mcp.md` and
+`docs/testing.md` before testing a service through MCP. The normal flow is:
+
+1. Call `toolbox`'s `list_features` or `list_services` introspection tool.
+2. Call `describe_feature` or `read_feature_documentation`.
+3. Call `expose_feature` for the RPC features under test.
+4. Call the generated feature tool or `toolbox`'s `call_rpc` tool.
+5. Use `hide_feature` or `feature_exposure` to inspect or reduce the footprint.
+
+The MCP wrapper runs `make host` only when `cmd/toolbox/bin/toolbox` is missing
+and keeps all build output on stderr, so stdout stays a valid MCP stream. Set
+`TOOLBOX_MCP_REBUILD=1` after changing Go code outside the normal build flow, or
+`TOOLBOX_MCP_NO_BUILD=1` to fail fast instead of building. OpenCode does not
+spawn `["sh", "script.sh", ...]` for local MCP servers, so the configured
+command must keep the `sh -c "exec scripts/toolbox-mcp.sh …"` form. Use
+`debug-mcp` for live Go debugging through its DAP/Delve tools; never write
+temporary logs or print statements into production code just to debug it.
+
+Validate the project configuration with:
+
+```sh
+opencode mcp list
+```
+
 ## Development workflow
 
 1. Read the relevant subsystem and architecture documentation.
@@ -92,7 +126,7 @@ make test-short           # fast workspace test suite
 make build                # standalone subsystem binaries and combined host
 make vet                  # vet all modules
 make fmt                  # format all hand-written Go files
-make host                 # build only cmd/toolsbox
+make host                 # build only cmd/toolbox
 
 cd subsystems/<name>
 make proto                # regenerate local protobuf artifacts
@@ -114,7 +148,7 @@ SQLite files, or temporary artifacts to Git.
 
 - Put the subsystem's contract in `subsystems/<name>/proto/`.
 - Use a stable package and API version, for example
-  `package toolsbox.workflow.v1`.
+  `package toolbox.workflow.v1`.
 - Use a fully qualified `go_package` that points inside that subsystem module.
 - Document every service, RPC, message, field, enum, and enum value. These
   comments are the source for generated CLI help and documentation.
@@ -191,11 +225,11 @@ failure disappear.
 
 Project-specific skills live in `.agents/skills/`:
 
-- `toolsbox-architecture/SKILL.md` — subsystem boundaries and integration design.
+- `toolbox-architecture/SKILL.md` — subsystem boundaries and integration design.
 - `connectrpc-subsystem/SKILL.md` — protobuf, service, Makefile, and host work.
-- `toolsbox-testing/SKILL.md` — testify, unit, integration, and race-test rules.
+- `toolbox-testing/SKILL.md` — testify, unit, integration, and race-test rules.
 - `documentation-cli/SKILL.md` — descriptor documentation and generated CLI work.
-- `toolsbox-mcp/SKILL.md` — generated MCP tools, introspection, exposure, and transports.
+- `toolbox-mcp/SKILL.md` — generated MCP tools, introspection, exposure, and transports.
 
 Load the relevant skill before editing files in its domain. Skills are
 instructions, not generated build artifacts; keep them concise and executable.

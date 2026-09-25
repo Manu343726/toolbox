@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/Manu343726/toolsbox/pkg/cliapp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	registry "github.com/Manu343726/toolsbox/subsystems/registry"
+	"github.com/Manu343726/toolbox/pkg/cliapp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	registry "github.com/Manu343726/toolbox/subsystems/registry"
 )
 
 func main() {

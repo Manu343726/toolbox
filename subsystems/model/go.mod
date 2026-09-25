@@ -1,10 +1,10 @@
-module github.com/Manu343726/toolsbox/subsystems/model
+module github.com/Manu343726/toolbox/subsystems/model
 
 go 1.27
 
 require (
 	connectrpc.com/connect v1.20.0
-	github.com/Manu343726/toolsbox v0.0.0
+	github.com/Manu343726/toolbox v0.0.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.11
 )
@@ -26,4 +26,4 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 )
 
-replace github.com/Manu343726/toolsbox => ../..
+replace github.com/Manu343726/toolbox => ../..

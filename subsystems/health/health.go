@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	healthv1 "github.com/Manu343726/toolsbox/subsystems/health/healthv1"
-	"github.com/Manu343726/toolsbox/subsystems/health/healthv1/healthv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	healthv1 "github.com/Manu343726/toolbox/subsystems/health/healthv1"
+	"github.com/Manu343726/toolbox/subsystems/health/healthv1/healthv1connect"
 )
 
 const (
@@ -62,7 +62,7 @@ func New(options Options) (*subsystem.Server, error) {
 	return subsystem.NewServer(subsystem.Config{
 		Name:          Name,
 		Version:       options.Version,
-		Description:   "Health and readiness reporting for Toolsbox subsystems.",
+		Description:   "Health and readiness reporting for Toolbox subsystems.",
 		ListenAddress: options.ListenAddress,
 		Health:        options.Check,
 		Services: []subsystem.Service{{

@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.registry.v1;
+package toolbox.registry.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/registry/registryv1;registryv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/registry/registryv1;registryv1";
 
 // RegistryService stores and resolves running subsystem registrations.
 service RegistryService {

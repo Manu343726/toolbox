@@ -1,6 +1,6 @@
-# Toolsbox documentation
+# Toolbox documentation
 
-This directory is the canonical project documentation for Toolsbox.
+This directory is the canonical project documentation for Toolbox.
 
 ## Start here
 

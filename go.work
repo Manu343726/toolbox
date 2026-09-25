@@ -2,7 +2,7 @@ go 1.27
 
 use (
 	.
-	./cmd/toolsbox
+	./cmd/toolbox
 	./subsystems/agent
 	./subsystems/documentation
 	./subsystems/health

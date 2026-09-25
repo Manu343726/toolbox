@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	agentv1 "github.com/Manu343726/toolsbox/subsystems/agent/agentv1"
-	"github.com/Manu343726/toolsbox/subsystems/agent/agentv1/agentv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	agentv1 "github.com/Manu343726/toolbox/subsystems/agent/agentv1"
+	"github.com/Manu343726/toolbox/subsystems/agent/agentv1/agentv1connect"
 	"google.golang.org/protobuf/proto"
 )
 

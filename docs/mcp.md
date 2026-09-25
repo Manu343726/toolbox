@@ -1,6 +1,6 @@
 # MCP gateway
 
-Toolsbox exposes reflected ConnectRPC services as Model Context Protocol (MCP)
+Toolbox exposes reflected ConnectRPC services as Model Context Protocol (MCP)
 servers. The implementation lives in `pkg/mcp` and uses the official
 `github.com/modelcontextprotocol/go-sdk` for protocol handling.
 
@@ -81,7 +81,7 @@ with only the eight management tools when a smaller discovery payload is
 preferred:
 
 ```sh
-toolsbox-echo mcp --minimal
+toolbox-echo mcp --minimal
 ```
 
 A typical agent flow is:
@@ -114,7 +114,7 @@ Every standalone subsystem command receives an automatic `mcp` subcommand:
 
 ```sh
 ./bin/workflow mcp
-./bin/workflow mcp --service toolsbox.workflow.v1.WorkflowService
+./bin/workflow mcp --service toolbox.workflow.v1.WorkflowService
 ./bin/workflow mcp --minimal
 ./bin/workflow mcp --include-infrastructure
 ```
@@ -134,15 +134,49 @@ underlying `pkg/mcp` adapters are:
 The combined host exposes one MCP over all selected built-in subsystems:
 
 ```sh
-./bin/toolsbox mcp --all
-./bin/toolsbox mcp --component workflow --component agent
-./bin/toolsbox mcp --service toolsbox.knowledge.v1.KnowledgeService
-./bin/toolsbox mcp --all --minimal
+./bin/toolbox mcp --all
+./bin/toolbox mcp --component workflow --component agent
+./bin/toolbox mcp --service toolbox.knowledge.v1.KnowledgeService
+./bin/toolbox mcp --all --minimal
 ```
 
 `--component` and `--service` are repeatable. `--component` selects
 subsystems; `--service` filters the fully-qualified service names inside the
 selected subsystems. `--minimal` starts with introspection tools only.
+
+## OpenCode sessions
+
+The repository `opencode.json` wires two local MCP servers into every OpenCode
+session started in this project:
+
+| Server     | Command                                            | Purpose                                     |
+| ---------- | -------------------------------------------------- | ------------------------------------------- |
+| `toolbox`  | `sh -c "exec scripts/toolbox-mcp.sh --all"`         | Aggregated gateway for all built-in subsystems |
+| `debug-mcp` | `npx -y @debugmcp/mcp-debugger@<version> stdio`      | Headless DAP debugging for nine languages  |
+
+`scripts/toolbox-mcp.sh` builds `cmd/toolbox/bin/toolbox` through `make host`
+when it is missing, keeps every build line on stderr so stdout stays a valid
+JSON-RPC stream, and then execs the gateway. `TOOLBOX_MCP_REBUILD=1` forces a
+rebuild; `TOOLBOX_MCP_NO_BUILD=1` fails fast instead of building. Startup,
+catalog, and execution timeouts are raised because the first connection may
+build the host and the debugger downloads through `npx`.
+
+OpenCode does not spawn `["sh", "script.sh", ...]` for local MCP servers — the
+process exits before the script runs and the client reports "Connection
+closed". Keep the `sh -c "exec …"` form in `opencode.json`.
+
+The `toolbox-docs` reference exposes `docs/` to the agent, and `AGENTS.md`
+carries the introspection-first workflow. A session typically does:
+
+```text
+toolbox.list_services      -> toolbox.list_features
+toolbox.describe_feature   -> toolbox.read_feature_documentation
+toolbox.expose_feature     -> toolbox.<service>__<method>
+toolbox.call_rpc           -> toolbox.hide_feature / toolbox.feature_exposure
+```
+
+Validate the configuration with `opencode mcp list`; both servers must report
+`connected` before feature work starts.
 
 ## Programmatic use
 
@@ -165,7 +199,7 @@ source, err := mcp.NewEndpointSource(mcp.ServiceEndpoint{
     Name: "workflow",
     URL:  "http://127.0.0.1:9000",
     Services: []mcp.ServiceMetadata{{
-        Name:         "toolsbox.workflow.v1.WorkflowService",
+        Name:         "toolbox.workflow.v1.WorkflowService",
         Capabilities: []string{"workflow.definition.read"},
     }},
 })

@@ -2,7 +2,7 @@
 
 ## Test strategy
 
-Toolsbox uses a layered test strategy:
+Toolbox uses a layered test strategy:
 
 1. **Pure unit tests** for stores, parsers, validators, and state transitions.
 2. **Handler tests** for protobuf request validation and ConnectRPC error codes.

@@ -8,23 +8,23 @@ composition; they are not yet production storage or AI execution engines.
 
 | Subsystem | Service contract | Current responsibility | Programmatic entrypoint | Maturity |
 |---|---|---|---|---|
-| `workflow` | `toolsbox.workflow.v1.WorkflowService` | Store, list, retrieve, and validate versioned workflow definitions | `workflow.New(workflow.Options{})` | Reference CRUD/validation |
-| `agent` | `toolsbox.agent.v1.AgentService` | Store versioned provider-neutral agent profiles and capability references | `agent.New(agent.Options{})` | Reference CRUD |
-| `skill` | `toolsbox.skill.v1.SkillService` | Store versioned reusable skills and required capability/policy references | `skill.New(skill.Options{})` | Reference CRUD |
-| `prompt` | `toolsbox.prompt.v1.PromptService` | Store versioned templates and render simple variables | `prompt.New(prompt.Options{})` | Reference CRUD/rendering |
-| `knowledge` | `toolsbox.knowledge.v1.KnowledgeService` | Store sources and perform deterministic metadata search | `knowledge.New(knowledge.Options{})` | Reference metadata search |
-| `model` | `toolsbox.model.v1.ModelService` | List provider-neutral models and invoke a deterministic reference provider | `model.New(model.Options{})` | Reference provider |
-| `tool` | `toolsbox.tool.v1.ToolService` | Declare tools and invoke explicitly registered local implementations | `tool.New(tool.Options{})` | Reference capability gateway |
-| `policy` | `toolsbox.policy.v1.PolicyService` | Evaluate simple allow/approval rules by policy ID | `policy.New(policy.Options{})` | Reference evaluator |
+| `workflow` | `toolbox.workflow.v1.WorkflowService` | Store, list, retrieve, and validate versioned workflow definitions | `workflow.New(workflow.Options{})` | Reference CRUD/validation |
+| `agent` | `toolbox.agent.v1.AgentService` | Store versioned provider-neutral agent profiles and capability references | `agent.New(agent.Options{})` | Reference CRUD |
+| `skill` | `toolbox.skill.v1.SkillService` | Store versioned reusable skills and required capability/policy references | `skill.New(skill.Options{})` | Reference CRUD |
+| `prompt` | `toolbox.prompt.v1.PromptService` | Store versioned templates and render simple variables | `prompt.New(prompt.Options{})` | Reference CRUD/rendering |
+| `knowledge` | `toolbox.knowledge.v1.KnowledgeService` | Store sources and perform deterministic metadata search | `knowledge.New(knowledge.Options{})` | Reference metadata search |
+| `model` | `toolbox.model.v1.ModelService` | List provider-neutral models and invoke a deterministic reference provider | `model.New(model.Options{})` | Reference provider |
+| `tool` | `toolbox.tool.v1.ToolService` | Declare tools and invoke explicitly registered local implementations | `tool.New(tool.Options{})` | Reference capability gateway |
+| `policy` | `toolbox.policy.v1.PolicyService` | Evaluate simple allow/approval rules by policy ID | `policy.New(policy.Options{})` | Reference evaluator |
 
 ## Platform subsystems
 
 | Subsystem | Service contract | Current responsibility | Programmatic entrypoint | Maturity |
 |---|---|---|---|---|
-| `registry` | `toolsbox.registry.v1.RegistryService` | In-memory registration, leases, lookup, filtering, and resolver adapter | `registry.New(registry.Options{})` | Reference control plane |
-| `health` | `toolsbox.health.v1.HealthService` | Report serving/not-serving state for a component | `health.New(health.Options{})` | Reference health service |
-| `documentation` | `toolsbox.documentation.v1.DocumentationService` | Serve neutral documentation extracted from protobuf descriptors | `documentation.New(documentation.Options{})` | Reference documentation service |
-| `testecho` | `toolsbox.testecho.v1.EchoService` | Integration fixture for reflection, typed calls, docs, and CLI | `testecho.New(testecho.Options{})` | Test fixture |
+| `registry` | `toolbox.registry.v1.RegistryService` | In-memory registration, leases, lookup, filtering, and resolver adapter | `registry.New(registry.Options{})` | Reference control plane |
+| `health` | `toolbox.health.v1.HealthService` | Report serving/not-serving state for a component | `health.New(health.Options{})` | Reference health service |
+| `documentation` | `toolbox.documentation.v1.DocumentationService` | Serve neutral documentation extracted from protobuf descriptors | `documentation.New(documentation.Options{})` | Reference documentation service |
+| `testecho` | `toolbox.testecho.v1.EchoService` | Integration fixture for reflection, typed calls, docs, and CLI | `testecho.New(testecho.Options{})` | Test fixture |
 
 ## Current RPC surface
 
@@ -115,6 +115,6 @@ composition; they are not yet production storage or AI execution engines.
 - A third-party service can replace a built-in service if it exposes the same
   contract and metadata through ConnectRPC/reflection/registry.
 - `pkg/cliapp` adds an `mcp` command to each standalone subsystem automatically.
-  The combined host adds `toolsbox mcp` for an aggregated MCP.
+  The combined host adds `toolbox mcp` for an aggregated MCP.
 - MCP feature exposure is separate from reflection: only policy-allowed unary
   methods can become generated tools or be reached through `call_rpc`.

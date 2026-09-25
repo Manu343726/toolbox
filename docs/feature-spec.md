@@ -1,8 +1,8 @@
-# Toolsbox feature specification
+# Toolbox feature specification
 
 ## 1. Product definition
 
-Toolsbox is a provider-neutral framework for building AI-assisted workflows.
+Toolbox is a provider-neutral framework for building AI-assisted workflows.
 It lets a user compose domain rules, knowledge, prompts, skills, agents, models,
 and tools into a working environment without binding the workflow to one model
 provider or one deployment topology.

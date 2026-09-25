@@ -9,7 +9,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
 )
 
 // Registration is a public callback invoked after a subsystem is ready.

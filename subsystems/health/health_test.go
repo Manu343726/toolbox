@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	healthv1 "github.com/Manu343726/toolsbox/subsystems/health/healthv1"
+	healthv1 "github.com/Manu343726/toolbox/subsystems/health/healthv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

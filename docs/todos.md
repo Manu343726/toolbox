@@ -12,7 +12,7 @@ the ecosystem.
 - [x] Add always-on list/describe/expose/hide/exposure/documentation tools.
 - [x] Add a policy-gated generic `call_rpc` tool.
 - [x] Add independent subsystem and aggregated host MCP adapters.
-- [x] Add automatic subsystem `mcp` commands and the host `toolsbox mcp`
+- [x] Add automatic subsystem `mcp` commands and the host `toolbox mcp`
       command.
 - [x] Add in-memory MCP protocol tests and a real `testecho` integration slice.
 
@@ -134,8 +134,8 @@ and tools participated in a run.
 
 ## P1 — developer experience
 
-- [ ] Add `toolsbox registry list/get`.
-- [ ] Add `toolsbox service inspect <name>`.
+- [ ] Add `toolbox registry list/get`.
+- [ ] Add `toolbox service inspect <name>`.
 - [ ] Add generated CLI support for nested messages, maps, oneofs, and
       required fields.
 - [ ] Add shell completion generated from enum values.

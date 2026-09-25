@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/Manu343726/toolsbox/pkg/cliapp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	skill "github.com/Manu343726/toolsbox/subsystems/skill"
+	"github.com/Manu343726/toolbox/pkg/cliapp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	skill "github.com/Manu343726/toolbox/subsystems/skill"
 )
 
 func main() {

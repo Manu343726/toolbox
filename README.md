@@ -1,6 +1,6 @@
-# toolsbox
+# toolbox
 
-Toolsbox is a provider-neutral framework for composable AI-assisted workflows.
+Toolbox is a provider-neutral framework for composable AI-assisted workflows.
 
 The repository is organized as a set of independent Go subsystems. A subsystem owns its implementation, its protobuf contract, its generated clients, its tests, and its standalone command:
 
@@ -83,13 +83,13 @@ make host
 Run one subsystem:
 
 ```sh
-./bin/toolsbox --component workflow
+./bin/toolbox --component workflow
 ```
 
 Run all built-in subsystems and register their endpoints in the in-process registry:
 
 ```sh
-./bin/toolsbox --all
+./bin/toolbox --all
 ```
 
 The host is only a composition layer. Subsystem packages do not import one another; cross-subsystem calls go through ConnectRPC, discovery, and the resolver/client packages.
@@ -108,8 +108,8 @@ The generated MCP reflects the subsystem's RPC services, turns allowed unary met
 The combined host exposes all selected built-in subsystems as one MCP:
 
 ```sh
-./bin/toolsbox mcp --all
-./bin/toolsbox mcp --component workflow --component agent
+./bin/toolbox mcp --all
+./bin/toolbox mcp --component workflow --component agent
 ```
 
 See [`docs/mcp.md`](docs/mcp.md) for the feature model, tool schemas, exposure semantics, and programmatic adapters.

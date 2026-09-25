@@ -12,9 +12,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	knowledgev1 "github.com/Manu343726/toolsbox/subsystems/knowledge/knowledgev1"
-	"github.com/Manu343726/toolsbox/subsystems/knowledge/knowledgev1/knowledgev1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	knowledgev1 "github.com/Manu343726/toolbox/subsystems/knowledge/knowledgev1"
+	"github.com/Manu343726/toolbox/subsystems/knowledge/knowledgev1/knowledgev1connect"
 	"google.golang.org/protobuf/proto"
 )
 

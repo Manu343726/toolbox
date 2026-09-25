@@ -16,11 +16,11 @@ build:
 		$(MAKE) -C subsystems/$$subsystem build; \
 		cp subsystems/$$subsystem/bin/$$subsystem $(BIN_DIR)/$$subsystem; \
 	done
-	@$(MAKE) -C cmd/toolsbox build
-	@cp cmd/toolsbox/bin/toolsbox $(BIN_DIR)/toolsbox
+	@$(MAKE) -C cmd/toolbox build
+	@cp cmd/toolbox/bin/toolbox $(BIN_DIR)/toolbox
 
 host:
-	@$(MAKE) -C cmd/toolsbox build
+	@$(MAKE) -C cmd/toolbox build
 
 check-tests:
 	@for subsystem in $(SUBSYSTEMS); do \
@@ -34,24 +34,24 @@ test: check-tests
 	@for subsystem in $(SUBSYSTEMS); do \
 		$(MAKE) -C subsystems/$$subsystem test; \
 	done
-	@$(MAKE) -C cmd/toolsbox test
+	@$(MAKE) -C cmd/toolbox test
 	@go test -count=1 ./...
 
 test-short: check-tests
 	@for subsystem in $(SUBSYSTEMS); do \
 		$(MAKE) -C subsystems/$$subsystem test-short; \
 	done
-	@$(MAKE) -C cmd/toolsbox test
+	@$(MAKE) -C cmd/toolbox test
 	@go test -short -count=1 ./...
 
 fmt:
 	@gofmt -w $$(find pkg -name '*.go' -not -name '*.pb.go' -not -name '*.connect.go')
 	@for subsystem in $(SUBSYSTEMS); do $(MAKE) -C subsystems/$$subsystem fmt; done
-	@$(MAKE) -C cmd/toolsbox fmt
+	@$(MAKE) -C cmd/toolbox fmt
 
 vet:
 	@for subsystem in $(SUBSYSTEMS); do $(MAKE) -C subsystems/$$subsystem vet; done
-	@$(MAKE) -C cmd/toolsbox vet
+	@$(MAKE) -C cmd/toolbox vet
 	@go vet ./...
 
 proto-tools:
@@ -59,5 +59,5 @@ proto-tools:
 
 clean:
 	@for subsystem in $(SUBSYSTEMS); do $(MAKE) -C subsystems/$$subsystem clean; done
-	@$(MAKE) -C cmd/toolsbox clean
+	@$(MAKE) -C cmd/toolbox clean
 	rm -rf $(BIN_DIR)

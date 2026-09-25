@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/Manu343726/toolsbox/pkg/cliapp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	policy "github.com/Manu343726/toolsbox/subsystems/policy"
+	"github.com/Manu343726/toolbox/pkg/cliapp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	policy "github.com/Manu343726/toolbox/subsystems/policy"
 )
 
 func main() {

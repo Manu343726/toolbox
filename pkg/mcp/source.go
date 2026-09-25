@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Manu343726/toolsbox/pkg/discovery"
+	"github.com/Manu343726/toolbox/pkg/discovery"
 	"google.golang.org/protobuf/proto"
 )
 

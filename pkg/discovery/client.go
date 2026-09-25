@@ -17,7 +17,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
-	"github.com/Manu343726/toolsbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/docs"
 	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

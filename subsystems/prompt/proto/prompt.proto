@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.prompt.v1;
+package toolbox.prompt.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/prompt/promptv1;promptv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/prompt/promptv1;promptv1";
 
 // PromptService stores reusable, provider-neutral prompt templates.
 service PromptService {

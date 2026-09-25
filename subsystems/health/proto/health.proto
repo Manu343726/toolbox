@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.health.v1;
+package toolbox.health.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/health/healthv1;healthv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/health/healthv1;healthv1";
 
 // HealthService reports subsystem readiness.
 service HealthService {

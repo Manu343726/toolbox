@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/subsystems/registry"
-	registryv1 "github.com/Manu343726/toolsbox/subsystems/registry/registryv1"
+	"github.com/Manu343726/toolbox/subsystems/registry"
+	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +20,7 @@ func TestMemoryRegisterAndClone(t *testing.T) {
 		SubsystemName:         "workflow",
 		Endpoint:              "http://127.0.0.1:9000",
 		ImplementationVersion: "1.0.0",
-		ServiceNames:          []string{"toolsbox.workflow.v1.WorkflowService"},
+		ServiceNames:          []string{"toolbox.workflow.v1.WorkflowService"},
 		Capabilities:          []*registryv1.Capability{{Name: "workflow.run"}},
 	}
 

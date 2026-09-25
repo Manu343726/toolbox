@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/core"
-	registryv1 "github.com/Manu343726/toolsbox/subsystems/registry/registryv1"
-	"github.com/Manu343726/toolsbox/subsystems/registry/registryv1/registryv1connect"
+	"github.com/Manu343726/toolbox/pkg/core"
+	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
+	"github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
 )
 
 // Resolver adapts the standalone registry service to core.Resolver. It is

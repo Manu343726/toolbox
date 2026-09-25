@@ -1,9 +1,9 @@
 ---
-name: toolsbox-architecture
-description: Design and review independent Toolsbox subsystems, module boundaries, runtime composition, and service-to-service dependencies.
+name: toolbox-architecture
+description: Design and review independent Toolbox subsystems, module boundaries, runtime composition, and service-to-service dependencies.
 ---
 
-# Toolsbox architecture
+# Toolbox architecture
 
 Use this skill when adding a subsystem, changing the host, introducing a
 runtime dependency, or reviewing whether a design preserves composability.

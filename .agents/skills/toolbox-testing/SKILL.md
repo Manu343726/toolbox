@@ -1,9 +1,9 @@
 ---
-name: toolsbox-testing
-description: Write deterministic testify unit and integration tests for Toolsbox subsystems, ConnectRPC handlers, registries, and shared runtime packages.
+name: toolbox-testing
+description: Write deterministic testify unit and integration tests for Toolbox subsystems, ConnectRPC handlers, registries, and shared runtime packages.
 ---
 
-# Toolsbox testing
+# Toolbox testing
 
 Use this skill whenever behavior changes or a new subsystem is added.
 

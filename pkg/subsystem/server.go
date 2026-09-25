@@ -1,5 +1,5 @@
 // Package subsystem provides the transport and lifecycle SDK shared by
-// independent Toolsbox subsystems. It intentionally knows nothing about any
+// independent Toolbox subsystems. It intentionally knows nothing about any
 // feature's protobuf contract; each subsystem supplies its own services.
 package subsystem
 
@@ -15,7 +15,7 @@ import (
 	"sync"
 
 	"connectrpc.com/grpcreflect"
-	"github.com/Manu343726/toolsbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/docs"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -81,7 +81,7 @@ type Handshake struct {
 }
 
 // HandshakeProtocol identifies the process handshake format.
-const HandshakeProtocol = "toolsbox-subsystem-v1"
+const HandshakeProtocol = "toolbox-subsystem-v1"
 
 // Server owns one subsystem's HTTP/ConnectRPC server lifecycle.
 type Server struct {

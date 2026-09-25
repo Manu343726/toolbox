@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Manu343726/toolsbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/docs"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 

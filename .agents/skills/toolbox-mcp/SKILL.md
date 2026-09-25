@@ -1,4 +1,4 @@
-# Toolsbox MCP gateway
+# Toolbox MCP gateway
 
 Use this skill when changing `pkg/mcp`, `pkg/cliapp`'s `mcp` command, or the
 combined host's aggregated MCP.

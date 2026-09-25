@@ -5,7 +5,7 @@
 
 ## Context
 
-Toolsbox needs composable AI workflows whose services can be developed,
+Toolbox needs composable AI workflows whose services can be developed,
 tested, deployed, and replaced independently. A single aggregate Go package or
 framework-wide proto would make feature changes couple unrelated services and
 would make external replacement difficult.

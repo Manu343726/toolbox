@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Manu343726/toolsbox/pkg/host"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
+	"github.com/Manu343726/toolbox/pkg/host"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

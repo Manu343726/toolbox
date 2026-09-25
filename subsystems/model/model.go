@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	modelv1 "github.com/Manu343726/toolsbox/subsystems/model/modelv1"
-	"github.com/Manu343726/toolsbox/subsystems/model/modelv1/modelv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	modelv1 "github.com/Manu343726/toolbox/subsystems/model/modelv1"
+	"github.com/Manu343726/toolbox/subsystems/model/modelv1/modelv1connect"
 )
 
 const (

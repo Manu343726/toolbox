@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	knowledgev1 "github.com/Manu343726/toolsbox/subsystems/knowledge/knowledgev1"
+	knowledgev1 "github.com/Manu343726/toolbox/subsystems/knowledge/knowledgev1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

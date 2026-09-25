@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	promptv1 "github.com/Manu343726/toolsbox/subsystems/prompt/promptv1"
-	"github.com/Manu343726/toolsbox/subsystems/prompt/promptv1/promptv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	promptv1 "github.com/Manu343726/toolbox/subsystems/prompt/promptv1"
+	"github.com/Manu343726/toolbox/subsystems/prompt/promptv1/promptv1connect"
 	"google.golang.org/protobuf/proto"
 )
 

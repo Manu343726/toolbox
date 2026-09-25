@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/Manu343726/toolsbox/pkg/cliapp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	prompt "github.com/Manu343726/toolsbox/subsystems/prompt"
+	"github.com/Manu343726/toolbox/pkg/cliapp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	prompt "github.com/Manu343726/toolbox/subsystems/prompt"
 )
 
 func main() {

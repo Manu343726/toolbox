@@ -20,7 +20,7 @@ the feature services are currently reference implementations.
 - Public foundation packages for serving, discovery, core calls,
   documentation, CLI generation, command running, and host composition.
 - `go.work` workspace for local multi-module development.
-- Combined `cmd/toolsbox` host for one-subsystem and all-subsystem modes.
+- Combined `cmd/toolbox` host for one-subsystem and all-subsystem modes.
 - Project `AGENTS.md` and five task-specific skills under `.agents/skills/`.
 
 ### Project documentation

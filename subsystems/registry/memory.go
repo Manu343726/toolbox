@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	registryv1 "github.com/Manu343726/toolsbox/subsystems/registry/registryv1"
+	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 	"google.golang.org/protobuf/proto"
 )
 

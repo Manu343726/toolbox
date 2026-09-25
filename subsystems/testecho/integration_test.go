@@ -8,16 +8,16 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/cli"
-	"github.com/Manu343726/toolsbox/pkg/cliapp"
-	"github.com/Manu343726/toolsbox/pkg/core"
-	"github.com/Manu343726/toolsbox/pkg/discovery"
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
-	toolsboxmcp "github.com/Manu343726/toolsbox/pkg/mcp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	testecho "github.com/Manu343726/toolsbox/subsystems/testecho"
-	echov1 "github.com/Manu343726/toolsbox/subsystems/testecho/echov1"
-	"github.com/Manu343726/toolsbox/subsystems/testecho/echov1/echov1connect"
+	"github.com/Manu343726/toolbox/pkg/cli"
+	"github.com/Manu343726/toolbox/pkg/cliapp"
+	"github.com/Manu343726/toolbox/pkg/core"
+	"github.com/Manu343726/toolbox/pkg/discovery"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
+	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	testecho "github.com/Manu343726/toolbox/subsystems/testecho"
+	echov1 "github.com/Manu343726/toolbox/subsystems/testecho/echov1"
+	"github.com/Manu343726/toolbox/subsystems/testecho/echov1/echov1connect"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,28 +35,28 @@ func TestDiscoveryAndDynamicInvocation(t *testing.T) {
 	ctx := context.Background()
 	services, err := client.ListServices(ctx)
 	require.NoError(t, err)
-	assert.Contains(t, services, "toolsbox.testecho.v1.EchoService")
+	assert.Contains(t, services, "toolbox.testecho.v1.EchoService")
 
-	schema, err := client.DescribeService(ctx, "toolsbox.testecho.v1.EchoService")
+	schema, err := client.DescribeService(ctx, "toolbox.testecho.v1.EchoService")
 	require.NoError(t, err)
 	require.Len(t, schema.Methods, 2)
 	require.NotNil(t, schema.Documentation)
-	catalogDoc, catalogErr := shareddocs.DefaultCatalog().Get("toolsbox.testecho.v1.EchoService")
+	catalogDoc, catalogErr := shareddocs.DefaultCatalog().Get("toolbox.testecho.v1.EchoService")
 	require.NoError(t, catalogErr)
 	assert.Equal(t, catalogDoc.Description, schema.Documentation.Description)
 	assert.Contains(t, schema.Documentation.Description, "small service")
 	assert.Equal(t, protoreflect.Name("EchoRequest"), schema.Methods[0].Input.Name())
 
-	response, err := client.Invoke(ctx, "toolsbox.testecho.v1.EchoService", "Echo", &echov1.EchoRequest{Message: "hello", Uppercase: true})
+	response, err := client.Invoke(ctx, "toolbox.testecho.v1.EchoService", "Echo", &echov1.EchoRequest{Message: "hello", Uppercase: true})
 	require.NoError(t, err)
 	dynamic, ok := response.(*dynamicpb.Message)
 	require.True(t, ok)
 	assert.Equal(t, "HELLO", dynamic.Get(fieldByName(t, dynamic, "message")).String())
 
-	_, err = client.Invoke(ctx, "toolsbox.testecho.v1.EchoService", "StreamEcho", &echov1.EchoRequest{})
+	_, err = client.Invoke(ctx, "toolbox.testecho.v1.EchoService", "StreamEcho", &echov1.EchoRequest{})
 	assert.Error(t, err)
 
-	jsonResponse, err := client.InvokeJSON(ctx, "toolsbox.testecho.v1.EchoService", "Echo", []byte(`{"message":"world"}`))
+	jsonResponse, err := client.InvokeJSON(ctx, "toolbox.testecho.v1.EchoService", "Echo", []byte(`{"message":"world"}`))
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"message":"world","length":5,"tags":[]}`, string(jsonResponse))
 }
@@ -67,16 +67,16 @@ func TestCoreTypedBindingAndDynamicCall(t *testing.T) {
 	defer func() { require.NoError(t, server.Shutdown(context.Background())) }()
 
 	resolver := core.NewStaticResolver(core.Endpoint{
-		Name: "echo", URL: server.Endpoint(), ServiceNames: []string{"toolsbox.testecho.v1.EchoService"},
+		Name: "echo", URL: server.Endpoint(), ServiceNames: []string{"toolbox.testecho.v1.EchoService"},
 	})
 	client := core.NewClient(core.ClientOptions{Resolver: resolver})
-	typed, err := core.Bind(context.Background(), client, "toolsbox.testecho.v1.EchoService", echov1connect.NewEchoServiceClient)
+	typed, err := core.Bind(context.Background(), client, "toolbox.testecho.v1.EchoService", echov1connect.NewEchoServiceClient)
 	require.NoError(t, err)
 	result, err := typed.Echo(context.Background(), connect.NewRequest(&echov1.EchoRequest{Message: "typed"}))
 	require.NoError(t, err)
 	assert.Equal(t, "typed", result.Msg.GetMessage())
 
-	dynamic, err := client.Invoke(context.Background(), "toolsbox.testecho.v1.EchoService", "Echo", &echov1.EchoRequest{Message: "dynamic"})
+	dynamic, err := client.Invoke(context.Background(), "toolbox.testecho.v1.EchoService", "Echo", &echov1.EchoRequest{Message: "dynamic"})
 	require.NoError(t, err)
 	encoded, err := protojson.Marshal(dynamic)
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestGeneratedCLIUsesReflectedSchema(t *testing.T) {
 
 	discoveryClient := discovery.New(server.Endpoint())
 	generator := cli.NewGenerator(discoveryClient, cli.Options{CommandName: "echoctl"})
-	root, err := generator.Generate(context.Background(), "toolsbox.testecho.v1.EchoService")
+	root, err := generator.Generate(context.Background(), "toolbox.testecho.v1.EchoService")
 	require.NoError(t, err)
 	var output bytes.Buffer
 	root.SetOut(&output)
@@ -134,26 +134,26 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, server.Shutdown(context.Background())) }()
 
-	singleService, err := toolsboxmcp.NewFromSubsystemService(context.Background(), server, "toolsbox.testecho.v1.EchoService", toolsboxmcp.Options{})
+	singleService, err := toolboxmcp.NewFromSubsystemService(context.Background(), server, "toolbox.testecho.v1.EchoService", toolboxmcp.Options{})
 	require.NoError(t, err)
 	assert.Len(t, singleService.Features(), 2)
-	_, err = toolsboxmcp.NewFromSubsystemService(context.Background(), server, "missing.v1.Service", toolsboxmcp.Options{})
+	_, err = toolboxmcp.NewFromSubsystemService(context.Background(), server, "missing.v1.Service", toolboxmcp.Options{})
 	assert.Error(t, err)
 
-	resolved, err := toolsboxmcp.NewFromResolver(context.Background(), core.NewStaticResolver(core.Endpoint{
+	resolved, err := toolboxmcp.NewFromResolver(context.Background(), core.NewStaticResolver(core.Endpoint{
 		Name:         "echo",
 		URL:          server.Endpoint(),
-		ServiceNames: []string{"toolsbox.testecho.v1.EchoService"},
+		ServiceNames: []string{"toolbox.testecho.v1.EchoService"},
 		Capabilities: []string{"testecho.echo"},
-	}), []string{"toolsbox.testecho.v1.EchoService"}, toolsboxmcp.Options{})
+	}), []string{"toolbox.testecho.v1.EchoService"}, toolboxmcp.Options{})
 	require.NoError(t, err)
 	assert.Len(t, resolved.Features(), 2)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	bridge, err := toolsboxmcp.NewFromSubsystem(ctx, server, toolsboxmcp.Options{
+	bridge, err := toolboxmcp.NewFromSubsystem(ctx, server, toolboxmcp.Options{
 		Name:            "testecho-mcp",
-		InitialExposure: toolsboxmcp.ExposeAllowedFeatures,
+		InitialExposure: toolboxmcp.ExposeAllowedFeatures,
 	})
 	require.NoError(t, err)
 	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
@@ -170,9 +170,9 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	assert.Contains(t, names, toolsboxmcp.ToolListFeatures)
-	assert.Contains(t, names, toolsboxmcp.ToolExposeFeature)
-	assert.Contains(t, names, toolsboxmcp.ToolCallRPC)
+	assert.Contains(t, names, toolboxmcp.ToolListFeatures)
+	assert.Contains(t, names, toolboxmcp.ToolExposeFeature)
+	assert.Contains(t, names, toolboxmcp.ToolCallRPC)
 	assert.Contains(t, names, "echo__echo")
 	assert.NotContains(t, names, "echo__stream_echo")
 
@@ -184,9 +184,9 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 	assert.False(t, result.IsError)
 	assert.Contains(t, resultText(t, result), "MCP")
 
-	featureID := "toolsbox.testecho.v1.EchoService/Echo"
+	featureID := "toolbox.testecho.v1.EchoService/Echo"
 	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      toolsboxmcp.ToolHideFeature,
+		Name:      toolboxmcp.ToolHideFeature,
 		Arguments: map[string]any{"feature": featureID},
 	})
 	require.NoError(t, err)
@@ -196,9 +196,9 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 	assert.NotContains(t, toolNames(tools.Tools), "echo__echo")
 
 	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name: toolsboxmcp.ToolCallRPC,
+		Name: toolboxmcp.ToolCallRPC,
 		Arguments: map[string]any{
-			"service": "toolsbox.testecho.v1.EchoService",
+			"service": "toolbox.testecho.v1.EchoService",
 			"method":  "Echo",
 			"request": map[string]any{"message": "hidden"},
 		},
@@ -208,15 +208,15 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "hidden")
 
 	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      toolsboxmcp.ToolExposeFeature,
+		Name:      toolboxmcp.ToolExposeFeature,
 		Arguments: map[string]any{"feature": featureID},
 	})
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
 	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name: toolsboxmcp.ToolCallRPC,
+		Name: toolboxmcp.ToolCallRPC,
 		Arguments: map[string]any{
-			"service": "toolsbox.testecho.v1.EchoService",
+			"service": "toolbox.testecho.v1.EchoService",
 			"method":  "Echo",
 			"request": map[string]any{"message": "again"},
 		},
@@ -226,7 +226,7 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "again")
 
 	result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      toolsboxmcp.ToolReadFeatureDocumentation,
+		Name:      toolboxmcp.ToolReadFeatureDocumentation,
 		Arguments: map[string]any{"feature": featureID},
 	})
 	require.NoError(t, err)

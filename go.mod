@@ -1,4 +1,4 @@
-module github.com/Manu343726/toolsbox
+module github.com/Manu343726/toolbox
 
 go 1.27
 

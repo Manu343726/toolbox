@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.agent.v1;
+package toolbox.agent.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/agent/agentv1;agentv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/agent/agentv1;agentv1";
 
 // AgentService stores provider-neutral agent profiles.
 service AgentService {

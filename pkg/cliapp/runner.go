@@ -9,10 +9,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/Manu343726/toolsbox/pkg/cli"
-	"github.com/Manu343726/toolsbox/pkg/discovery"
-	toolsboxmcp "github.com/Manu343726/toolsbox/pkg/mcp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
+	"github.com/Manu343726/toolbox/pkg/cli"
+	"github.com/Manu343726/toolbox/pkg/discovery"
+	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
 	"github.com/spf13/cobra"
 )
 
@@ -20,10 +20,10 @@ import (
 type MCPOptions struct {
 	// Policy optionally overrides the feature policy derived from subsystem
 	// service capabilities.
-	Policy toolsboxmcp.FeaturePolicy
+	Policy toolboxmcp.FeaturePolicy
 	// InitialExposure controls whether generated feature tools are present
 	// immediately. The zero value exposes all allowed unary features.
-	InitialExposure toolsboxmcp.InitialExposure
+	InitialExposure toolboxmcp.InitialExposure
 	// IncludeInfrastructure exposes health, registry, documentation, and
 	// reflection services in the MCP catalog.
 	IncludeInfrastructure bool
@@ -118,20 +118,20 @@ func Run(ctx context.Context, options Options) error {
 			}
 			initialExposure := options.MCP.InitialExposure
 			if minimal {
-				initialExposure = toolsboxmcp.ExposeNoFeatures
+				initialExposure = toolboxmcp.ExposeNoFeatures
 			}
-			mcpOptions := toolsboxmcp.Options{
+			mcpOptions := toolboxmcp.Options{
 				Name:                  options.Name,
 				Description:           options.Description,
 				Policy:                options.MCP.Policy,
 				InitialExposure:       initialExposure,
 				IncludeInfrastructure: includeInfrastructure || options.MCP.IncludeInfrastructure,
 			}
-			var bridge *toolsboxmcp.Server
+			var bridge *toolboxmcp.Server
 			if serviceName != "" {
-				bridge, err = toolsboxmcp.NewFromSubsystemService(cmd.Context(), server, serviceName, mcpOptions)
+				bridge, err = toolboxmcp.NewFromSubsystemService(cmd.Context(), server, serviceName, mcpOptions)
 			} else {
-				bridge, err = toolsboxmcp.NewFromSubsystem(cmd.Context(), server, mcpOptions)
+				bridge, err = toolboxmcp.NewFromSubsystem(cmd.Context(), server, mcpOptions)
 			}
 			if err != nil {
 				return err

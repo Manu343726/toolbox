@@ -22,7 +22,7 @@ The plugins are installed in `~/go/bin`, which the Makefiles add to `PATH`.
 ```text
 pkg/                       public foundation packages
 subsystems/<name>/         independent subsystem modules
-cmd/toolsbox/              combined host module
+cmd/toolbox/              combined host module
 docs/                      detailed project documentation
 .agents/skills/             project-specific agent skills
 go.work                    local workspace for development
@@ -154,7 +154,7 @@ When adding a subsystem:
 4. Use `mcp.ServiceMetadata.AllowedMethods` or a custom `FeaturePolicy` when
    service-level capabilities are too broad.
 
-The combined host's `toolsbox mcp` command aggregates the descriptors of the
+The combined host's `toolbox mcp` command aggregates the descriptors of the
 selected subsystems. Use `--component` for subsystem selection and `--service`
 for fully-qualified service selection.
 

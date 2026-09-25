@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
-	documentationv1 "github.com/Manu343726/toolsbox/subsystems/documentation/documentationv1"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
+	documentationv1 "github.com/Manu343726/toolbox/subsystems/documentation/documentationv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

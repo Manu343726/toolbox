@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.knowledge.v1;
+package toolbox.knowledge.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/knowledge/knowledgev1;knowledgev1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/knowledge/knowledgev1;knowledgev1";
 
 // KnowledgeService stores sources and exposes provider-neutral retrieval.
 service KnowledgeService {

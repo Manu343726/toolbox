@@ -12,9 +12,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	toolv1 "github.com/Manu343726/toolsbox/subsystems/tool/toolv1"
-	"github.com/Manu343726/toolsbox/subsystems/tool/toolv1/toolv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	toolv1 "github.com/Manu343726/toolbox/subsystems/tool/toolv1"
+	"github.com/Manu343726/toolbox/subsystems/tool/toolv1/toolv1connect"
 )
 
 const (

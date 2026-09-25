@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	policyv1 "github.com/Manu343726/toolsbox/subsystems/policy/policyv1"
+	policyv1 "github.com/Manu343726/toolbox/subsystems/policy/policyv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

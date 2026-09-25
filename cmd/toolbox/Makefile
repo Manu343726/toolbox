@@ -12,7 +12,7 @@ proto:
 
 build: proto
 	@mkdir -p bin
-	go build -o bin/toolsbox .
+	go build -o bin/toolbox .
 
 test: proto
 	go test ./...

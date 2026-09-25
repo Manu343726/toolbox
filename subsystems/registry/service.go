@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	registryv1 "github.com/Manu343726/toolsbox/subsystems/registry/registryv1"
+	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 )
 
 // Service exposes a Memory registry through the platform RegistryService.

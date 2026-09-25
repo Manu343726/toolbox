@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	modelv1 "github.com/Manu343726/toolsbox/subsystems/model/modelv1"
+	modelv1 "github.com/Manu343726/toolbox/subsystems/model/modelv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

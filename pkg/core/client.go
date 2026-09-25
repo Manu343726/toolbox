@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/discovery"
+	"github.com/Manu343726/toolbox/pkg/discovery"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -33,12 +33,12 @@ func (m Metadata) Header() http.Header {
 	for key, value := range m.Headers {
 		header.Set(key, value)
 	}
-	setIfPresent(header, "X-Toolsbox-Request-Id", m.RequestID)
-	setIfPresent(header, "X-Toolsbox-Trace-Id", m.TraceID)
-	setIfPresent(header, "X-Toolsbox-Actor-Id", m.ActorID)
-	setIfPresent(header, "X-Toolsbox-Run-Id", m.RunID)
-	setIfPresent(header, "X-Toolsbox-Workspace-Id", m.WorkspaceID)
-	setIfPresent(header, "X-Toolsbox-Policy-Id", m.PolicyID)
+	setIfPresent(header, "X-Toolbox-Request-Id", m.RequestID)
+	setIfPresent(header, "X-Toolbox-Trace-Id", m.TraceID)
+	setIfPresent(header, "X-Toolbox-Actor-Id", m.ActorID)
+	setIfPresent(header, "X-Toolbox-Run-Id", m.RunID)
+	setIfPresent(header, "X-Toolbox-Workspace-Id", m.WorkspaceID)
+	setIfPresent(header, "X-Toolbox-Policy-Id", m.PolicyID)
 	return header
 }
 

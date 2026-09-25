@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

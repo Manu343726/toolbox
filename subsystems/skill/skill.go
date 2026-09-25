@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	skillv1 "github.com/Manu343726/toolsbox/subsystems/skill/skillv1"
-	"github.com/Manu343726/toolsbox/subsystems/skill/skillv1/skillv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	skillv1 "github.com/Manu343726/toolbox/subsystems/skill/skillv1"
+	"github.com/Manu343726/toolbox/subsystems/skill/skillv1/skillv1connect"
 	"google.golang.org/protobuf/proto"
 )
 

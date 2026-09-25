@@ -2,7 +2,7 @@ SHELL := /bin/sh
 export PATH := $(HOME)/go/bin:$(PATH)
 
 NAME := model
-MODULE := github.com/Manu343726/toolsbox/subsystems/model
+MODULE := github.com/Manu343726/toolbox/subsystems/model
 PROTO_SRCS := $(shell find proto -name '*.proto' -print | sort)
 BIN := bin/$(NAME)
 

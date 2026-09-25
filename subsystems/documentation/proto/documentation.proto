@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.documentation.v1;
+package toolbox.documentation.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/documentation/documentationv1;documentationv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/documentation/documentationv1;documentationv1";
 
 // DocumentationService exposes protobuf-derived documentation for CLI and
 // agent clients.

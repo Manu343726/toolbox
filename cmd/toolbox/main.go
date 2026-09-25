@@ -1,4 +1,4 @@
-// Command toolsbox launches one or more built-in Toolsbox subsystems in a
+// Command toolbox launches one or more built-in Toolbox subsystems in a
 // single process. Feature modules remain independently buildable; this host
 // only composes their programmatic entrypoints.
 package main
@@ -13,22 +13,22 @@ import (
 	"syscall"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/host"
-	toolsboxmcp "github.com/Manu343726/toolsbox/pkg/mcp"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	agent "github.com/Manu343726/toolsbox/subsystems/agent"
-	documentation "github.com/Manu343726/toolsbox/subsystems/documentation"
-	health "github.com/Manu343726/toolsbox/subsystems/health"
-	knowledge "github.com/Manu343726/toolsbox/subsystems/knowledge"
-	model "github.com/Manu343726/toolsbox/subsystems/model"
-	policy "github.com/Manu343726/toolsbox/subsystems/policy"
-	prompt "github.com/Manu343726/toolsbox/subsystems/prompt"
-	registry "github.com/Manu343726/toolsbox/subsystems/registry"
-	registryv1 "github.com/Manu343726/toolsbox/subsystems/registry/registryv1"
-	registryv1connect "github.com/Manu343726/toolsbox/subsystems/registry/registryv1/registryv1connect"
-	skill "github.com/Manu343726/toolsbox/subsystems/skill"
-	tool "github.com/Manu343726/toolsbox/subsystems/tool"
-	workflow "github.com/Manu343726/toolsbox/subsystems/workflow"
+	"github.com/Manu343726/toolbox/pkg/host"
+	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	agent "github.com/Manu343726/toolbox/subsystems/agent"
+	documentation "github.com/Manu343726/toolbox/subsystems/documentation"
+	health "github.com/Manu343726/toolbox/subsystems/health"
+	knowledge "github.com/Manu343726/toolbox/subsystems/knowledge"
+	model "github.com/Manu343726/toolbox/subsystems/model"
+	policy "github.com/Manu343726/toolbox/subsystems/policy"
+	prompt "github.com/Manu343726/toolbox/subsystems/prompt"
+	registry "github.com/Manu343726/toolbox/subsystems/registry"
+	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
+	registryv1connect "github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
+	skill "github.com/Manu343726/toolbox/subsystems/skill"
+	tool "github.com/Manu343726/toolbox/subsystems/tool"
+	workflow "github.com/Manu343726/toolbox/subsystems/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -43,8 +43,8 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "toolsbox",
-		Short:         "Composable Toolsbox subsystem host",
+		Use:           "toolbox",
+		Short:         "Composable Toolbox subsystem host",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE:          runServe,
@@ -114,9 +114,9 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	if err := registerStartedSubsystems(cmd.Context(), h); err != nil {
 		return err
 	}
-	initialExposure := toolsboxmcp.ExposeAllowedFeatures
+	initialExposure := toolboxmcp.ExposeAllowedFeatures
 	if minimal {
-		initialExposure = toolsboxmcp.ExposeNoFeatures
+		initialExposure = toolboxmcp.ExposeNoFeatures
 	}
 	descriptors := h.Descriptors()
 	if len(serviceFilter) > 0 {
@@ -125,9 +125,9 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 	}
-	bridge, err := toolsboxmcp.NewFromDescriptors(cmd.Context(), descriptors, toolsboxmcp.Options{
-		Name:                  "toolsbox",
-		Description:           "Aggregated Model Context Protocol server for Toolsbox subsystems.",
+	bridge, err := toolboxmcp.NewFromDescriptors(cmd.Context(), descriptors, toolboxmcp.Options{
+		Name:                  "toolbox",
+		Description:           "Aggregated Model Context Protocol server for Toolbox subsystems.",
 		InitialExposure:       initialExposure,
 		IncludeInfrastructure: includeInfrastructure,
 	})

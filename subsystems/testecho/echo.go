@@ -8,10 +8,10 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	echov1 "github.com/Manu343726/toolsbox/subsystems/testecho/echov1"
-	"github.com/Manu343726/toolsbox/subsystems/testecho/echov1/echov1connect"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	echov1 "github.com/Manu343726/toolbox/subsystems/testecho/echov1"
+	"github.com/Manu343726/toolbox/subsystems/testecho/echov1/echov1connect"
 )
 
 const (

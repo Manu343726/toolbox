@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.model.v1;
+package toolbox.model.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/model/modelv1;modelv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/model/modelv1;modelv1";
 
 // ModelService exposes provider-neutral model capabilities.
 service ModelService {

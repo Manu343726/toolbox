@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.testecho.v1;
+package toolbox.testecho.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/testecho/echov1;echov1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/testecho/echov1;echov1";
 
 // EchoService is a small service used to exercise discovery and CLI generation.
 service EchoService {

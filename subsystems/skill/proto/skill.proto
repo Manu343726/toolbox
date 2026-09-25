@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.skill.v1;
+package toolbox.skill.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/skill/skillv1;skillv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/skill/skillv1;skillv1";
 
 // SkillService stores reusable, versioned skills and prompt resources.
 service SkillService {

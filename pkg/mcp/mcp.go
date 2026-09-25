@@ -22,8 +22,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Manu343726/toolsbox/pkg/discovery"
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/discovery"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/dynamicpb"
@@ -49,7 +49,7 @@ const (
 	ToolCallRPC = "call_rpc"
 
 	defaultVersion    = "0.1.0"
-	defaultServerName = "toolsbox"
+	defaultServerName = "toolbox"
 	// Keep generated names below the 128-character MCP limit even when a
 	// third-party service uses a very long protobuf name.
 	maxToolNameLength = 100
@@ -68,7 +68,7 @@ const (
 
 // Options configures an MCP server generated from a Source.
 type Options struct {
-	// Name is the MCP server implementation name. Empty uses "toolsbox".
+	// Name is the MCP server implementation name. Empty uses "toolbox".
 	Name string
 	// Version is the MCP server implementation version.
 	Version string
@@ -208,7 +208,7 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 				entry.documentation = methodDoc
 			}
 			if entry.feature.Description == "" {
-				entry.feature.Description = fmt.Sprintf("Call %s.%s through the Toolsbox RPC gateway.", serviceName, method.Name)
+				entry.feature.Description = fmt.Sprintf("Call %s.%s through the Toolbox RPC gateway.", serviceName, method.Name)
 			}
 			if _, exists := server.entries[entry.feature.ID]; exists {
 				return nil, fmt.Errorf("duplicate reflected feature %q", entry.feature.ID)

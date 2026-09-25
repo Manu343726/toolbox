@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package toolsbox.workflow.v1;
+package toolbox.workflow.v1;
 
-option go_package = "github.com/Manu343726/toolsbox/subsystems/workflow/workflowv1;workflowv1";
+option go_package = "github.com/Manu343726/toolbox/subsystems/workflow/workflowv1;workflowv1";
 
 // WorkflowService stores and validates portable workflow definitions.
 service WorkflowService {

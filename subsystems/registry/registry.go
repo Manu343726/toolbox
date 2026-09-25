@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	registryv1connect "github.com/Manu343726/toolsbox/subsystems/registry/registryv1/registryv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	registryv1connect "github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
 )
 
 const (

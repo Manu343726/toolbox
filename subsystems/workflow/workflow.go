@@ -12,9 +12,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	workflowv1 "github.com/Manu343726/toolsbox/subsystems/workflow/workflowv1"
-	"github.com/Manu343726/toolsbox/subsystems/workflow/workflowv1/workflowv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	workflowv1 "github.com/Manu343726/toolbox/subsystems/workflow/workflowv1"
+	"github.com/Manu343726/toolbox/subsystems/workflow/workflowv1/workflowv1connect"
 	"google.golang.org/protobuf/proto"
 )
 

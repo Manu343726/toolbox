@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	workflowv1 "github.com/Manu343726/toolsbox/subsystems/workflow/workflowv1"
+	workflowv1 "github.com/Manu343726/toolbox/subsystems/workflow/workflowv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,6 +82,6 @@ func TestNewServerExposesWorkflowService(t *testing.T) {
 	require.NoError(t, err)
 	services := server.Services()
 	require.Len(t, services, 1)
-	assert.Equal(t, "toolsbox.workflow.v1.WorkflowService", services[0].Name)
+	assert.Equal(t, "toolbox.workflow.v1.WorkflowService", services[0].Name)
 	assert.Contains(t, services[0].Capabilities, "workflow.validate")
 }

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Manu343726/toolsbox/pkg/discovery"
-	"github.com/Manu343726/toolsbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/discovery"
+	"github.com/Manu343726/toolbox/pkg/docs"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -34,7 +34,7 @@ type DocumentationSource interface {
 
 // Options controls generated command names and visibility.
 type Options struct {
-	// CommandName is the root command name. Empty uses "toolsbox".
+	// CommandName is the root command name. Empty uses "toolbox".
 	CommandName string
 	// Description is displayed in root help.
 	Description string
@@ -52,7 +52,7 @@ type Generator struct {
 // NewGenerator creates a schema-driven CLI generator.
 func NewGenerator(source Source, options Options) *Generator {
 	if options.CommandName == "" {
-		options.CommandName = "toolsbox"
+		options.CommandName = "toolbox"
 	}
 	return &Generator{source: source, options: options}
 }
@@ -78,7 +78,7 @@ func (g *Generator) Generate(ctx context.Context, serviceNames ...string) (*cobr
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	if root.Short == "" {
-		root.Short = "Generated Toolsbox service commands"
+		root.Short = "Generated Toolbox service commands"
 	}
 	for _, name := range serviceNames {
 		if !g.options.IncludeInfrastructure && isInfrastructure(name) {

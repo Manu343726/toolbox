@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	promptv1 "github.com/Manu343726/toolsbox/subsystems/prompt/promptv1"
+	promptv1 "github.com/Manu343726/toolbox/subsystems/prompt/promptv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

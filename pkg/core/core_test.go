@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/core"
+	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -68,8 +68,8 @@ func TestMetadataHeaders(t *testing.T) {
 		RequestID: "req", TraceID: "trace", ActorID: "actor", RunID: "run",
 		WorkspaceID: "workspace", PolicyID: "policy", Headers: map[string]string{"X-Test": "yes"},
 	}.Header()
-	assert.Equal(t, "req", header.Get("X-Toolsbox-Request-Id"))
-	assert.Equal(t, "trace", header.Get("X-Toolsbox-Trace-Id"))
+	assert.Equal(t, "req", header.Get("X-Toolbox-Request-Id"))
+	assert.Equal(t, "trace", header.Get("X-Toolbox-Trace-Id"))
 	assert.Equal(t, "yes", header.Get("X-Test"))
 }
 

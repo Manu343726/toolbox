@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Manu343726/toolsbox/pkg/core"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
+	"github.com/Manu343726/toolbox/pkg/core"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
 )
 
 // NewFromServiceEndpoints builds one MCP server over an arbitrary set of

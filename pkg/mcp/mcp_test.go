@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Manu343726/toolsbox/pkg/discovery"
+	"github.com/Manu343726/toolbox/pkg/discovery"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Manu343726/toolsbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/docs"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-const documentationServiceName = "toolsbox.documentation.v1.DocumentationService"
+const documentationServiceName = "toolbox.documentation.v1.DocumentationService"
 
 // GetDocumentation loads documentation for targetService from the standard
 // DocumentationService exposed at this endpoint. If the process has embedded

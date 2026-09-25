@@ -11,9 +11,9 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	policyv1 "github.com/Manu343726/toolsbox/subsystems/policy/policyv1"
-	"github.com/Manu343726/toolsbox/subsystems/policy/policyv1/policyv1connect"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	policyv1 "github.com/Manu343726/toolbox/subsystems/policy/policyv1"
+	"github.com/Manu343726/toolbox/subsystems/policy/policyv1/policyv1connect"
 )
 
 const (

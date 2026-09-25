@@ -1,5 +1,5 @@
 // Package core contains the public runtime primitives shared by independent
-// Toolsbox subsystems: endpoint resolution, service discovery, and dynamic
+// Toolbox subsystems: endpoint resolution, service discovery, and dynamic
 // service-to-service ConnectRPC calls.
 package core
 

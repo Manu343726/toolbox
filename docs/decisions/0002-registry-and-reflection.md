@@ -13,7 +13,7 @@ an endpoint across a distributed deployment.
 
 Use two explicit mechanisms:
 
-- `toolsbox.registry.v1.RegistryService` resolves subsystem/service names to
+- `toolbox.registry.v1.RegistryService` resolves subsystem/service names to
   endpoints, capabilities, versions, and leases.
 - gRPC reflection v1/v1alpha describes services and descriptors at a resolved
   endpoint.

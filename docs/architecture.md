@@ -1,8 +1,8 @@
-# Toolsbox architecture
+# Toolbox architecture
 
 ## 1. Architecture goals
 
-Toolsbox separates feature behavior from transport and deployment. A subsystem
+Toolbox separates feature behavior from transport and deployment. A subsystem
 can be replaced, moved to another process, or implemented by a third party
 without changing the contracts used by other subsystems.
 
@@ -18,7 +18,7 @@ The architecture has four concerns:
 
 ```text
                          ┌──────────────────────┐
-                         │  cmd/toolsbox host   │
+                         │  cmd/toolbox host   │
                          │  imports factories   │
                          └──────────┬───────────┘
                                     │ composition only
@@ -200,7 +200,7 @@ always-on introspection   generated RPC tools
 ```
 
 Each generated MCP instance owns its feature-exposure state. A subsystem
-command creates an instance for its mounted services; `toolsbox mcp` creates
+command creates an instance for its mounted services; `toolbox mcp` creates
 one instance over all selected host descriptors. Introspection tools remain
 available when the initial feature surface is empty, allowing an agent to
 list, read documentation for, expose, and hide individual methods. See
@@ -222,7 +222,7 @@ host. Dependencies must be supplied through a resolver or configuration.
 ### Selected mode
 
 ```sh
-./bin/toolsbox --component workflow --component registry
+./bin/toolbox --component workflow --component registry
 ```
 
 The host constructs and starts only the selected subsystem factories.
@@ -230,7 +230,7 @@ The host constructs and starts only the selected subsystem factories.
 ### All mode
 
 ```sh
-./bin/toolsbox --all
+./bin/toolbox --all
 ```
 
 The host starts all built-in modules. Each module still registers and resolves

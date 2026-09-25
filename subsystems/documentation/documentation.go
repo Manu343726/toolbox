@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	shareddocs "github.com/Manu343726/toolsbox/pkg/docs"
-	"github.com/Manu343726/toolsbox/pkg/subsystem"
-	documentationv1 "github.com/Manu343726/toolsbox/subsystems/documentation/documentationv1"
-	"github.com/Manu343726/toolsbox/subsystems/documentation/documentationv1/documentationv1connect"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
+	documentationv1 "github.com/Manu343726/toolbox/subsystems/documentation/documentationv1"
+	"github.com/Manu343726/toolbox/subsystems/documentation/documentationv1/documentationv1connect"
 )
 
 const (

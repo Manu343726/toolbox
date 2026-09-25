@@ -11,7 +11,7 @@
 
 ## Naming
 
-- Protobuf packages are versioned: `toolsbox.<subsystem>.v1`.
+- Protobuf packages are versioned: `toolbox.<subsystem>.v1`.
 - Service names are fully qualified and end in `Service`.
 - RPC methods use imperative PascalCase names.
 - Subsystem names are stable lowercase identifiers such as `workflow`.
@@ -43,12 +43,12 @@ Runtime metadata should be propagated through headers/interceptors rather than
 feature-specific request fields. The current core metadata supports:
 
 ```text
-X-Toolsbox-Request-Id
-X-Toolsbox-Trace-Id
-X-Toolsbox-Actor-Id
-X-Toolsbox-Run-Id
-X-Toolsbox-Workspace-Id
-X-Toolsbox-Policy-Id
+X-Toolbox-Request-Id
+X-Toolbox-Trace-Id
+X-Toolbox-Actor-Id
+X-Toolbox-Run-Id
+X-Toolbox-Workspace-Id
+X-Toolbox-Policy-Id
 ```
 
 Subsystems may add protocol-specific metadata, but authentication credentials
