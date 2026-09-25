@@ -22,6 +22,23 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
+// Mount is an HTTP handler served on a subsystem's own listener at a path, with no
+// protobuf contract behind it.
+//
+// It is how one address serves two kinds of client: a core that has to be a single
+// address — so a subsystem can register with it and an agent can reach it without
+// being told a second port — also has to serve something that is not ConnectRPC.
+// Calling that a service would put a non-protobuf handler into reflection and into
+// the descriptor, where it does not belong.
+type Mount struct {
+	// Path is the request path the handler is mounted at.
+	Path string
+	// Handler answers requests at that path.
+	Handler http.Handler
+	// Description explains what the mount serves, for a handshake or a diagnostic.
+	Description string
+}
+
 // Service binds a fully-qualified protobuf service name to its ConnectRPC
 // handler and process metadata.
 type Service struct {
@@ -49,6 +66,15 @@ type Config struct {
 	ListenAddress string
 	// Services are the ConnectRPC services mounted by this subsystem.
 	Services []Service
+	// Mounts are additional HTTP handlers served on this subsystem's own listener,
+	// under their own paths.
+	//
+	// A mount is not a service: it is not reflected, it is not in the descriptor, and
+	// it has no protobuf contract. That is the point. A core that has to be one
+	// address — so a subsystem can register with it and an agent can reach it
+	// without a second port — needs to serve something that is not ConnectRPC, and
+	// calling it a service would put a non-protobuf handler into reflection.
+	Mounts []Mount
 	// Documentation is populated from linked descriptors and is available to
 	// the subsystem's own documentation service. The common server does not
 	// mount a documentation protocol on its own.
@@ -113,6 +139,16 @@ func NewServer(cfg Config) (*Server, error) {
 	mux := http.NewServeMux()
 	serviceNames := make([]string, 0, len(cfg.Services))
 	paths := make(map[string]string)
+	for _, mount := range cfg.Mounts {
+		if err := validateMount(mount); err != nil {
+			return nil, err
+		}
+		if _, exists := paths[mount.Path]; exists {
+			return nil, fmt.Errorf("mount %q is already served by this subsystem", mount.Path)
+		}
+		paths[mount.Path] = "a mount"
+		mux.Handle(mount.Path, mount.Handler)
+	}
 	for _, service := range cfg.Services {
 		if err := validateService(service); err != nil {
 			return nil, err
@@ -335,6 +371,26 @@ func (s *Config) ServicesNames() []string {
 		result = append(result, service.Name)
 	}
 	return result
+}
+
+func validateMount(mount Mount) error {
+	if strings.TrimSpace(mount.Path) == "" {
+		return fmt.Errorf("a mount needs a path")
+	}
+	if mount.Handler == nil {
+		return fmt.Errorf("mount %q has no handler", mount.Path)
+	}
+	if !strings.HasPrefix(mount.Path, "/") {
+		return fmt.Errorf("mount %q path must start with '/'", mount.Path)
+	}
+	// A mount may not sit on the reflection handlers. The mux panics on a duplicate
+	// pattern, and a caller would be left silently unable to describe any contract.
+	v1Path, _ := grpcreflect.NewHandlerV1(nil)
+	alphaPath, _ := grpcreflect.NewHandlerV1Alpha(nil)
+	if mount.Path == v1Path || mount.Path == alphaPath {
+		return fmt.Errorf("mount %q collides with the protocol's reflection service", mount.Path)
+	}
+	return nil
 }
 
 func validateService(service Service) error {

@@ -20,7 +20,7 @@ import (
 // subsystem's own contract, and the gateway offers the subsystem's operations as
 // tools.
 func TestAutomaticExposureOfSubsystems(t *testing.T) {
-	h, catalog, err := buildHost(config.Config{})
+	h, catalog, err := buildHost(config.Config{}, "")
 	require.NoError(t, err)
 	// Health and registry are started on purpose: their services declare
 	// capabilities, so the uniform rule has to hold for them too.
@@ -138,7 +138,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 // TestReflectionAndCatalogAgreeOnToolNames guards the promise that switching the
 // source of the tool surface does not rename anything an agent already uses.
 func TestReflectionAndCatalogAgreeOnToolNames(t *testing.T) {
-	h, catalog, err := buildHost(config.Config{})
+	h, catalog, err := buildHost(config.Config{}, "")
 	require.NoError(t, err)
 	require.NoError(t, h.Select("knowledge", "apigrpc"))
 	require.NoError(t, h.Start(context.Background()))

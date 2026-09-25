@@ -90,6 +90,17 @@ func newRootCommand() *cobra.Command {
 	mcpFlags.String("policy", "", "Path to a policy document deciding which operations may be exposed; the default grants every read and nothing that changes state")
 	mcpFlags.StringSlice("service", nil, "Only expose these fully-qualified services; repeatable or comma-separated")
 	root.AddCommand(mcpCommand)
+
+	daemonCommand := &cobra.Command{
+		Use:   "daemon",
+		Short: "Run the core as a long-lived process other clients join",
+		Long: "Run the core as a long-lived process at a fixed address. Subsystems that did not " +
+			"start inside it register with the core's registry, and an agent connects to the " +
+			"Model Context Protocol endpoint over the network instead of launching a subprocess.",
+		Args: cobra.NoArgs,
+		RunE: runDaemon,
+	}
+	root.AddCommand(daemonCommand)
 	return root
 }
 
@@ -142,7 +153,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, catalog, err := buildHost(resolved)
+	h, catalog, err := buildHost(resolved, "")
 	if err != nil {
 		return err
 	}
@@ -301,7 +312,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, _, err := buildHost(resolved)
+	h, _, err := buildHost(resolved, "")
 	if err != nil {
 		return err
 	}
@@ -331,7 +342,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // core is, and what an agent may call. Both are read here rather than by each
 // consumer, because the catalog, the seeder, and the gateway all have to be
 // answering from one policy and one address.
-func buildHost(resolved config.Config) (*host.Host, *sharedCatalog, error) {
+func buildHost(resolved config.Config, registryAddress string, mounts ...subsystem.Mount) (*host.Host, *sharedCatalog, error) {
 	h := host.New()
 	// The API catalog is given the host's own provider directory, so it finds the
 	// parsers, adapters, and invokers this process starts without importing a
@@ -381,10 +392,22 @@ func buildHost(resolved config.Config) (*host.Host, *sharedCatalog, error) {
 		"model":         func() (*subsystem.Server, error) { return model.New(model.Options{}) },
 		"policy":        func() (*subsystem.Server, error) { return policy.New(policy.Options{}) },
 		"prompt":        func() (*subsystem.Server, error) { return prompt.New(prompt.Options{}) },
-		"registry":      func() (*subsystem.Server, error) { return registry.New(registry.Options{}) },
-		"skill":         func() (*subsystem.Server, error) { return skill.New(skill.Options{}) },
-		"tool":          func() (*subsystem.Server, error) { return tool.New(tool.Options{}) },
-		"workflow":      func() (*subsystem.Server, error) { return workflow.New(workflow.Options{}) },
+		// The registry is the core's own endpoint, so a daemon gives it the configured
+		// address. An in-process core passes none and keeps the ephemeral loopback
+		// port: nothing outside the process needs to find it.
+		"registry": func() (*subsystem.Server, error) {
+			options := registry.Options{}
+			if registryAddress != "" {
+				options.ListenAddress = registryAddress
+			}
+			if len(mounts) > 0 {
+				options.Mounts = mounts
+			}
+			return registry.New(options)
+		},
+		"skill":    func() (*subsystem.Server, error) { return skill.New(skill.Options{}) },
+		"tool":     func() (*subsystem.Server, error) { return tool.New(tool.Options{}) },
+		"workflow": func() (*subsystem.Server, error) { return workflow.New(workflow.Options{}) },
 	}
 	for name, factory := range factories {
 		if err := h.Register(name, factory); err != nil {

@@ -21,8 +21,15 @@ type Options struct {
 	Store *Memory
 	// DefaultLease is used when registrations do not specify a lease.
 	DefaultLease time.Duration
-	// ListenAddress defaults to 127.0.0.1:0.
+	// ListenAddress defaults to 127.0.0.1:0. A core that is meant to be reached
+	// gives it a fixed address; one that is not leaves it ephemeral.
 	ListenAddress string
+	// Mounts are additional HTTP handlers served on this subsystem's own listener.
+	//
+	// The registry is the core's endpoint, so this is how one address serves both a
+	// subsystem registering itself and an agent reaching the Model Context Protocol.
+	// A mount is not a service: it has no protobuf contract and is not reflected.
+	Mounts []subsystem.Mount
 	// Version overrides the implementation version.
 	Version string
 	// Background is optional registry work.
@@ -46,6 +53,7 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Stores and resolves independent subsystem registrations.",
 		ListenAddress: options.ListenAddress,
 		Background:    options.Background,
+		Mounts:        options.Mounts,
 		Services: []subsystem.Service{{
 			Name:    registryv1connect.RegistryServiceName,
 			Path:    path,
