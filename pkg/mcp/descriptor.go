@@ -89,9 +89,6 @@ func Manifest(described api.API, options RenderOptions) ([]byte, error) {
 			entry["outputSchema"] = tool.OutputSchema
 		}
 		entry["x-toolbox-operation"] = tool.OperationID
-		if len(tool.Capabilities) > 0 {
-			entry[CapabilitiesExtension] = tool.Capabilities
-		}
 		// A description's declared consequences are written as the protocol's own
 		// annotations, so a manifest read back says the same thing the description
 		// did. Dropping them here would lose exactly what a policy needs.

@@ -209,10 +209,8 @@ func TestRegisterIntoDescribesAndExposesAHostSubsystem(t *testing.T) {
 	stored, ok := catalog.apis["fixture"]
 	require.True(t, ok)
 	require.Len(t, stored.Services, 2)
-	assert.Empty(t, stored.Services[0].Capabilities,
-		"a description read from a contract states no authorization facts")
 	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, stored.Services[0].Operations[0].SideEffects,
-		"it does state what invoking an operation does")
+		"a description read from a contract states what invoking an operation does, and nothing about who may")
 
 	// Both operations are exposed, and the seeder asked for exactly those.
 	assert.Contains(t, catalog.exposure, "fixture/"+fixtureService+"/ListThings")

@@ -78,20 +78,14 @@ func New(options Options) (*subsystem.Server, error) {
 		Background:    options.Background,
 		Services: []subsystem.Service{
 			{
-				Name:         apiv1connect.ApiParserServiceName,
-				Path:         parserPath,
-				Handler:      parserHandler,
-				Capabilities: []string{api.ParseCapability(FormatGRPC)},
+				Name:    apiv1connect.ApiParserServiceName,
+				Path:    parserPath,
+				Handler: parserHandler,
 			},
 			{
 				Name:    apiv1connect.ApiInvokerServiceName,
 				Path:    invokerPath,
 				Handler: invokerHandler,
-				Capabilities: []string{
-					api.InvokeCapability(TransportConnectRPC),
-					api.InvokeCapability(TransportGRPC),
-					api.InvokeCapability(TransportGRPCWeb),
-				},
 			},
 		},
 	})
@@ -122,11 +116,6 @@ func TransportDescriptors() []api.TransportDescriptor {
 // it contributes a provider record for each, plus a convenience record that names
 // both for a deployment that only needs the service names.
 func Providers(endpoint string) []api.Provider {
-	invokerCapabilities := []string{
-		api.InvokeCapability(TransportConnectRPC),
-		api.InvokeCapability(TransportGRPC),
-		api.InvokeCapability(TransportGRPCWeb),
-	}
 	return []api.Provider{
 		{
 			ID:                    Name + "-parser",
@@ -135,7 +124,6 @@ func Providers(endpoint string) []api.Provider {
 			Formats:               []api.Format{FormatGRPC},
 			Endpoint:              endpoint,
 			ServiceNames:          []string{apiv1connect.ApiParserServiceName},
-			Capabilities:          []string{api.ParseCapability(FormatGRPC)},
 			Status:                api.ServerStatusServing,
 			ImplementationVersion: Version,
 		},
@@ -146,7 +134,6 @@ func Providers(endpoint string) []api.Provider {
 			Transports:            []api.Transport{TransportConnectRPC, TransportGRPC, TransportGRPCWeb},
 			Endpoint:              endpoint,
 			ServiceNames:          []string{apiv1connect.ApiInvokerServiceName},
-			Capabilities:          invokerCapabilities,
 			Status:                api.ServerStatusServing,
 			ImplementationVersion: Version,
 		},
@@ -156,7 +143,6 @@ func Providers(endpoint string) []api.Provider {
 			Role:                  api.ProviderParser,
 			Endpoint:              endpoint,
 			ServiceNames:          []string{apiv1connect.ApiParserServiceName, apiv1connect.ApiInvokerServiceName},
-			Capabilities:          append([]string{api.ParseCapability(FormatGRPC)}, invokerCapabilities...),
 			Status:                api.ServerStatusServing,
 			ImplementationVersion: Version,
 		},

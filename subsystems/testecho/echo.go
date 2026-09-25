@@ -51,10 +51,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Reference echo service for framework integration tests.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         echov1connect.EchoServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"testecho.echo"},
+			Name:    echov1connect.EchoServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

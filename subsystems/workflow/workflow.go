@@ -163,10 +163,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Stores and validates provider-neutral workflow definitions.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         workflowv1connect.WorkflowServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"workflow.definition.read", "workflow.definition.write", "workflow.validate"},
+			Name:    workflowv1connect.WorkflowServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

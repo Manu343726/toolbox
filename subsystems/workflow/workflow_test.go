@@ -83,5 +83,4 @@ func TestNewServerExposesWorkflowService(t *testing.T) {
 	services := server.Services()
 	require.Len(t, services, 1)
 	assert.Equal(t, "toolbox.workflow.v1.WorkflowService", services[0].Name)
-	assert.Contains(t, services[0].Capabilities, "workflow.validate")
 }

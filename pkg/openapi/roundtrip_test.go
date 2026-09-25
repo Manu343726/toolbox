@@ -113,12 +113,11 @@ func TestRenderedDocumentCanBeReadBack(t *testing.T) {
 		Services: []api.Service{{
 			Name: "pets",
 			Operations: []api.Operation{{
-				Name:         "getPet",
-				Method:       "get",
-				Path:         "/pets/{petId}",
-				Summary:      "Fetch one pet",
-				Capabilities: []string{"pet.read"},
-				SideEffects:  []api.SideEffect{api.SideEffectReadOnly},
+				Name:        "getPet",
+				Method:      "get",
+				Path:        "/pets/{petId}",
+				Summary:     "Fetch one pet",
+				SideEffects: []api.SideEffect{api.SideEffectReadOnly},
 				Parameters: []api.Parameter{{
 					Name:     "petId",
 					In:       api.ParameterInPath,
@@ -140,7 +139,6 @@ func TestRenderedDocumentCanBeReadBack(t *testing.T) {
 
 	operation, found := reparsed.Operation("shop/pets/getPet")
 	require.True(t, found)
-	assert.Equal(t, []string{"pet.read"}, operation.Capabilities, "capabilities survive the round trip")
 	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, operation.SideEffects)
 	assert.Len(t, operation.Parameters, 1)
 	assert.Equal(t, api.ParameterInPath, operation.Parameters[0].In)

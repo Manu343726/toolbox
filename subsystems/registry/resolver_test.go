@@ -33,7 +33,6 @@ func TestResolverUsesTypedRegistryClientAndResolvesServiceNames(t *testing.T) {
 	endpoint, err := resolver.Resolve(context.Background(), "weather.v1.WeatherService")
 	require.NoError(t, err)
 	assert.Equal(t, "weather", endpoint.Name)
-	assert.Equal(t, []string{"weather.forecast"}, endpoint.Capabilities)
 
 	_, err = resolver.Resolve(context.Background(), "missing.v1.Service")
 	assert.ErrorIs(t, err, core.ErrNotFound)

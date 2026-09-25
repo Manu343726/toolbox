@@ -224,8 +224,6 @@ type Server struct {
 	// was read: a document a caller supplied, or an endpoint that described
 	// itself. It is absent for a server someone registered by hand.
 	Source Source
-	// Capabilities are the explicit capabilities this server grants.
-	Capabilities []string
 	// Status is the operational state of the server.
 	Status ServerStatus
 	// RegisteredAt is when the server entered the catalog.
@@ -256,8 +254,6 @@ type API struct {
 	// DeclaredServers are the locations the description document itself
 	// declares, before any server is registered against it.
 	DeclaredServers []DeclaredServer
-	// Capabilities are the explicit capabilities this API grants.
-	Capabilities []string
 	// Security are the API-wide security requirements.
 	Security []SecurityRequirement
 	// SecuritySchemes describes how credentials are supplied.
@@ -303,8 +299,6 @@ type Service struct {
 	// unless the operation declares its own. A protobuf contract uses this to
 	// classify a uniformly read-only service once instead of on every method.
 	SideEffects []SideEffect
-	// Capabilities are the explicit capabilities this service grants.
-	Capabilities []string
 	// Operations are the callable operations of the service, in description
 	// order.
 	Operations []Operation
@@ -346,8 +340,6 @@ type Operation struct {
 	// SideEffects are the declared consequences of invoking the operation. An
 	// empty list means unknown, not safe.
 	SideEffects []SideEffect
-	// Capabilities are the explicit capabilities this operation grants.
-	Capabilities []string
 	// Deprecated states that the operation should not be used for new work.
 	Deprecated bool
 	// Streaming states the streaming behavior of the operation.
@@ -450,7 +442,6 @@ func (o Operation) Clone() Operation {
 	clone.Tags = append([]string(nil), o.Tags...)
 	clone.Security = append([]SecurityRequirement(nil), o.Security...)
 	clone.SideEffects = append([]SideEffect(nil), o.SideEffects...)
-	clone.Capabilities = append([]string(nil), o.Capabilities...)
 	clone.Streaming = o.Streaming
 	clone.Parameters = make([]Parameter, 0, len(o.Parameters))
 	for i := range o.Parameters {
@@ -473,7 +464,6 @@ func (o Operation) Clone() Operation {
 func (s Service) Clone() Service {
 	clone := s
 	clone.SideEffects = append([]SideEffect(nil), s.SideEffects...)
-	clone.Capabilities = append([]string(nil), s.Capabilities...)
 	clone.Operations = make([]Operation, 0, len(s.Operations))
 	for i := range s.Operations {
 		clone.Operations = append(clone.Operations, s.Operations[i].Clone())
@@ -486,7 +476,6 @@ func (a API) Clone() API {
 	clone := a
 	clone.ServerIDs = append([]string(nil), a.ServerIDs...)
 	clone.DeclaredServers = append([]DeclaredServer(nil), a.DeclaredServers...)
-	clone.Capabilities = append([]string(nil), a.Capabilities...)
 	clone.Tags = append([]string(nil), a.Tags...)
 	clone.Security = append([]SecurityRequirement(nil), a.Security...)
 	clone.SecuritySchemes = make([]SecurityScheme, 0, len(a.SecuritySchemes))
@@ -506,7 +495,6 @@ func (a API) Clone() API {
 // Clone returns a deep copy of the server.
 func (s Server) Clone() Server {
 	clone := s
-	clone.Capabilities = append([]string(nil), s.Capabilities...)
 	clone.Metadata = copyMetadata(s.Metadata)
 	return clone
 }

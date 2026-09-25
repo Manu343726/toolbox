@@ -41,12 +41,10 @@ func DescribeDocument(document []byte, options DescribeOptions) (api.API, []stri
 				DestructiveHint *bool `json:"destructiveHint"`
 				IdempotentHint  bool  `json:"idempotentHint"`
 			} `json:"annotations"`
-			Operation    string   `json:"x-toolbox-operation"`
-			Capabilities []string `json:"-"`
+			Operation string `json:"x-toolbox-operation"`
 		} `json:"tools"`
 		Warnings []string `json:"x-toolbox-warnings"`
 	}
-	// Capabilities are read from the raw document, because the extension's value is
 	// either a list or a single string and a typed field would refuse the second.
 	raw := map[string]any{}
 	if err := json.Unmarshal(document, &raw); err != nil {
@@ -120,7 +118,6 @@ type manifestEntry struct {
 	InputSchema  map[string]any
 	OutputSchema map[string]any
 	Operation    string
-	Capabilities []string
 	ReadOnly     bool
 	Destructive  bool
 	Idempotent   bool
@@ -136,8 +133,7 @@ func findManifestTool(tools []struct {
 		DestructiveHint *bool `json:"destructiveHint"`
 		IdempotentHint  bool  `json:"idempotentHint"`
 	} `json:"annotations"`
-	Operation    string   `json:"x-toolbox-operation"`
-	Capabilities []string `json:"-"`
+	Operation string `json:"x-toolbox-operation"`
 }, name string) manifestEntry {
 	raw := map[string]any{}
 	_ = json.Unmarshal([]byte("{}"), &raw)
@@ -171,12 +167,6 @@ func manifestOperation(tool manifestEntry, raw map[string]any, serviceName strin
 		Summary:     firstLine(tool.Description),
 		Description: strings.TrimSpace(tool.Description),
 		Request:     api.SchemaFromJSONSchema(tool.InputSchema),
-		Capabilities: func() []string {
-			if len(tool.Capabilities) > 0 {
-				return api.CapabilitiesFor(tool.Capabilities)
-			}
-			return api.CapabilitiesFor(declaredCapabilityNames(raw, tool.Name))
-		}(),
 	}
 	effects := make([]api.SideEffect, 0, 3)
 	if tool.ReadOnly {
@@ -223,35 +213,37 @@ func operationNameFor(tool manifestEntry, serviceName string) string {
 	return name
 }
 
-// declaredCapabilityNames reads the capabilities extension from the raw document,
-// where a value may be a list or a single string.
-func declaredCapabilityNames(raw map[string]any, toolName string) []string {
-	tools, ok := raw["tools"].([]any)
-	if !ok {
-		return nil
-	}
-	for _, entry := range tools {
-		tool, ok := entry.(map[string]any)
-		if !ok || tool["name"] != toolName {
-			continue
-		}
-		switch declared := tool[CapabilitiesExtension].(type) {
-		case []any:
-			names := make([]string, 0, len(declared))
-			for _, value := range declared {
-				if text, ok := value.(string); ok {
-					names = append(names, text)
-				}
-			}
-			return names
-		case string:
-			return []string{declared}
-		}
-	}
-	return nil
-}
-
 // toolSegmentFor reduces a service name to the segment a tool name starts with.
 func toolSegmentFor(name string) string {
 	return strings.TrimSuffix(generatedToolName("", name), "__")
+}
+
+// callResultSchema describes the protocol's own result envelope, for a tool that
+// declares no result shape of its own. Describing the envelope is more useful than
+// describing nothing.
+func callResultSchema() *api.Schema {
+	return &api.Schema{
+		Type:        api.TypeObject,
+		Title:       "Tool call result",
+		Description: "The Model Context Protocol's result for a tool call.",
+		Properties: []api.Property{{
+			Name: "content",
+			Schema: &api.Schema{
+				Type:        api.TypeArray,
+				Description: "The result content: text, an image, or an embedded resource.",
+				Items:       &api.Schema{Type: api.TypeObject, AdditionalPropertiesAllowed: true},
+			},
+		}, {
+			Name: "structuredContent",
+			Schema: &api.Schema{
+				Type:        api.TypeObject,
+				Description: "The structured result, when the tool declares one.",
+			},
+		}, {
+			Name:     "isError",
+			Required: true,
+			Schema:   &api.Schema{Type: api.TypeBoolean, Description: "True when the call ended in an error."},
+		}},
+		Required: []string{"content", "isError"},
+	}
 }

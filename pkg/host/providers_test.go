@@ -7,207 +7,131 @@ import (
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
 	"github.com/Manu343726/toolbox/pkg/core"
-	"github.com/Manu343726/toolbox/pkg/subsystem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestProviderDirectoryDerivesRolesFromCapabilities proves the extension-point
-// discovery a catalog depends on: a subsystem participates by declaring a
-// capability, and nothing in the framework has to know the subsystem exists.
-func TestProviderDirectoryDerivesRolesFromCapabilities(t *testing.T) {
+// A provider declares itself. These tests pin what that means: the directory holds
+// what a deployment handed it, the role a provider plays is the record's own field
+// rather than something inferred from a capability string, and a subsystem nothing
+// registered is not a provider however much it serves.
+
+func providerFixtures() []api.Provider {
+	return []api.Provider{{
+		ID:           "apiopenapi-parser",
+		Subsystem:    "apiopenapi",
+		Role:         api.ProviderParser,
+		Endpoint:     "http://127.0.0.1:9001",
+		Formats:      []api.Format{"openapi"},
+		ServiceNames: []string{apiv1connect.ApiParserServiceName},
+	}, {
+		ID:           "apiopenapi-adapter",
+		Subsystem:    "apiopenapi",
+		Role:         api.ProviderAdapter,
+		Endpoint:     "http://127.0.0.1:9001",
+		Targets:      []string{"openapi"},
+		ServiceNames: []string{apiv1connect.ApiAdapterServiceName},
+	}, {
+		ID:           "apigrpc-parser",
+		Subsystem:    "apigrpc",
+		Role:         api.ProviderParser,
+		Endpoint:     "http://127.0.0.1:9002",
+		Formats:      []api.Format{"grpc"},
+		ServiceNames: []string{apiv1connect.ApiParserServiceName},
+	}}
+}
+
+func TestProviderDirectoryHoldsWhatTheDeploymentRegistered(t *testing.T) {
 	directory := (&Host{}).ProviderDirectory()
-	providers := directory.ProvidersOf([]ProviderEndpoint{
-		{
-			Subsystem:             "apiopenapi",
-			Endpoint:              "http://127.0.0.1:9001",
-			ImplementationVersion: "0.1.0",
-			Capabilities: []string{
-				api.ParseCapability("openapi"),
-				api.RenderCapability("openapi"),
-				api.InvokeCapability("http"),
-			},
-		},
-		{
-			Subsystem: "apigrpc",
-			Endpoint:  "http://127.0.0.1:9002",
-			Capabilities: []string{
-				api.ParseCapability("grpc"),
-				api.InvokeCapability("connectrpc"),
-			},
-		},
-		{
-			// A subsystem with no extension-point capability is not a provider,
-			// whatever else it offers.
-			Subsystem:    "workflow",
-			Endpoint:     "http://127.0.0.1:9003",
-			Capabilities: []string{"workflow.definition.read"},
-		},
-	})
+	require.NoError(t, directory.Register(providerFixtures()...))
+
+	providers, err := directory.Providers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, providers, 3, "two subsystems implementing three contracts between them")
 
 	byID := make(map[string]api.Provider, len(providers))
 	for _, provider := range providers {
 		byID[provider.ID] = provider
 	}
-	require.Len(t, byID, 5, "two subsystems implementing three contracts between them")
-
 	parser := byID["apiopenapi-parser"]
 	assert.Equal(t, api.ProviderParser, parser.Role)
 	assert.Equal(t, []api.Format{"openapi"}, parser.Formats)
 	assert.Equal(t, []string{apiv1connect.ApiParserServiceName}, parser.ServiceNames)
+	assert.Equal(t, api.ServerStatusServing, parser.Status,
+		"a registered provider is serving until something reports otherwise")
 
 	adapter := byID["apiopenapi-adapter"]
 	assert.Equal(t, api.ProviderAdapter, adapter.Role)
 	assert.Equal(t, []string{"openapi"}, adapter.Targets)
-	assert.Equal(t, []string{apiv1connect.ApiAdapterServiceName}, adapter.ServiceNames)
 
-	invoker := byID["apiopenapi-invoker"]
-	assert.Equal(t, api.ProviderInvoker, invoker.Role)
-	assert.Equal(t, []api.Transport{"http"}, invoker.Transports)
-	assert.Equal(t, []string{apiv1connect.ApiInvokerServiceName}, invoker.ServiceNames)
-
-	assert.Contains(t, byID, "apigrpc-parser")
-	assert.Contains(t, byID, "apigrpc-invoker")
-	assert.NotContains(t, byID, "apigrpc-adapter", "a subsystem that implements no adapter contract claims no target")
+	// A subsystem nobody registered is not a provider, whatever else it serves.
 	assert.NotContains(t, byID, "workflow-parser")
 }
 
-func TestProviderDirectoryDerivesUserDefinedIdentifiers(t *testing.T) {
+func TestRegisteringAProviderTwiceReplacesIt(t *testing.T) {
+	// A subsystem restarted on a new port is the same provider at a new address.
 	directory := (&Host{}).ProviderDirectory()
-	providers := directory.ProvidersOf([]ProviderEndpoint{{
-		Subsystem: "apimystery",
-		Endpoint:  "http://127.0.0.1:9004",
-		Capabilities: []string{
-			api.ParseCapability("mystery-idl"),
-			api.RenderCapability("mystery-target"),
-			api.InvokeCapability("mystery-transport"),
-		},
-	}})
-	require.Len(t, providers, 3)
-	byRole := make(map[string]api.Provider, len(providers))
+	require.NoError(t, directory.Register(providerFixtures()...))
+	moved := providerFixtures()[0]
+	moved.Endpoint = "http://127.0.0.1:9999"
+	require.NoError(t, directory.Register(moved))
+
+	providers, err := directory.Providers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, providers, 3, "the identifier is the provider's, not the endpoint's")
+	byID := map[string]api.Provider{}
 	for _, provider := range providers {
-		byRole[provider.Role] = provider
+		byID[provider.ID] = provider
 	}
-	assert.True(t, byRole[api.ProviderParser].HandlesFormat("mystery-idl"))
-	assert.True(t, byRole[api.ProviderAdapter].HandlesTarget("mystery-target"))
-	assert.True(t, byRole[api.ProviderInvoker].HandlesTransport("mystery-transport"),
-		"an identifier the framework has never seen resolves like any other")
+	assert.Equal(t, "http://127.0.0.1:9999", byID["apiopenapi-parser"].Endpoint)
 }
 
-func TestProviderDirectoryRefusesUnknownProvider(t *testing.T) {
+func TestAProviderNeedsAnIdentifier(t *testing.T) {
 	directory := (&Host{}).ProviderDirectory()
-	_, err := directory.Parser(context.Background(), "ghost")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no provider")
+	assert.Error(t, directory.Register(api.Provider{Role: api.ProviderParser}),
+		"an identifier is what a caller binds a provider by")
 }
 
-func TestProviderDirectoryBindsAHostProviderWithoutAResolver(t *testing.T) {
-	// A provider the host started knows its own endpoint, so it is reachable
-	// without a registry, a resolver, or any configuration a deployment has to get
-	// right. That is what makes a single-process deployment work out of the box.
-	path, handler := apiv1connect.NewApiInvokerServiceHandler(&noOpInvoker{})
-	server, err := subsystem.NewServer(subsystem.Config{
-		Name: "apimystery",
-		Services: []subsystem.Service{{
-			Name:         apiv1connect.ApiInvokerServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{api.InvokeCapability("mystery")},
-		}},
-	})
-	require.NoError(t, err)
-	h := New()
-	require.NoError(t, h.Register("apimystery", func() (*subsystem.Server, error) { return server, nil }))
-	require.NoError(t, h.Select("apimystery"))
-	require.NoError(t, h.Start(context.Background()))
-	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
-
-	directory := h.ProviderDirectory()
-	assert.Nil(t, directory.clients, "no resolver has been installed, and none is needed")
-	client, err := directory.Invoker(context.Background(), "apimystery-invoker")
-	require.NoError(t, err)
-	assert.NotNil(t, client)
-}
-
-// noOpInvoker is a contract implementation that answers nothing, which is enough
-// for a test that binds a client and does not call it.
-type noOpInvoker struct {
-	apiv1connect.UnimplementedApiInvokerServiceHandler
-}
-
-func TestProviderDirectoryDescribeIsStable(t *testing.T) {
+func TestDirectoryBindsAProviderByItsOwnIdentity(t *testing.T) {
+	// Two providers serve one contract on purpose, and a caller naming the contract
+	// would reach whichever answered first. Naming the provider reaches the one
+	// meant, which is why binding is by identifier and never by service name.
 	directory := (&Host{}).ProviderDirectory()
-	providers := directory.ProvidersOf([]ProviderEndpoint{{
-		Subsystem:    "apigrpc",
-		Endpoint:     "http://127.0.0.1:9002",
-		Capabilities: []string{api.ParseCapability("grpc")},
-	}})
-	require.Len(t, providers, 1)
-	assert.Equal(t, "apigrpc-parser", providers[0].ID)
-}
+	require.NoError(t, directory.Register(
+		api.Provider{
+			ID:           "apigrpc-parser",
+			Role:         api.ProviderParser,
+			Endpoint:     "http://127.0.0.1:9002",
+			ServiceNames: []string{apiv1connect.ApiParserServiceName},
+		},
+		api.Provider{
+			ID:           "apimcp-parser",
+			Role:         api.ProviderParser,
+			Endpoint:     "http://127.0.0.1:9003",
+			ServiceNames: []string{apiv1connect.ApiParserServiceName},
+		},
+	))
+	directory.SetResolver(core.NewStaticResolver(
+		core.Endpoint{
+			Name:         "apigrpc",
+			URL:          "http://127.0.0.1:9002",
+			ServiceNames: []string{apiv1connect.ApiParserServiceName},
+		},
+		core.Endpoint{
+			Name:         "apimcp",
+			URL:          "http://127.0.0.1:9003",
+			ServiceNames: []string{apiv1connect.ApiParserServiceName},
+		},
+	))
 
-func TestProviderEndpointCarriesCapabilityNames(t *testing.T) {
-	// The directory's inputs are Go values supplied by a deployment's own
-	// composition; the capability names are the only contract involved, and they
-	// are the same strings the registry advertises.
-	endpoint := ProviderEndpoint{
-		Subsystem:    "s",
-		Endpoint:     "http://x",
-		Capabilities: []string{api.ParseCapability("f"), api.InvokeCapability("t")},
-	}
-	directory := (&Host{}).ProviderDirectory()
-	providers := directory.ProvidersOf([]ProviderEndpoint{endpoint})
-	require.Len(t, providers, 2)
-	assert.Contains(t, endpoint.Capabilities, "api.parse.f")
-	assert.Contains(t, endpoint.Capabilities, "api.invoke.t")
-}
-
-// TestProviderDirectoryBindsEachProviderToItsOwnEndpoint covers the case two
-// providers create by existing: several subsystems serve the same contract,
-// because serving it is how a format or a transport is contributed. A client
-// bound by service name would reach whichever endpoint claimed the name first, so
-// a catalog asking for one provider would silently get another's behaviour.
-func TestProviderDirectoryBindsEachProviderToItsOwnEndpoint(t *testing.T) {
-	h := New()
-	for _, name := range []string{"alpha", "beta"} {
-		name := name
-		path, handler := apiv1connect.NewApiInvokerServiceHandler(&noOpInvoker{})
-		server, err := subsystem.NewServer(subsystem.Config{
-			Name: name,
-			Services: []subsystem.Service{{
-				Name:    apiv1connect.ApiInvokerServiceName,
-				Path:    path,
-				Handler: handler,
-				// Both providers claim an invocation transport, which is what makes
-				// the catalog able to choose between them.
-				Capabilities: []string{api.InvokeCapability("connectrpc")},
-			}},
-		})
-		require.NoError(t, err)
-		require.NoError(t, h.Register(name, func() (*subsystem.Server, error) { return server, nil }))
-	}
-	require.NoError(t, h.Start(context.Background()))
-	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
-
-	directory := h.ProviderDirectory()
-	directory.SetResolver(core.NewStaticResolver(core.Endpoint{
-		// One endpoint claims the contract on behalf of both providers, which is
-		// exactly the ambiguity this test exists to rule out.
-		Name:         "any",
-		URL:          h.Servers()["alpha"].Endpoint(),
-		ServiceNames: []string{apiv1connect.ApiInvokerServiceName},
-	}))
-
-	alpha, err := directory.Invoker(context.Background(), "alpha-invoker")
-	require.NoError(t, err, "the first provider binds")
-	beta, err := directory.Invoker(context.Background(), "beta-invoker")
-	require.NoError(t, err, "the second provider binds")
-	assert.NotSame(t, alpha, beta,
-		"two providers serving one contract are two clients, one per endpoint")
-
-	// A client is memoized per provider, so a second request costs nothing and
-	// cannot pick a different endpoint.
-	again, err := directory.Invoker(context.Background(), "alpha-invoker")
+	grpc, err := directory.Parser(context.Background(), "apigrpc-parser")
 	require.NoError(t, err)
-	assert.Same(t, alpha, again)
+	require.NotNil(t, grpc)
+	mcp, err := directory.Parser(context.Background(), "apimcp-parser")
+	require.NoError(t, err)
+	require.NotNil(t, mcp)
+	assert.NotSame(t, grpc, mcp, "two providers, two clients")
+
+	_, err = directory.Parser(context.Background(), "apimcp")
+	assert.Error(t, err, "a subsystem name is not a provider identifier")
 }

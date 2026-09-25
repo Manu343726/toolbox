@@ -88,7 +88,6 @@ func TestParserReportsTheFormatDescriptorItImplements(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "shop", described.ID)
 	require.Len(t, described.Services, 1)
-	assert.Equal(t, []string{"pet.read"}, described.Services[0].Operations[0].Capabilities)
 }
 
 func TestParserAppliesTheCallersBaseURLWhenTheDocumentDeclaresNone(t *testing.T) {
@@ -249,8 +248,6 @@ func TestNewServesAllThreeContracts(t *testing.T) {
 	assert.True(t, names[apiv1connect.ApiParserServiceName])
 	assert.True(t, names[apiv1connect.ApiAdapterServiceName])
 	assert.True(t, names[apiv1connect.ApiInvokerServiceName])
-	assert.Contains(t, descriptor.Capabilities, api.ParseCapability(FormatOpenAPI))
-	assert.Contains(t, descriptor.Capabilities, api.RenderCapability(TargetOpenAPI))
 }
 
 func TestCredentialTypesAreThePackagesOwn(t *testing.T) {
@@ -273,12 +270,11 @@ func aPetAPI(t *testing.T) api.API {
 		Services: []api.Service{{
 			Name: "pets",
 			Operations: []api.Operation{{
-				Name:         "getPet",
-				Method:       "get",
-				Path:         "/pets/{petId}",
-				Summary:      "Fetch one pet",
-				Capabilities: []string{"pet.read"},
-				SideEffects:  []api.SideEffect{api.SideEffectReadOnly},
+				Name:        "getPet",
+				Method:      "get",
+				Path:        "/pets/{petId}",
+				Summary:     "Fetch one pet",
+				SideEffects: []api.SideEffect{api.SideEffectReadOnly},
 				Parameters: []api.Parameter{{
 					Name:     "petId",
 					In:       api.ParameterInPath,

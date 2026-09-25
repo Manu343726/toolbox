@@ -15,13 +15,9 @@ import (
 
 // Extensions a document may use to declare what the framework needs to know and
 // cannot infer. Everything else about an operation is described by the document
-// itself; these extensions are the only way it states authorization-relevant
-// facts, which keeps a parsed operation honest: an operation nobody declared
-// capabilities for stays unexposable.
+// itself; these extensions are the only way a document states anything the HTTP
+// method does not already imply.
 const (
-	// ExtensionCapabilities declares the capabilities an API, operation, or tag
-	// grants, as a list of strings.
-	ExtensionCapabilities = "x-toolbox-capabilities"
 	// ExtensionSideEffects declares additional side effects, as a list of
 	// strings, beyond the ones implied by the HTTP method.
 	ExtensionSideEffects = "x-toolbox-side-effects"
@@ -299,7 +295,6 @@ func parseDocument(data []byte, request parseRequest) (api.API, []string, error)
 			Location: request.Source.Location,
 			Digest:   hex.EncodeToString(digest[:]),
 		},
-		Tags: capabilitiesFromExtensions(parsed.Extensions),
 	}
 	if target.Source.Kind == "" {
 		target.Source.Kind = "document"
@@ -322,18 +317,16 @@ func parseDocument(data []byte, request parseRequest) (api.API, []string, error)
 	}
 	sort.Slice(target.SecuritySchemes, func(i, j int) bool { return target.SecuritySchemes[i].Name < target.SecuritySchemes[j].Name })
 	target.Security = builder.securityRequirements(parsed.Security, "")
-	tagCapabilities := make(map[string][]string, len(parsed.Tags))
 	tagDescriptions := make(map[string]string, len(parsed.Tags))
 	for _, entry := range parsed.Tags {
 		name := strings.TrimSpace(entry.Name)
 		if name == "" {
 			continue
 		}
-		tagCapabilities[name] = capabilitiesFromExtensions(entry.Extensions)
 		tagDescriptions[name] = strings.TrimSpace(entry.Description)
 	}
 	for _, path := range sortedPaths(parsed.Paths) {
-		services, err := builder.buildServices(target.ID, path, parsed.Paths[path], tagCapabilities, tagDescriptions)
+		services, err := builder.buildServices(target.ID, path, parsed.Paths[path], tagDescriptions)
 		if err != nil {
 			return api.API{}, nil, err
 		}
@@ -384,7 +377,6 @@ func (b *builder) warn(format string, args ...any) {
 func (b *builder) buildServices(
 	apiID, path string,
 	item pathItem,
-	tagCapabilities map[string][]string,
 	tagDescriptions map[string]string,
 ) ([]api.Service, error) {
 	shared, err := b.convertParameters(item.Parameters)
@@ -428,12 +420,6 @@ func (b *builder) buildServices(
 	services := make([]api.Service, 0, len(order))
 	for _, name := range order {
 		operations := grouped[name]
-		for i := range operations {
-			merged := make([]string, 0, len(tagCapabilities[name])+len(operations[i].Capabilities))
-			merged = append(merged, tagCapabilities[name]...)
-			merged = append(merged, operations[i].Capabilities...)
-			operations[i].Capabilities = deduplicate(merged)
-		}
 		service := api.Service{
 			Name:        name,
 			Description: strings.TrimSpace(tagDescriptions[name]),
@@ -492,16 +478,15 @@ func (b *builder) buildOperation(
 		parameters = append(parameters, parameter)
 	}
 	operation := api.Operation{
-		Name:         name,
-		Method:       strings.ToUpper(method.field),
-		Path:         path,
-		Summary:      strings.TrimSpace(node.Summary),
-		Description:  strings.TrimSpace(node.Description),
-		Tags:         deduplicate(node.Tags),
-		Parameters:   parameters,
-		Security:     b.securityRequirements(node.Security, ""),
-		Capabilities: capabilitiesFromExtensions(node.Extensions),
-		Deprecated:   node.Deprecated || boolFromExtensions(node.Extensions, ExtensionDeprecated),
+		Name:        name,
+		Method:      strings.ToUpper(method.field),
+		Path:        path,
+		Summary:     strings.TrimSpace(node.Summary),
+		Description: strings.TrimSpace(node.Description),
+		Tags:        deduplicate(node.Tags),
+		Parameters:  parameters,
+		Security:    b.securityRequirements(node.Security, ""),
+		Deprecated:  node.Deprecated || boolFromExtensions(node.Extensions, ExtensionDeprecated),
 	}
 	if service := firstTag(node.Tags); service != "" {
 		operation.Service = service
@@ -890,13 +875,6 @@ func firstTag(tags []string) string {
 		}
 	}
 	return ""
-}
-
-func capabilitiesFromExtensions(extensions map[string]yaml.Node) []string {
-	if extensions == nil {
-		return nil
-	}
-	return stringsFromNode(extensions[ExtensionCapabilities])
 }
 
 func sideEffectsFor(method httpMethod, extensions map[string]yaml.Node) []api.SideEffect {

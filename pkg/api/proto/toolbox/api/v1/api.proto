@@ -260,8 +260,6 @@ message ApiOperation {
   repeated ApiSecurityRequirement security = 14;
   // Declared side effects, as open identifiers.
   repeated string side_effects = 15;
-  // Explicit capabilities this operation grants.
-  repeated string capabilities = 16;
   // The operation should not be used for new work.
   bool deprecated = 17;
   // Streaming behavior.
@@ -284,8 +282,6 @@ message ApiService {
   // declares its own. A service that does not state them leaves its operations
   // unclassified, which a policy has to be told to trust rather than infer.
   repeated string side_effects = 7;
-  // Explicit capabilities this service grants.
-  repeated string capabilities = 5;
   // Callable operations, in description order.
   repeated ApiOperation operations = 6;
 }
@@ -332,8 +328,6 @@ message Api {
   repeated string server_ids = 8;
   // Locations the description document itself declares.
   repeated ApiDeclaredServer declared_servers = 9;
-  // Explicit capabilities this API grants.
-  repeated string capabilities = 10;
   // API-wide security requirements.
   repeated ApiSecurityRequirement security = 11;
   // Declared credential schemes.
@@ -367,8 +361,6 @@ message ApiServer {
   string transport = 5;
   // Human-readable description.
   string description = 6;
-  // Explicit capabilities this server grants.
-  repeated string capabilities = 7;
   // Operational state of the server.
   ApiServerStatus status = 8;
   // Registration time as Unix nanoseconds since the epoch.
@@ -432,8 +424,6 @@ message ApiProviderInfo {
   string endpoint = 7;
   // Fully-qualified service names the provider serves.
   repeated string service_names = 8;
-  // Explicit capabilities the provider advertises.
-  repeated string capabilities = 9;
   // Operational state of the provider.
   ApiServerStatus status = 10;
   // Implementation version of the provider subsystem.

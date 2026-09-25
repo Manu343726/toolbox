@@ -116,9 +116,11 @@ func TestThirdPartyMCPServerBecomesACatalogAPI(t *testing.T) {
 	assert.Contains(t, string(result.Body), "sunny in Porto")
 }
 
-func TestAnMCPServerWithNoDeclaredCapabilityIsNotExposed(t *testing.T) {
-	// A server that declares no capabilities produces operations a policy refuses,
-	// which is the whole point: reading a tool list is not authorization.
+func TestAnMCPServerWhoseToolDeclaresNothingIsNotExposed(t *testing.T) {
+	// A tool that says nothing about what calling it does comes out of the parser
+	// unclassified, and the default policy grants reads. So it is not offered,
+	// which is the whole point: reading a tool list is not authorization, and
+	// neither is a server existing.
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "bare", Version: "1.0.0"}, nil)
 	server.AddTool(&sdkmcp.Tool{
 		Name:        "do_thing",
@@ -146,7 +148,6 @@ func TestAnMCPServerWithNoDeclaredCapabilityIsNotExposed(t *testing.T) {
 	require.NoError(t, err)
 	operation, found := describable.API.Operation("bare/mcp/do_thing")
 	require.True(t, found)
-	assert.Empty(t, operation.Capabilities, "a tool manifest states no authorization facts, so none are invented")
 
 	_, _, err = service.Registrar().RegisterAPI(context.Background(), describable.API, "")
 	require.NoError(t, err)

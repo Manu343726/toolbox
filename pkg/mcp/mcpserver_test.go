@@ -40,17 +40,12 @@ func startServer(t *testing.T, tools ...testTool) string {
 			destructive := true
 			annotations.DestructiveHint = &destructive
 		}
-		meta := sdkmcp.Meta{}
-		if tool.capability != "" {
-			meta[CapabilitiesExtension] = []any{tool.capability}
-		}
 		declared := &sdkmcp.Tool{
 			Name:         tool.name,
 			Description:  tool.description,
 			InputSchema:  tool.arguments,
 			OutputSchema: tool.result,
 			Annotations:  annotations,
-			Meta:         meta,
 		}
 		server.AddTool(declared, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 			return &sdkmcp.CallToolResult{
@@ -128,7 +123,6 @@ func TestDescribeReadsALiveServer(t *testing.T) {
 	assert.Equal(t, ToolCallMethod, fetch.Method, "an MCP operation is called by the protocol's method")
 	assert.Equal(t, "Fetch one pet.", fetch.Summary, "the first line is what a model reads first")
 	assert.Contains(t, fetch.Description, "Returns the pet as JSON.")
-	assert.Equal(t, []string{"pet.read"}, fetch.Capabilities, "what the server declared is carried through")
 	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, fetch.SideEffects)
 
 	// The argument schema arrives as a description, not as a document: a caller
@@ -267,6 +261,8 @@ func TestDescribeFitsTheCompositionShape(t *testing.T) {
 	operation, found := result.API.Operation("shop/mcp/get_pet")
 	require.True(t, found)
 	assert.Equal(t, ToolCallMethod, operation.Method)
+	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, operation.SideEffects,
+		"a published manifest carries what calling a tool does, so a deployment can classify it")
 }
 
 func TestInvokerCallsATool(t *testing.T) {
@@ -407,7 +403,8 @@ func TestManifestIsTheDocumentAReaderInspects(t *testing.T) {
 	assert.Equal(t, "Fetch one pet", tool["description"])
 	assert.Equal(t, "shop/mcp/get_pet", tool["x-toolbox-operation"],
 		"the document names the operation it came from, so a reader can find it again")
-	assert.Equal(t, []any{"pet.read"}, tool[CapabilitiesExtension])
+	assert.Equal(t, true, tool["annotations"].(map[string]any)["readOnlyHint"],
+		"a manifest states what calling a tool does, in the protocol's own vocabulary")
 	assert.Contains(t, tool, "outputSchema")
 	assert.Contains(t, tool, "inputSchema")
 }
@@ -442,7 +439,6 @@ func TestDescribeToolReportsAToolWithNoInputSchema(t *testing.T) {
 		joined += warning + "\n"
 	}
 	assert.Contains(t, joined, "declares no input schema")
-	assert.Empty(t, operation.Capabilities, "a manifest declares no authorization facts, so none are invented")
 	assert.Empty(t, operation.SideEffects, "a tool that says nothing about its consequences has declared none")
 	require.NotNil(t, operation.Response)
 	failed, ok := operation.Response.Property("isError")
@@ -489,7 +485,6 @@ func TestDescriptionSurvivesTheMcpRoundTrip(t *testing.T) {
 	assert.Equal(t, first.Name, second.Name)
 	assert.Equal(t, first.Method, second.Method)
 	assert.Equal(t, first.Summary, second.Summary)
-	assert.Equal(t, first.Capabilities, second.Capabilities, "capabilities survive, so the policy still holds")
 	assert.Equal(t, first.SideEffects, second.SideEffects, "declared consequences survive")
 
 	firstID, ok := first.Request.Property("petId")
@@ -517,7 +512,7 @@ func TestDescribeDocumentReadsAPublishedManifest(t *testing.T) {
 				"required":   []any{"petId"},
 			},
 			"x-toolbox-operation": "shop/mcp/get_pet",
-			CapabilitiesExtension: []any{"pet.read"},
+			"annotations":         map[string]any{"readOnlyHint": true},
 		}},
 	}
 	encoded, err := json.Marshal(document)
@@ -533,7 +528,8 @@ func TestDescribeDocumentReadsAPublishedManifest(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, "get_pet", operation.Name, "the manifest's tool name is reduced to the operation's")
 	assert.Equal(t, ToolCallMethod, operation.Method)
-	assert.Equal(t, []string{"pet.read"}, operation.Capabilities)
+	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, operation.SideEffects,
+		"a published manifest carries what calling a tool does, so a deployment can classify it")
 
 	petID, ok := operation.Request.Property("petId")
 	require.True(t, ok)

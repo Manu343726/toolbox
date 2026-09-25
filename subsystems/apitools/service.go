@@ -464,10 +464,10 @@ func (s *Service) ListApis(_ context.Context, req *connect.Request[apitoolsv1.Li
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("list request is required"))
 	}
 	apis := s.store.ListAPIs(APIFilter{
-		Query:              req.Msg.GetQuery(),
-		Format:             req.Msg.GetFormat(),
-		ServerID:           req.Msg.GetServerId(),
-		RequiredCapability: req.Msg.GetRequiredCapability(),
+		Query:       req.Msg.GetQuery(),
+		Format:      req.Msg.GetFormat(),
+		ServerID:    req.Msg.GetServerId(),
+		SideEffects: req.Msg.GetSideEffects(),
 	})
 	response := &apitoolsv1.ListApisResponse{}
 	for _, stored := range apis {

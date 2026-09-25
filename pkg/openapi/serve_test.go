@@ -30,12 +30,11 @@ func petAPI(t *testing.T) api.API {
 		Services: []api.Service{{
 			Name: "pets",
 			Operations: []api.Operation{{
-				Name:         "getPet",
-				Method:       "get",
-				Path:         "/pets/{petId}",
-				Summary:      "Fetch one pet",
-				Capabilities: []string{"pet.read"},
-				SideEffects:  []api.SideEffect{api.SideEffectReadOnly},
+				Name:        "getPet",
+				Method:      "get",
+				Path:        "/pets/{petId}",
+				Summary:     "Fetch one pet",
+				SideEffects: []api.SideEffect{api.SideEffectReadOnly},
 				Parameters: []api.Parameter{{
 					Name:     "petId",
 					In:       api.ParameterInPath,

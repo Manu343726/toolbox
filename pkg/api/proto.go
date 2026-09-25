@@ -218,20 +218,19 @@ func copyInt(value *int64) *int64 {
 // ToProto converts the operation into its contract message.
 func (o Operation) ToProto() *apiv1.ApiOperation {
 	message := &apiv1.ApiOperation{
-		Id:           o.ID,
-		ApiId:        o.APIID,
-		Service:      o.Service,
-		Name:         o.Name,
-		Method:       o.Method,
-		Path:         o.Path,
-		Summary:      o.Summary,
-		Description:  o.Description,
-		Tags:         append([]string(nil), o.Tags...),
-		Request:      o.Request.ToProto(),
-		Response:     o.Response.ToProto(),
-		Deprecated:   o.Deprecated,
-		Streaming:    &apiv1.ApiStreaming{Client: o.Streaming.Client, Server: o.Streaming.Server},
-		Capabilities: append([]string(nil), o.Capabilities...),
+		Id:          o.ID,
+		ApiId:       o.APIID,
+		Service:     o.Service,
+		Name:        o.Name,
+		Method:      o.Method,
+		Path:        o.Path,
+		Summary:     o.Summary,
+		Description: o.Description,
+		Tags:        append([]string(nil), o.Tags...),
+		Request:     o.Request.ToProto(),
+		Response:    o.Response.ToProto(),
+		Deprecated:  o.Deprecated,
+		Streaming:   &apiv1.ApiStreaming{Client: o.Streaming.Client, Server: o.Streaming.Server},
 	}
 	for _, parameter := range o.Parameters {
 		message.Parameters = append(message.Parameters, &apiv1.ApiParameter{
@@ -267,18 +266,17 @@ func OperationFromProto(message *apiv1.ApiOperation) (Operation, error) {
 		return Operation{}, fmt.Errorf("operation is required")
 	}
 	operation := Operation{
-		ID:           message.GetId(),
-		APIID:        message.GetApiId(),
-		Service:      message.GetService(),
-		Name:         message.GetName(),
-		Method:       message.GetMethod(),
-		Path:         message.GetPath(),
-		Summary:      message.GetSummary(),
-		Description:  message.GetDescription(),
-		Tags:         append([]string(nil), message.GetTags()...),
-		Deprecated:   message.GetDeprecated(),
-		Capabilities: append([]string(nil), message.GetCapabilities()...),
-		SideEffects:  append([]SideEffect(nil), message.GetSideEffects()...),
+		ID:          message.GetId(),
+		APIID:       message.GetApiId(),
+		Service:     message.GetService(),
+		Name:        message.GetName(),
+		Method:      message.GetMethod(),
+		Path:        message.GetPath(),
+		Summary:     message.GetSummary(),
+		Description: message.GetDescription(),
+		Tags:        append([]string(nil), message.GetTags()...),
+		Deprecated:  message.GetDeprecated(),
+		SideEffects: append([]SideEffect(nil), message.GetSideEffects()...),
 		Streaming: Streaming{
 			Client: message.GetStreaming().GetClient(),
 			Server: message.GetStreaming().GetServer(),
@@ -331,12 +329,11 @@ func OperationFromProto(message *apiv1.ApiOperation) (Operation, error) {
 // ToProto converts the service into its contract message.
 func (s Service) ToProto() *apiv1.ApiService {
 	message := &apiv1.ApiService{
-		Id:           s.ID,
-		Name:         s.Name,
-		Title:        s.Title,
-		Description:  s.Description,
-		SideEffects:  append([]string(nil), s.SideEffects...),
-		Capabilities: append([]string(nil), s.Capabilities...),
+		Id:          s.ID,
+		Name:        s.Name,
+		Title:       s.Title,
+		Description: s.Description,
+		SideEffects: append([]string(nil), s.SideEffects...),
 	}
 	for _, operation := range s.Operations {
 		message.Operations = append(message.Operations, operation.ToProto())
@@ -351,12 +348,11 @@ func ServiceFromProto(message *apiv1.ApiService) (Service, error) {
 		return Service{}, fmt.Errorf("service is required")
 	}
 	service := Service{
-		ID:           message.GetId(),
-		Name:         message.GetName(),
-		Title:        message.GetTitle(),
-		Description:  message.GetDescription(),
-		SideEffects:  append([]SideEffect(nil), message.GetSideEffects()...),
-		Capabilities: append([]string(nil), message.GetCapabilities()...),
+		ID:          message.GetId(),
+		Name:        message.GetName(),
+		Title:       message.GetTitle(),
+		Description: message.GetDescription(),
+		SideEffects: append([]SideEffect(nil), message.GetSideEffects()...),
 	}
 	for _, operation := range message.GetOperations() {
 		converted, err := OperationFromProto(operation)
@@ -371,17 +367,16 @@ func ServiceFromProto(message *apiv1.ApiService) (Service, error) {
 // ToProto converts the API into its contract message.
 func (a API) ToProto() *apiv1.Api {
 	message := &apiv1.Api{
-		Id:           a.ID,
-		Name:         a.Name,
-		Version:      a.Version,
-		Title:        a.Title,
-		Description:  a.Description,
-		Format:       a.Format,
-		ServerIds:    append([]string(nil), a.ServerIDs...),
-		Capabilities: append([]string(nil), a.Capabilities...),
-		Tags:         append([]string(nil), a.Tags...),
-		Metadata:     copyMetadata(a.Metadata),
-		Transport:    string(a.Transport),
+		Id:          a.ID,
+		Name:        a.Name,
+		Version:     a.Version,
+		Title:       a.Title,
+		Description: a.Description,
+		Format:      a.Format,
+		ServerIds:   append([]string(nil), a.ServerIDs...),
+		Tags:        append([]string(nil), a.Tags...),
+		Metadata:    copyMetadata(a.Metadata),
+		Transport:   string(a.Transport),
 		Source: &apiv1.ApiSource{
 			Kind:     a.Source.Kind,
 			Location: a.Source.Location,
@@ -425,17 +420,16 @@ func APIFromProto(message *apiv1.Api) (API, error) {
 		return API{}, fmt.Errorf("api is required")
 	}
 	target := API{
-		ID:           message.GetId(),
-		Name:         message.GetName(),
-		Version:      message.GetVersion(),
-		Title:        message.GetTitle(),
-		Description:  message.GetDescription(),
-		Format:       message.GetFormat(),
-		ServerIDs:    append([]string(nil), message.GetServerIds()...),
-		Capabilities: append([]string(nil), message.GetCapabilities()...),
-		Tags:         append([]string(nil), message.GetTags()...),
-		Metadata:     copyMetadata(message.GetMetadata()),
-		Transport:    Transport(message.GetTransport()),
+		ID:          message.GetId(),
+		Name:        message.GetName(),
+		Version:     message.GetVersion(),
+		Title:       message.GetTitle(),
+		Description: message.GetDescription(),
+		Format:      message.GetFormat(),
+		ServerIDs:   append([]string(nil), message.GetServerIds()...),
+		Tags:        append([]string(nil), message.GetTags()...),
+		Metadata:    copyMetadata(message.GetMetadata()),
+		Transport:   Transport(message.GetTransport()),
 		Source: Source{
 			Kind:     message.GetSource().GetKind(),
 			Location: message.GetSource().GetLocation(),
@@ -478,15 +472,14 @@ func APIFromProto(message *apiv1.Api) (API, error) {
 // ToProto converts the server into its contract message.
 func (s Server) ToProto() *apiv1.ApiServer {
 	message := &apiv1.ApiServer{
-		Id:           s.ID,
-		Name:         s.Name,
-		BaseUrl:      s.BaseURL,
-		Format:       s.Format,
-		Transport:    s.Transport,
-		Description:  s.Description,
-		Capabilities: append([]string(nil), s.Capabilities...),
-		Status:       ServerStatusToProto(s.Status),
-		Metadata:     copyMetadata(s.Metadata),
+		Id:          s.ID,
+		Name:        s.Name,
+		BaseUrl:     s.BaseURL,
+		Format:      s.Format,
+		Transport:   s.Transport,
+		Description: s.Description,
+		Status:      ServerStatusToProto(s.Status),
+		Metadata:    copyMetadata(s.Metadata),
 	}
 	if !s.RegisteredAt.IsZero() {
 		message.RegisteredAtUnixNano = s.RegisteredAt.UnixNano()
@@ -500,15 +493,14 @@ func ServerFromProto(message *apiv1.ApiServer) (Server, error) {
 		return Server{}, fmt.Errorf("server is required")
 	}
 	server := Server{
-		ID:           message.GetId(),
-		Name:         message.GetName(),
-		BaseURL:      message.GetBaseUrl(),
-		Format:       message.GetFormat(),
-		Transport:    message.GetTransport(),
-		Description:  message.GetDescription(),
-		Capabilities: append([]string(nil), message.GetCapabilities()...),
-		Status:       ServerStatusFromProto(message.GetStatus()),
-		Metadata:     copyMetadata(message.GetMetadata()),
+		ID:          message.GetId(),
+		Name:        message.GetName(),
+		BaseURL:     message.GetBaseUrl(),
+		Format:      message.GetFormat(),
+		Transport:   message.GetTransport(),
+		Description: message.GetDescription(),
+		Status:      ServerStatusFromProto(message.GetStatus()),
+		Metadata:    copyMetadata(message.GetMetadata()),
 	}
 	if nanos := message.GetRegisteredAtUnixNano(); nanos != 0 {
 		server.RegisteredAt = time.Unix(0, nanos).UTC()
@@ -618,7 +610,6 @@ func (p Provider) ToProto() *apiv1.ApiProviderInfo {
 		Targets:               append([]string(nil), p.Targets...),
 		Endpoint:              p.Endpoint,
 		ServiceNames:          append([]string(nil), p.ServiceNames...),
-		Capabilities:          append([]string(nil), p.Capabilities...),
 		Status:                ServerStatusToProto(p.Status),
 		ImplementationVersion: p.ImplementationVersion,
 	}

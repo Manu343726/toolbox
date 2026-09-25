@@ -47,10 +47,9 @@ func New(options Options) (*subsystem.Server, error) {
 		ListenAddress: options.ListenAddress,
 		Background:    options.Background,
 		Services: []subsystem.Service{{
-			Name:         registryv1connect.RegistryServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"service.registry.read", "service.registry.write"},
+			Name:    registryv1connect.RegistryServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

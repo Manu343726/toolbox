@@ -72,10 +72,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Evaluates versioned domain policies and approval requirements.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         policyv1connect.PolicyServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"policy.evaluate", "policy.list"},
+			Name:    policyv1connect.PolicyServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

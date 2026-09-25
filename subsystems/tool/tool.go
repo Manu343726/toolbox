@@ -89,10 +89,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Exposes explicitly declared tools and their invocations.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         toolv1connect.ToolServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"tool.list", "tool.invoke"},
+			Name:    toolv1connect.ToolServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

@@ -140,10 +140,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Stores and renders provider-neutral prompt templates.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         promptv1connect.PromptServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"prompt.read", "prompt.write", "prompt.render"},
+			Name:    promptv1connect.PromptServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

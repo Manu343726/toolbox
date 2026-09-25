@@ -61,10 +61,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Documentation: catalog,
 		Background:    options.Background,
 		Services: []subsystem.Service{{
-			Name:         documentationv1connect.DocumentationServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"documentation.read"},
+			Name:    documentationv1connect.DocumentationServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

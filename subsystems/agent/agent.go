@@ -140,10 +140,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Stores provider-neutral agent profiles and capability references.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         agentv1connect.AgentServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"agent.profile.read", "agent.profile.write"},
+			Name:    agentv1connect.AgentServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

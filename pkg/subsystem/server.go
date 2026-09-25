@@ -33,9 +33,6 @@ type Service struct {
 	Path string
 	// Handler is the generated ConnectRPC HTTP handler.
 	Handler http.Handler
-	// Capabilities are semantic operations intentionally exposed by this
-	// service. Reflection alone never creates capabilities.
-	Capabilities []string
 	// Dependencies are subsystem or capability names required by this service.
 	Dependencies []string
 }
@@ -63,8 +60,6 @@ type Config struct {
 	Background func(context.Context) error
 	// HandshakeWriter receives a JSON handshake after the listener is ready.
 	HandshakeWriter io.Writer
-	// Capabilities are subsystem-level capabilities merged into the descriptor.
-	Capabilities []string
 	// Dependencies are subsystem-level dependencies merged into the descriptor.
 	Dependencies []string
 }
@@ -252,11 +247,9 @@ func (s *Server) Descriptor() *Descriptor {
 	endpoint := s.endpoint
 	s.mu.Unlock()
 	serviceNames := make([]string, 0, len(s.config.Services))
-	capabilities := append([]string(nil), s.config.Capabilities...)
 	dependencies := append([]string(nil), s.config.Dependencies...)
 	for _, service := range s.config.Services {
 		serviceNames = append(serviceNames, service.Name)
-		capabilities = append(capabilities, service.Capabilities...)
 		dependencies = append(dependencies, service.Dependencies...)
 	}
 	return &Descriptor{
@@ -265,7 +258,6 @@ func (s *Server) Descriptor() *Descriptor {
 		ImplementationVersion: s.config.Version,
 		APIVersion:            "v1",
 		ServiceNames:          uniqueSorted(serviceNames),
-		Capabilities:          uniqueSorted(capabilities),
 		Dependencies:          uniqueSorted(dependencies),
 		Description:           s.config.Description,
 	}
@@ -280,7 +272,6 @@ type Descriptor struct {
 	ImplementationVersion string
 	APIVersion            string
 	ServiceNames          []string
-	Capabilities          []string
 	Dependencies          []string
 	Description           string
 }
@@ -389,25 +380,4 @@ func uniqueSorted(values []string) []string {
 		}
 	}
 	return result
-}
-
-// ServiceCapabilities returns the capabilities the subsystem declared for each of
-// its services, keyed by fully-qualified service name.
-//
-// The descriptor flattens these together, because a registry and a discovery
-// client both want one list. A composition that joins a served contract to what the
-// subsystem is for needs them apart: a capability belongs to a service, not to a
-// process.
-func (s *Server) ServiceCapabilities() map[string][]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	capabilities := make(map[string][]string, len(s.config.Services))
-	for _, service := range s.config.Services {
-		names := make([]string, 0, len(service.Capabilities))
-		for _, capability := range service.Capabilities {
-			names = append(names, capability)
-		}
-		capabilities[service.Name] = uniqueSorted(names)
-	}
-	return capabilities
 }

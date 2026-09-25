@@ -84,9 +84,6 @@ func (s *Service) ServeApi(ctx context.Context, req *connect.Request[apitoolsv1.
 		Format:      described.Format,
 		Transport:   api.Transport("http"),
 		Description: fmt.Sprintf("Adapted surface of %s rendered into %s by %s.", described.ID, target, provider.ID),
-		Capabilities: []string{
-			api.ParseCapability(described.Format),
-		},
 	}, false)
 	if err != nil {
 		// The surface is already running, so it has to be stopped again rather

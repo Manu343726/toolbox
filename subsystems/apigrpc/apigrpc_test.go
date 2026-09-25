@@ -150,8 +150,6 @@ func TestNewServesBothContracts(t *testing.T) {
 	assert.True(t, names[apiv1connect.ApiParserServiceName])
 	assert.True(t, names[apiv1connect.ApiInvokerServiceName])
 	// The claim a catalog discovers is the capability the manifest declares.
-	assert.Contains(t, descriptor.Capabilities, api.ParseCapability(FormatGRPC))
-	assert.Contains(t, descriptor.Capabilities, api.InvokeCapability(TransportGRPCWeb))
 }
 
 func TestConnectCodeCoversEveryClassification(t *testing.T) {

@@ -175,54 +175,6 @@ func RequestPayload(arguments json.RawMessage) (json.RawMessage, error) {
 	return arguments, nil
 }
 
-// CapabilitiesFor returns the capabilities a deployment declared for each of a
-// contract's services, keyed by service name.
-//
-// It is the one place that joins a parsed contract to what a server says it does:
-// a contract knows which services exist, and a server's manifest knows what those
-// services are for. Neither knows about the other, so a deployment that exposes
-// its own subsystems supplies the manifest's answer here rather than encoding it
-// into a contract that is not allowed to declare it.
-func CapabilitiesFor(declared map[string][]string) map[string][]string {
-	byService := make(map[string][]string, len(declared))
-	for service, capabilities := range declared {
-		if trimmed := api.CapabilitiesFor(capabilities); len(trimmed) > 0 {
-			byService[service] = trimmed
-		}
-	}
-	if len(byService) == 0 {
-		return nil
-	}
-	return byService
-}
-
-// ApplyCapabilities attaches the capabilities a server declared to the services of
-// a described API. The join itself belongs to the model, so a description read here
-// and one read by a host come out the same.
-func ApplyCapabilities(described api.API, declared map[string][]string) api.API {
-	return described.WithCapabilities(declared)
-}
-
-// ParseWithCapabilities describes a live endpoint and attaches the capabilities
-// its server declared, which is the shape a composition needs: one call, one
-// description, ready to register.
-func (d *Descriptor) ParseWithCapabilities(
-	ctx context.Context,
-	endpoint string,
-	declared map[string][]string,
-) (api.API, []string, error) {
-	described, warnings, err := d.FromEndpoint(ctx, endpoint)
-	if err != nil {
-		return api.API{}, warnings, err
-	}
-	enriched := described.WithCapabilities(CapabilitiesFor(declared))
-	normalized, err := enriched.Normalize()
-	if err != nil {
-		return api.API{}, warnings, api.WrapError(api.KindInvalid, err, "normalize the described API")
-	}
-	return normalized, warnings, nil
-}
-
 // assert the invoker satisfies the framework's interface at compile time.
 var _ api.Invoker = (*Invoker)(nil)
 

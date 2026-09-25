@@ -64,15 +64,10 @@ func (r *Resolver) Resolve(ctx context.Context, serviceName string) (core.Endpoi
 }
 
 func endpointFromDescriptor(descriptor *registryv1.ServiceDescriptor) core.Endpoint {
-	capabilities := make([]string, 0, len(descriptor.GetCapabilities()))
-	for _, capability := range descriptor.GetCapabilities() {
-		capabilities = append(capabilities, capability.GetName())
-	}
 	return core.Endpoint{
 		Name:         descriptor.GetSubsystemName(),
 		URL:          descriptor.GetEndpoint(),
 		Version:      descriptor.GetImplementationVersion(),
 		ServiceNames: append([]string(nil), descriptor.GetServiceNames()...),
-		Capabilities: capabilities,
 	}
 }

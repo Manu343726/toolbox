@@ -36,6 +36,5 @@ func TestPromptHandlerErrors(t *testing.T) {
 func TestPromptServerCapabilities(t *testing.T) {
 	server, err := New(Options{})
 	require.NoError(t, err)
-	assert.Contains(t, server.Services()[0].Capabilities, "prompt.render")
 	assert.Equal(t, "0.1.0", server.Descriptor().ImplementationVersion)
 }

@@ -28,12 +28,11 @@ func describedShop(t *testing.T) api.API {
 			Name:        "shop.pets",
 			Description: "Pet operations",
 			Operations: []api.Operation{{
-				Name:         "getPet",
-				Method:       "get",
-				Path:         "/pets/{petId}",
-				Summary:      "Fetch one pet",
-				Capabilities: []string{"pet.read"},
-				SideEffects:  []api.SideEffect{api.SideEffectReadOnly},
+				Name:        "getPet",
+				Method:      "get",
+				Path:        "/pets/{petId}",
+				Summary:     "Fetch one pet",
+				SideEffects: []api.SideEffect{api.SideEffectReadOnly},
 				Parameters: []api.Parameter{{
 					Name:        "petId",
 					In:          api.ParameterInPath,
@@ -43,11 +42,10 @@ func describedShop(t *testing.T) api.API {
 				}},
 				Response: api.ObjectSchema(api.Property{Name: "name", Schema: api.StringSchema()}),
 			}, {
-				Name:         "deletePet",
-				Method:       "delete",
-				Path:         "/pets/{petId}",
-				Capabilities: []string{"pet.write"},
-				SideEffects:  []api.SideEffect{api.SideEffectIrreversible},
+				Name:        "deletePet",
+				Method:      "delete",
+				Path:        "/pets/{petId}",
+				SideEffects: []api.SideEffect{api.SideEffectIrreversible},
 			}},
 		}, {
 			// A second service, so the tests can see that one is neither
@@ -55,8 +53,7 @@ func describedShop(t *testing.T) api.API {
 			// capability for is published like any other operation.
 			Name: "toolbox.shop.v1.HealthService",
 			Operations: []api.Operation{{
-				Name:         "Check",
-				Capabilities: []string{"health.read"},
+				Name: "Check",
 			}},
 		}},
 	}
@@ -77,7 +74,6 @@ func TestRenderTurnsADescriptionIntoTools(t *testing.T) {
 	fetch := byName["pets__get_pet"]
 	require.Contains(t, byName, "pets__get_pet", "the tool name comes from the service and method")
 	assert.Equal(t, "Fetch one pet", fetch.Description)
-	assert.Equal(t, []string{"pet.read"}, fetch.Capabilities)
 	assert.True(t, fetch.ReadOnly, "a read-only side effect is carried through to the tool")
 	assert.Equal(t, "shop/shop.pets/getPet", fetch.OperationID)
 	assert.Equal(t, "getPet", fetch.Method)
@@ -99,7 +95,6 @@ func TestRenderTurnsADescriptionIntoTools(t *testing.T) {
 
 	remove := byName["pets__delete_pet"]
 	assert.False(t, remove.ReadOnly, "a destructive operation is not read-only")
-	assert.Equal(t, []string{"pet.write"}, remove.Capabilities)
 }
 
 func TestRenderNamesToolsTheSameWayTheGatewayDoes(t *testing.T) {
@@ -180,40 +175,24 @@ func TestRenderUsesTheDescriptionForInstructions(t *testing.T) {
 	assert.Equal(t, "Use sparingly.", explicit.Instructions)
 }
 
-func TestRenderResolvesCapabilitiesFromTheNearestDeclaration(t *testing.T) {
+func TestRenderCarriesTheDeclaredSideEffects(t *testing.T) {
+	// A rendered manifest states what calling a tool does, so a deployment reading
+	// one classifies the operations without having to know the original contract.
 	described := describedShop(t)
-	described.Services[0].Capabilities = []string{"pets.serves"}
-	described.Capabilities = []string{"shop.serves"}
-	described.Services[0].Operations[0].Capabilities = nil
+	described.Services[0].Operations[0].SideEffects = nil
 
 	rendered, err := Render(described, RenderOptions{})
 	require.NoError(t, err)
-	require.NotEmpty(t, rendered.Tools)
-	assert.Equal(t, []string{"pets.serves"}, rendered.Tools[0].Capabilities,
-		"a service's capabilities cover its operations, and a nearer declaration wins")
-
-	described.Services[0].Capabilities = nil
-	apiLevel, err := Render(described, RenderOptions{})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"shop.serves"}, apiLevel.Tools[0].Capabilities)
-}
-
-func TestRenderLeavesCapabilitiesEmptyWhenNothingDeclaredThem(t *testing.T) {
-	// A description that states no authorization facts must render tools with no
-	// capabilities, so a policy can still refuse them.
-	described := describedShop(t)
-	for i := range described.Services {
-		described.Services[i].Capabilities = nil
-		for j := range described.Services[i].Operations {
-			described.Services[i].Operations[j].Capabilities = nil
-		}
-	}
-	rendered, err := Render(described, RenderOptions{})
-	require.NoError(t, err)
-	require.NotEmpty(t, rendered.Tools)
+	byName := map[string]ToolDefinition{}
 	for _, tool := range rendered.Tools {
-		assert.Empty(t, tool.Capabilities)
+		byName[tool.Name] = tool
 	}
+	assert.Empty(t, byName["pets__get_pet"].SideEffects,
+		"an operation that classified nothing renders unclassified, not read-only")
+	assert.Equal(t, []api.SideEffect{api.SideEffectIrreversible},
+		byName["pets__delete_pet"].SideEffects)
+	assert.False(t, byName["pets__get_pet"].ReadOnly,
+		"an unclassified tool is not advertised as read-only, which is the safe direction")
 }
 
 func TestRenderedToolsAreTheOnesAGatewayOffers(t *testing.T) {
@@ -347,8 +326,7 @@ func TestRenderSurfacesARequestValuesOwnArguments(t *testing.T) {
 		Services: []api.Service{{
 			Name: "contract.pets",
 			Operations: []api.Operation{{
-				Name:         "getPet",
-				Capabilities: []string{"pet.read"},
+				Name: "getPet",
 				Request: api.ObjectSchema(
 					api.Property{Name: "petId", Schema: api.StringSchema(), Required: true},
 					api.Property{Name: "verbose", Schema: &api.Schema{Type: api.TypeBoolean}},

@@ -43,12 +43,6 @@ const ToolCallMethod = "tools/call"
 // from a document.
 const SourceKind = "mcp"
 
-// CapabilitiesExtension is the metadata key a server may use to declare the
-// capabilities an operation grants. A server that does not know the framework
-// simply omits it, and its operations stay unexposable until a deployment declares
-// what it authorizes.
-const CapabilitiesExtension = "x-toolbox-capabilities"
-
 // ServerName is the service name a described MCP server's tools are grouped under
 // when the caller does not supply one.
 const ServerName = "mcp"
@@ -163,12 +157,11 @@ func describeTool(tool *sdkmcp.Tool) (api.Operation, []string) {
 		Description: strings.TrimSpace(tool.Description),
 		// The request is the tool's argument schema, read into the model so the
 		// description travels as a description rather than as a document.
-		Request:     api.SchemaFromJSONSchema(schemaDocument(tool.InputSchema)),
+		Request: api.SchemaFromJSONSchema(schemaDocument(tool.InputSchema)),
+		// A tool manifest states what its tools do, in the vocabulary MCP already
+		// defines for exactly that, and nothing about what a deployment authorizes.
+		// The two are different questions, and only one of them is the server's.
 		SideEffects: sideEffectsOf(tool),
-		// A tool manifest states no authorization facts, so no capability is
-		// invented: an operation nobody declared a capability for stays
-		// unexposable until a deployment says what it authorizes.
-		Capabilities: declaredCapabilities(tool),
 	}
 	warnings := make([]string, 0)
 	if output := schemaDocument(tool.OutputSchema); len(output) > 0 {
@@ -218,60 +211,6 @@ func sideEffectsOf(tool *sdkmcp.Tool) []api.SideEffect {
 	}
 	sort.Slice(effects, func(i, j int) bool { return effects[i] < effects[j] })
 	return effects
-}
-
-// declaredCapabilities reads the capabilities a server declared for a tool, if it
-// declared any. A server that does not know the extension omits it, and nothing
-// is assumed on its behalf.
-func declaredCapabilities(tool *sdkmcp.Tool) []string {
-	raw, ok := tool.Meta[CapabilitiesExtension]
-	if !ok {
-		return nil
-	}
-	values, ok := raw.([]any)
-	if !ok {
-		if text, ok := raw.(string); ok {
-			return api.CapabilitiesFor([]string{text})
-		}
-		return nil
-	}
-	declared := make([]string, 0, len(values))
-	for _, value := range values {
-		if text, ok := value.(string); ok {
-			declared = append(declared, text)
-		}
-	}
-	return api.CapabilitiesFor(declared)
-}
-
-// callResultSchema describes what an MCP tool call returns: the protocol's result
-// envelope. The content union is wider than the standard model can express, so the
-// envelope is described and the content is left open.
-func callResultSchema() *api.Schema {
-	return &api.Schema{
-		Type:        api.TypeObject,
-		Title:       "Tool call result",
-		Description: "The Model Context Protocol's result for a tool call.",
-		Properties: []api.Property{{
-			Name: "content",
-			Schema: &api.Schema{
-				Type:        api.TypeArray,
-				Description: "The result content: text, an image, or an embedded resource.",
-				Items:       &api.Schema{Type: api.TypeObject, AdditionalPropertiesAllowed: true},
-			},
-		}, {
-			Name: "structuredContent",
-			Schema: &api.Schema{
-				Type:        api.TypeObject,
-				Description: "The structured result, when the tool declares one.",
-			},
-		}, {
-			Name:     "isError",
-			Required: true,
-			Schema:   &api.Schema{Type: api.TypeBoolean, Description: "True when the call ended in an error."},
-		}},
-		Required: []string{"content", "isError"},
-	}
 }
 
 // schemaDocument reads a tool's schema, which the protocol leaves as "any value

@@ -1,58 +1,5 @@
 package api
 
-// Extension-point capability names.
-//
-// Each contract is advertised under its own prefix, followed by the identifier the
-// provider claims: a parser claims the formats it reads, an adapter claims the
-// representations it renders into, and an invoker claims the transports it calls
-// over. A catalog therefore finds the provider for a format, a target, or a
-// transport without knowing which subsystem implements it, and a deployment can
-// add a provider for something the framework has never heard of without changing
-// any other component.
-const (
-	// CapabilityParse marks a subsystem that parses description documents.
-	CapabilityParse = "api.parse"
-	// CapabilityRender marks a subsystem that renders descriptions into a target
-	// representation.
-	CapabilityRender = "api.render"
-	// CapabilityInvoke marks a subsystem that invokes API operations.
-	CapabilityInvoke = "api.invoke"
-)
-
-// ParseCapability returns the capability name a parser advertises for a format.
-func ParseCapability(format Format) string { return CapabilityParse + "." + format }
-
-// RenderCapability returns the capability name an adapter advertises for a target
-// representation.
-func RenderCapability(target string) string { return CapabilityRender + "." + target }
-
-// InvokeCapability returns the capability name an invoker advertises for a
-// transport.
-func InvokeCapability(transport Transport) string { return CapabilityInvoke + "." + transport }
-
-// IdentifierFromCapability returns the identifier encoded in an extension-point
-// capability name, such as "openapi" for "api.parse.openapi". The role prefix
-// must match. Any identifier is accepted: the framework does not know which
-// formats or transports exist, so a user-defined one resolves like any other.
-// It reports false for a role capability without an identifier suffix, and for
-// any other capability.
-func IdentifierFromCapability(capability, rolePrefix string) (string, bool) {
-	if rolePrefix == "" {
-		return "", false
-	}
-	if len(capability) <= len(rolePrefix)+1 {
-		return "", false
-	}
-	if capability[:len(rolePrefix)] != rolePrefix || capability[len(rolePrefix)] != '.' {
-		return "", false
-	}
-	identifier := capability[len(rolePrefix)+1:]
-	if identifier == "" {
-		return "", false
-	}
-	return identifier, true
-}
-
 // ProviderRole is the open identifier of the role a provider subsystem plays.
 // The documented roles are parser and adapter; a user may add another.
 type ProviderRole = string
@@ -97,8 +44,6 @@ type Provider struct {
 	Endpoint string
 	// ServiceNames are the fully-qualified services the provider serves.
 	ServiceNames []string
-	// Capabilities are the explicit capabilities the provider advertises.
-	Capabilities []string
 	// Status is the operational state of the provider.
 	Status ServerStatus
 	// ImplementationVersion is the provider subsystem version.
@@ -112,7 +57,6 @@ func (p Provider) Clone() Provider {
 	clone.Targets = append([]string(nil), p.Targets...)
 	clone.Transports = append([]Transport(nil), p.Transports...)
 	clone.ServiceNames = append([]string(nil), p.ServiceNames...)
-	clone.Capabilities = append([]string(nil), p.Capabilities...)
 	return clone
 }
 

@@ -232,28 +232,6 @@ func TestSummarizeCountsServicesAndOperations(t *testing.T) {
 	assert.Equal(t, "openapi", summary.Format)
 }
 
-func TestCapabilityNamesAreOpenIdentifiers(t *testing.T) {
-	assert.Equal(t, "api.parse.smithy", ParseCapability("smithy"))
-	assert.Equal(t, "api.render.mcp", RenderCapability("mcp"))
-	assert.Equal(t, "api.invoke.carrier-pigeon", InvokeCapability("carrier-pigeon"))
-
-	identifier, ok := IdentifierFromCapability("api.parse.smithy", CapabilityParse)
-	require.True(t, ok)
-	assert.Equal(t, "smithy", identifier)
-
-	// A user-defined identifier resolves like any other; the framework has no list.
-	identifier, ok = IdentifierFromCapability("api.render.never-heard-of-it", CapabilityRender)
-	require.True(t, ok)
-	assert.Equal(t, "never-heard-of-it", identifier)
-
-	_, ok = IdentifierFromCapability("api.parse", CapabilityParse)
-	assert.False(t, ok, "a role capability without an identifier does not name one")
-	_, ok = IdentifierFromCapability("api.parse.smithy", CapabilityInvoke)
-	assert.False(t, ok, "the role prefix must match")
-	_, ok = IdentifierFromCapability("knowledge.search", CapabilityParse)
-	assert.False(t, ok, "an unrelated capability names no identifier")
-}
-
 func TestProviderHandlesClaims(t *testing.T) {
 	provider := Provider{
 		Role:       ProviderAdapter,
@@ -395,4 +373,23 @@ func TestAPIRoundTripsItsTransportClaim(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Transport("mcp"), restored.Transport,
 		"a description's transport claim survives the wire, because a catalog needs it to pick an invoker")
+}
+
+func TestAProviderDeclaresOpenIdentifiers(t *testing.T) {
+	// The framework has no list of formats, targets, or transports. A provider
+	// states what it handles, and an identifier nobody has heard of resolves like
+	// any other — which is what lets a user add a format without changing anything
+	// that has to recognize it.
+	provider := Provider{
+		ID:      "smithy",
+		Role:    ProviderParser,
+		Formats: []Format{"smithy"},
+	}
+	assert.True(t, provider.HandlesFormat("smithy"))
+	assert.False(t, provider.HandlesTarget("smithy"))
+	assert.False(t, provider.HandlesTransport("smithy"))
+
+	target := Provider{ID: "local", Role: ProviderAdapter, Targets: []string{"never-heard-of-it"}}
+	assert.True(t, target.HandlesTarget("never-heard-of-it"))
+	assert.False(t, target.HandlesFormat("never-heard-of-it"))
 }

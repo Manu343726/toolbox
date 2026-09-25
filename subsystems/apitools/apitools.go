@@ -82,24 +82,11 @@ func New(options Options) (*subsystem.Server, error) {
 		ListenAddress: options.ListenAddress,
 		Background:    options.Background,
 		Services: []subsystem.Service{{
-			Name:         apitoolsv1connect.ApiToolsServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{CapabilityRead, CapabilityIndex, CapabilityWrite, CapabilityCall},
+			Name:    apitoolsv1connect.ApiToolsServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
-}
-
-// ProviderCapability returns the capability a provider subsystem advertises so
-// a deployment can discover it through the registry. A parser advertises
-// api.parse.<format> for each format it parses and an adapter advertises
-// api.invoke.<transport> for each transport it reaches.
-func ProviderCapability(role string, identifier string) string {
-	prefix := api.CapabilityParse
-	if role == api.ProviderAdapter {
-		prefix = api.CapabilityInvoke
-	}
-	return prefix + "." + identifier
 }
 
 // ParserServiceName is the fully-qualified name of the framework's parser
@@ -133,10 +120,9 @@ func NewServiceServer(service *Service, options Options) (*subsystem.Server, err
 		ListenAddress: options.ListenAddress,
 		Background:    options.Background,
 		Services: []subsystem.Service{{
-			Name:         apitoolsv1connect.ApiToolsServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{CapabilityRead, CapabilityIndex, CapabilityWrite, CapabilityCall},
+			Name:    apitoolsv1connect.ApiToolsServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

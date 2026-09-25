@@ -29,8 +29,6 @@ type Endpoint struct {
 	Version string
 	// ServiceNames lists fully-qualified protobuf services at the endpoint.
 	ServiceNames []string
-	// Capabilities lists semantic capabilities exposed by the endpoint.
-	Capabilities []string
 }
 
 // Resolver maps a fully-qualified protobuf service name to an endpoint.
@@ -131,7 +129,6 @@ func ValidateEndpoint(endpoint Endpoint) error {
 
 func cloneEndpoint(endpoint Endpoint) Endpoint {
 	endpoint.ServiceNames = append([]string(nil), endpoint.ServiceNames...)
-	endpoint.Capabilities = append([]string(nil), endpoint.Capabilities...)
 	return endpoint
 }
 

@@ -71,9 +71,6 @@ func testServer(id string) api.Server {
 		BaseURL:   "http://" + id + ".example/api",
 		Format:    testFormat,
 		Transport: "http",
-		Capabilities: []string{
-			api.InvokeCapability("http"),
-		},
 	}
 }
 
@@ -98,7 +95,6 @@ func testAPI(id string) api.API {
 				SideEffects: []api.SideEffect{
 					api.SideEffectReadOnly,
 				},
-				Capabilities: []string{"pet.read"},
 			}},
 		}},
 	}
@@ -255,11 +251,10 @@ func TestExposureCountsAndOrdering(t *testing.T) {
 	require.NoError(t, err)
 	second := testAPI("beta")
 	second.Services[0].Operations = append(second.Services[0].Operations, api.Operation{
-		Name:         "deletePet",
-		Method:       "delete",
-		Path:         "/pets/{petId}",
-		Capabilities: []string{"pet.write"},
-		SideEffects:  []api.SideEffect{api.SideEffectDelete},
+		Name:        "deletePet",
+		Method:      "delete",
+		Path:        "/pets/{petId}",
+		SideEffects: []api.SideEffect{api.SideEffectDelete},
 	})
 	_, _, err = store.RegisterAPI(second, "shop", false)
 	require.NoError(t, err)
@@ -371,7 +366,9 @@ func TestListAPIsFilters(t *testing.T) {
 	_, _, err = store.RegisterAPI(testAPI("pets-api"), "shop", false)
 	require.NoError(t, err)
 	billing := testAPI("billing-api")
-	billing.Services[0].Operations[0].Capabilities = []string{"billing.read"}
+	// One API whose operation declares a write, so the effect filter has something
+	// to exclude.
+	billing.Services[0].Operations[0].SideEffects = []api.SideEffect{api.SideEffectFinancial}
 	_, _, err = store.RegisterAPI(billing, "", false)
 	require.NoError(t, err)
 
@@ -382,9 +379,10 @@ func TestListAPIsFilters(t *testing.T) {
 	byFormat := store.ListAPIs(APIFilter{Format: testFormat})
 	assert.Len(t, byFormat, 2)
 
-	byCapability := store.ListAPIs(APIFilter{RequiredCapability: "pet.read"})
-	require.Len(t, byCapability, 1)
-	assert.Equal(t, "pets-api", byCapability[0].ID)
+	byEffect := store.ListAPIs(APIFilter{SideEffects: []api.SideEffect{api.SideEffectReadOnly}})
+	require.Len(t, byEffect, 1)
+	assert.Equal(t, "pets-api", byEffect[0].ID,
+		"the filter asks what an API's operations do, not what a deployment permits")
 
 	byQuery := store.ListAPIs(APIFilter{Query: "billing"})
 	require.Len(t, byQuery, 1)

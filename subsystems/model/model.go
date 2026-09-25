@@ -77,10 +77,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Exposes provider-neutral model capabilities and generation.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         modelv1connect.ModelServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"model.list", "model.generate"},
+			Name:    modelv1connect.ModelServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

@@ -26,13 +26,11 @@ func providerAPI(t *testing.T, id, serverID string) api.API {
 		Format:    "grpc",
 		ServerIDs: []string{serverID},
 		Services: []api.Service{{
-			Name:         sharedContract,
-			Capabilities: []string{api.ParseCapability("grpc")},
+			Name: sharedContract,
 			Operations: []api.Operation{{
-				Name:         "ParseApi",
-				Method:       "ParseApi",
-				Capabilities: []string{api.ParseCapability("grpc")},
-				Request:      &api.Schema{Ref: "toolbox.api.v1.ParseApiRequest", Type: api.TypeObject},
+				Name:    "ParseApi",
+				Method:  "ParseApi",
+				Request: &api.Schema{Ref: "toolbox.api.v1.ParseApiRequest", Type: api.TypeObject},
 			}},
 		}},
 	}
@@ -97,16 +95,14 @@ func TestEndpointSourceAcceptsSeveralEndpointsServingOneContract(t *testing.T) {
 			Name: "apigrpc",
 			URL:  "http://grpc.test",
 			Services: []ServiceMetadata{{
-				Name:         sharedContract,
-				Capabilities: []string{api.ParseCapability("grpc")},
+				Name: sharedContract,
 			}},
 		},
 		ServiceEndpoint{
 			Name: "apimcp",
 			URL:  "http://mcp.test",
 			Services: []ServiceMetadata{{
-				Name:         sharedContract,
-				Capabilities: []string{api.ParseCapability("mcp")},
+				Name: sharedContract,
 			}},
 		},
 	)

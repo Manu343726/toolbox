@@ -165,14 +165,13 @@ func (h *Host) registerOne(
 		return Seeded{Subsystem: endpoint.Subsystem, Skipped: err.Error()}, warnings, nil
 	}
 	server, _, err := registrar.RegisterServer(ctx, api.Server{
-		ID:           endpoint.Subsystem,
-		Name:         endpoint.Subsystem,
-		BaseURL:      endpoint.Endpoint,
-		Format:       described.Format,
-		Transport:    DefaultSubsystemTransport,
-		Description:  fmt.Sprintf("The %s subsystem, described from the contract it serves.", endpoint.Subsystem),
-		Source:       described.Source,
-		Capabilities: append([]string(nil), endpoint.Capabilities...),
+		ID:          endpoint.Subsystem,
+		Name:        endpoint.Subsystem,
+		BaseURL:     endpoint.Endpoint,
+		Format:      described.Format,
+		Transport:   DefaultSubsystemTransport,
+		Description: fmt.Sprintf("The %s subsystem, described from the contract it serves.", endpoint.Subsystem),
+		Source:      described.Source,
 	})
 	if err != nil {
 		return Seeded{}, warnings, fmt.Errorf("register the %s server: %w", endpoint.Subsystem, err)

@@ -53,5 +53,4 @@ func TestNewServerMetadata(t *testing.T) {
 	server, err := New(Options{})
 	require.NoError(t, err)
 	assert.Equal(t, Name, server.Descriptor().SubsystemName)
-	assert.Contains(t, server.Services()[0].Capabilities, "agent.profile.write")
 }

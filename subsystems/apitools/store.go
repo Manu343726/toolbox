@@ -418,9 +418,8 @@ type APIFilter struct {
 	Format api.Format
 	// ServerID requires the API to be hosted by that server.
 	ServerID string
-	// RequiredCapability requires the API or one of its operations to declare
-	// the capability.
-	RequiredCapability string
+	// SideEffects requires the API to have an operation declaring one of them.
+	SideEffects []api.SideEffect
 }
 
 // ListAPIs returns matching APIs ordered by identifier.
@@ -429,7 +428,12 @@ func (m *Memory) ListAPIs(filter APIFilter) []api.API {
 	defer m.mu.RUnlock()
 	query := strings.ToLower(strings.TrimSpace(filter.Query))
 	serverID := strings.TrimSpace(filter.ServerID)
-	capability := strings.TrimSpace(filter.RequiredCapability)
+	effects := make([]api.SideEffect, 0, len(filter.SideEffects))
+	for _, effect := range filter.SideEffects {
+		if trimmed := api.SideEffect(strings.TrimSpace(effect)); trimmed != "" {
+			effects = append(effects, trimmed)
+		}
+	}
 	format := strings.TrimSpace(filter.Format)
 	result := make([]api.API, 0, len(m.apis))
 	for _, target := range m.apis {
@@ -439,7 +443,7 @@ func (m *Memory) ListAPIs(filter APIFilter) []api.API {
 		if serverID != "" && !containsString(target.ServerIDs, serverID) {
 			continue
 		}
-		if capability != "" && !declaresCapability(target, capability) {
+		if len(effects) > 0 && !hasSideEffect(target, effects) {
 			continue
 		}
 		if query != "" && !apiMatches(target, query) {
@@ -457,17 +461,16 @@ func apiMatches(target api.API, query string) bool {
 		strings.Contains(strings.ToLower(target.Title), query)
 }
 
-func declaresCapability(target api.API, capability string) bool {
-	if containsString(target.Capabilities, capability) {
-		return true
-	}
-	for _, service := range target.Services {
-		if containsString(service.Capabilities, capability) {
-			return true
-		}
-		for _, operation := range service.Operations {
-			if containsString(operation.Capabilities, capability) {
-				return true
+// hasSideEffect reports whether any operation of an API declares one of the
+// effects. It answers "which APIs offer something that does this", which is a
+// question about the operations rather than about who may call them.
+func hasSideEffect(target api.API, effects []api.SideEffect) bool {
+	for _, operation := range target.Operations() {
+		for _, declared := range operation.SideEffects {
+			for _, wanted := range effects {
+				if declared == wanted {
+					return true
+				}
 			}
 		}
 	}

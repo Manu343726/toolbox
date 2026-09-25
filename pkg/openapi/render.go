@@ -104,7 +104,6 @@ func renderOpenAPI(described api.API, options renderOptions) ([]byte, []string, 
 		// ones, so they travel as extensions. Dropping them would mean a rendered
 		// document could no longer be parsed back into something the catalog is
 		// willing to expose.
-		document[ExtensionCapabilities] = described.Capabilities
 	}
 	if len(described.SecuritySchemes) > 0 {
 		schemes := make(map[string]any, len(described.SecuritySchemes))
@@ -312,7 +311,6 @@ func renderOperation(operation api.Operation, names map[string]string, target ma
 			},
 		}
 	}
-	entry[ExtensionCapabilities] = operation.Capabilities
 	if len(operation.SideEffects) > 0 {
 		entry[ExtensionSideEffects] = operation.SideEffects
 	}

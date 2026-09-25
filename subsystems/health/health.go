@@ -66,10 +66,9 @@ func New(options Options) (*subsystem.Server, error) {
 		ListenAddress: options.ListenAddress,
 		Health:        options.Check,
 		Services: []subsystem.Service{{
-			Name:         healthv1connect.HealthServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"health.check"},
+			Name:    healthv1connect.HealthServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

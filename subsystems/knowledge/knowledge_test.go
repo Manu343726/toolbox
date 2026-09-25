@@ -41,7 +41,6 @@ func TestKnowledgeHandler(t *testing.T) {
 }
 
 func TestKnowledgeServerExposesSearch(t *testing.T) {
-	server, err := New(Options{})
+	_, err := New(Options{})
 	require.NoError(t, err)
-	assert.Contains(t, server.Services()[0].Capabilities, "knowledge.search")
 }

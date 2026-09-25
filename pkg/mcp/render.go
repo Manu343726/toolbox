@@ -27,10 +27,12 @@ type ToolDefinition struct {
 	// OutputSchema is the tool's result as a JSON Schema object, when the
 	// description declares a result shape.
 	OutputSchema map[string]any
-	// Capabilities are the declared capabilities the tool's operation is covered
-	// by. They are empty when nothing declared them, which is what keeps a
+	// SideEffects are what the description declared invoking the operation does. They are empty when nothing declared them, which is what keeps a
 	// described operation unexposable until a deployment says what it authorizes.
-	Capabilities []string
+	// SideEffects are what the description declared invoking this operation does,
+	// carried through to the manifest so a reader sees the same facts the policy
+	// filters on.
+	SideEffects []api.SideEffect
 	// ReadOnly states that the tool does not modify its environment, as its
 	// description declares.
 	ReadOnly bool
@@ -157,7 +159,7 @@ func (f feature) definition() ToolDefinition {
 		Description:  description,
 		InputSchema:  operationArgumentsSchema(f.operation),
 		OutputSchema: absentResponseSchema(f.operation.Response),
-		Capabilities: f.capabilities(),
+		SideEffects:  append([]api.SideEffect(nil), f.operation.SideEffects...),
 		ReadOnly:     declaresEffect(f.operation, api.SideEffectReadOnly),
 		Destructive:  declaresEffect(f.operation, api.SideEffectIrreversible),
 		Idempotent:   declaresEffect(f.operation, sideEffectRepeatable),
@@ -165,19 +167,6 @@ func (f feature) definition() ToolDefinition {
 		Method:       f.operation.Name,
 		Qualified:    f.qualified,
 	}
-}
-
-// capabilities resolves the capabilities that cover an operation: its own, else its
-// service's, else its API's. The first one that declares something wins, because a
-// narrower declaration is the more specific claim.
-func (f feature) capabilities() []string {
-	if len(f.operation.Capabilities) > 0 {
-		return append([]string(nil), f.operation.Capabilities...)
-	}
-	if len(f.service.Capabilities) > 0 {
-		return append([]string(nil), f.service.Capabilities...)
-	}
-	return append([]string(nil), f.described.Capabilities...)
 }
 
 // declaresEffect reports whether an operation declared one consequence. The set is

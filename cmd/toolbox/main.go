@@ -328,6 +328,15 @@ func buildHost(policyPath string) (*host.Host, *sharedCatalog, error) {
 	// automatic exposure path needs the very service the subsystem serves: a host
 	// that registers its own subsystems writes into this store, and the MCP gateway
 	// reads the same one. Two views of one catalog, not two catalogs.
+	// A provider declares itself: each provider subsystem exports the records
+	// describing what it implements, and the composition hands them over. The
+	// directory used to derive them by scanning capability strings, which meant the
+	// claim that a subsystem implemented a contract was silently also the grant to
+	// call it.
+	if err := providers.Register(providerRecords(h)...); err != nil {
+		return nil, nil, err
+	}
+
 	// One policy, read once, held by all three consumers: the catalog that
 	// authorizes exposure, the seeder that asks for it, and the gateway that
 	// reports it. Three readers of one document is the whole point; three policies
@@ -370,13 +379,42 @@ func buildHost(policyPath string) (*host.Host, *sharedCatalog, error) {
 		}
 	}
 	h.OnStarted(func(context.Context, *subsystem.Descriptor) error {
-		// A subsystem's endpoint is only known once it has started, so the
-		// resolver the providers are bound through is installed here.
+		// A subsystem's endpoint is only known once it has started, so the resolver
+		// the providers are bound through is installed here, and the provider
+		// records are registered with the addresses they actually reached.
+		if err := providers.Register(providerRecords(h)...); err != nil {
+			return err
+		}
 		providers.SetResolver(core.NewStaticResolver(hostEndpoints(h)...))
 		return nil
 	})
 	catalog.host = h
 	return h, catalog, nil
+}
+
+// providerRecords collects what every started provider subsystem says it
+// implements, addressed where it actually reached.
+//
+// The records come from the provider subsystems themselves — apigrpc.Providers and
+// its two siblings — so a format or a transport is claimed by whoever implements
+// it, and adding one is a change to that subsystem rather than to anything that
+// has to recognize it.
+func providerRecords(h *host.Host) []api.Provider {
+	endpoints := make(map[string]string, len(h.Servers()))
+	for name, server := range h.Servers() {
+		endpoints[name] = server.Endpoint()
+	}
+	records := make([]api.Provider, 0, 9)
+	for _, provider := range apigrpc.Providers(endpoints["apigrpc"]) {
+		records = append(records, provider)
+	}
+	for _, provider := range apiopenapi.Providers(endpoints["apiopenapi"]) {
+		records = append(records, provider)
+	}
+	for _, provider := range apimcp.Providers(endpoints["apimcp"]) {
+		records = append(records, provider)
+	}
+	return records
 }
 
 // sharedCatalog is the API catalog a host serves and, in the automatic path, fills:
@@ -418,7 +456,6 @@ func hostEndpoints(h *host.Host) []core.Endpoint {
 			Name:         descriptor.SubsystemName,
 			URL:          descriptor.Endpoint,
 			ServiceNames: append([]string(nil), descriptor.ServiceNames...),
-			Capabilities: append([]string(nil), descriptor.Capabilities...),
 		})
 	}
 	return endpoints
@@ -431,17 +468,12 @@ func registerStartedSubsystems(ctx context.Context, h *host.Host) error {
 	}
 	client := registryv1connect.NewRegistryServiceClient(http.DefaultClient, registryServer.Endpoint())
 	for _, descriptor := range h.Descriptors() {
-		capabilities := make([]*registryv1.Capability, 0, len(descriptor.Capabilities))
-		for _, name := range descriptor.Capabilities {
-			capabilities = append(capabilities, &registryv1.Capability{Name: name})
-		}
 		registration := &registryv1.ServiceDescriptor{
 			SubsystemName:         descriptor.SubsystemName,
 			Endpoint:              descriptor.Endpoint,
 			ImplementationVersion: descriptor.ImplementationVersion,
 			ApiVersion:            descriptor.APIVersion,
 			ServiceNames:          append([]string(nil), descriptor.ServiceNames...),
-			Capabilities:          capabilities,
 			Dependencies:          append([]string(nil), descriptor.Dependencies...),
 			Description:           descriptor.Description,
 		}

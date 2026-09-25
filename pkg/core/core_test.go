@@ -20,7 +20,6 @@ func TestStaticResolverIndexesSubsystemAndServiceNames(t *testing.T) {
 		Name:         "weather",
 		URL:          "http://127.0.0.1:9000",
 		ServiceNames: []string{"weather.v1.WeatherService", "weather.v1.ForecastService"},
-		Capabilities: []string{"weather.forecast"},
 	})
 
 	bySubsystem, err := resolver.Resolve(context.Background(), "weather")

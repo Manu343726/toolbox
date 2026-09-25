@@ -21,19 +21,17 @@ type Source interface {
 	Invoke(context.Context, string, string, proto.Message) (proto.Message, error)
 }
 
-// ServiceMetadata is the explicit capability metadata for one service.
+// ServiceMetadata names one service a source serves.
+//
+// It carries nothing but the name. What a service is for, and what calling it
+// does, are facts about its contract and its deployment's policy — neither of
+// which is a property of a routing table, and both of which used to be smuggled
+// through here.
 type ServiceMetadata struct {
-	Name         string
-	Capabilities []string
-	// AllowedMethods optionally narrows the service to an explicit method
-	// allow-list. An empty list means all unary methods are covered by the
-	// service capability declaration.
-	AllowedMethods []string
+	Name string
 }
 
-// ServiceEndpoint identifies a ConnectRPC endpoint and the services it
-// advertises. Capabilities are attached to service names rather than inferred
-// from reflected method names.
+// ServiceEndpoint identifies a ConnectRPC endpoint and the services it advertises.
 type ServiceEndpoint struct {
 	Name     string
 	URL      string

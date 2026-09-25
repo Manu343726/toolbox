@@ -268,7 +268,6 @@ func (s *Server) Normalize(now time.Time) error {
 	if s.RegisteredAt.IsZero() && !now.IsZero() {
 		s.RegisteredAt = now
 	}
-	s.Capabilities = normalizeStrings(s.Capabilities)
 	return s.Validate()
 }
 
@@ -288,13 +287,10 @@ func (a *API) Normalize() (API, error) {
 	normalized.Source.Kind = strings.TrimSpace(normalized.Source.Kind)
 	normalized.Source.Location = strings.TrimSpace(normalized.Source.Location)
 	normalized.ServerIDs = normalizeStrings(normalized.ServerIDs)
-	normalized.Capabilities = normalizeStrings(normalized.Capabilities)
 	normalized.Tags = normalizeStrings(normalized.Tags)
 	for i := range normalized.Services {
-		normalized.Services[i].Capabilities = normalizeStrings(normalized.Services[i].Capabilities)
 		for j := range normalized.Services[i].Operations {
 			operation := &normalized.Services[i].Operations[j]
-			operation.Capabilities = normalizeStrings(operation.Capabilities)
 			operation.Tags = normalizeStrings(operation.Tags)
 			operation.SideEffects = normalizeSideEffects(operation.SideEffects)
 			operation.Name = strings.TrimSpace(operation.Name)

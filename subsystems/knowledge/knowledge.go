@@ -142,10 +142,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Provides provider-neutral knowledge source storage and retrieval.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         knowledgev1connect.KnowledgeServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"knowledge.source.read", "knowledge.source.write", "knowledge.search"},
+			Name:    knowledgev1connect.KnowledgeServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

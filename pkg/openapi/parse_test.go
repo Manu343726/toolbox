@@ -181,11 +181,10 @@ func TestParseDocumentMergesPathLevelParameters(t *testing.T) {
 	}
 }
 
-func TestParseDocumentCarriesCapabilitiesAndSideEffects(t *testing.T) {
+func TestParseDocumentInfersSideEffectsAndAddsWhatTheDocumentDeclares(t *testing.T) {
 	parsed := parseDocumentForTest(t, []byte(petStoreJSON))
 
 	get, _ := parsed.Operation("pet-store-1-4-0/pets/getPetById")
-	assert.Equal(t, []string{"pet.read"}, get.Capabilities)
 	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, get.SideEffects)
 
 	remove, _ := parsed.Operation("pet-store-1-4-0/pets/deletePet")
@@ -199,10 +198,10 @@ func TestParseDocumentCarriesCapabilitiesAndSideEffects(t *testing.T) {
 	assert.True(t, request.Required)
 }
 
-func TestParseDocumentLeavesUndeclaredCapabilitiesEmpty(t *testing.T) {
-	// An operation that declares no capabilities must come out of the parser
-	// with none, so the catalog's policy can refuse it. Capabilities are never
-	// inferred from a path or an operation name.
+func TestParseDocumentLeavesAnUndeclaredEffectToTheHTTPMethod(t *testing.T) {
+	// A document that extends nothing still gets the effect its method implies,
+	// because an HTTP verb does say something about what the call does. Nothing is
+	// inferred from the path or the operation name.
 	const document = `
 openapi: "3.1.0"
 info: {title: Bare, version: "1"}
@@ -217,8 +216,7 @@ paths:
 	// An untagged operation lands in the default group.
 	operation, ok := parsed.Operation("bare-1/default/listThings")
 	require.True(t, ok)
-	assert.Empty(t, operation.Capabilities)
-	assert.Empty(t, parsed.Capabilities)
+	assert.Equal(t, []api.SideEffect{api.SideEffectReadOnly}, operation.SideEffects)
 }
 
 func TestParseDocumentReadsSecuritySchemes(t *testing.T) {

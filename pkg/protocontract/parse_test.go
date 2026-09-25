@@ -127,16 +127,15 @@ func TestDescriptorMarksStreamingWithoutInvokingIt(t *testing.T) {
 	assert.True(t, stream.Streaming.Streaming())
 }
 
-func TestDescriptorDeclaresNoCapabilitiesForAProtobufContract(t *testing.T) {
-	// A protobuf contract states no authorization facts, so a reader must not
-	// invent any: a policy refuses the operations until a deployment says what it
-	// authorizes.
+func TestDescriptorStatesWhatAContractSaysAndNothingElse(t *testing.T) {
+	// A contract says what invoking a method does, and a contract says nothing
+	// about who may invoke it. A reader must not invent the second from the first:
+	// the policy answers that question, from the deployment.
 	parsed := parseForTest(t, contractDescriptorSet(t))
 	for _, service := range parsed.Services {
-		assert.Empty(t, service.Capabilities, "a contract declares no capabilities for its services")
 		for _, operation := range service.Operations {
-			assert.Empty(t, operation.Capabilities)
-			assert.Empty(t, operation.SideEffects)
+			assert.Empty(t, operation.SideEffects,
+				"this fixture's contract declares none, so its operations are unclassified")
 		}
 	}
 }

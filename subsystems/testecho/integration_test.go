@@ -144,7 +144,6 @@ func TestGeneratedMCPExposesIntrospectsAndGatesFeatures(t *testing.T) {
 		Name:         "echo",
 		URL:          server.Endpoint(),
 		ServiceNames: []string{"toolbox.testecho.v1.EchoService"},
-		Capabilities: []string{"testecho.echo"},
 	}), []string{"toolbox.testecho.v1.EchoService"}, toolboxmcp.Options{})
 	require.NoError(t, err)
 	assert.Len(t, resolved.Features(), 2)

@@ -139,10 +139,9 @@ func New(options Options) (*subsystem.Server, error) {
 		Description:   "Stores reusable, versioned agent skills.",
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
-			Name:         skillv1connect.SkillServiceName,
-			Path:         path,
-			Handler:      handler,
-			Capabilities: []string{"skill.read", "skill.write"},
+			Name:    skillv1connect.SkillServiceName,
+			Path:    path,
+			Handler: handler,
 		}},
 	})
 }

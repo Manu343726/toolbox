@@ -510,8 +510,10 @@ message ListApisRequest {
   string format = 2;
   // Only return APIs hosted by this server.
   string server_id = 3;
-  // Only return APIs declaring this capability.
-  string required_capability = 4;
+  // Only return APIs with an operation declaring this side effect, such as
+  // "read_only" or "delete". It is a filter over what the operations do, not over
+  // what a deployment permits.
+  repeated string side_effects = 4;
 }
 
 // ListApisResponse returns registered APIs ordered by identifier.

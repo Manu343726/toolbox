@@ -79,7 +79,6 @@ func TestParserReadsALiveServer(t *testing.T) {
 	operation, found := described.Operation("shop/mcp/get_pet")
 	require.True(t, found)
 	assert.Equal(t, "tools/call", operation.Method)
-	assert.Equal(t, []string{"pet.read"}, operation.Capabilities)
 	require.Len(t, described.DeclaredServers, 1)
 	assert.Equal(t, endpoint, described.DeclaredServers[0].URL)
 }
@@ -106,9 +105,8 @@ func TestParserReadsAPublishedManifest(t *testing.T) {
 	require.NoError(t, err)
 	described, err := api.APIFromProto(response.Msg.GetApi())
 	require.NoError(t, err)
-	operation, found := described.Operation("shop/mcp/get_pet")
+	_, found := described.Operation("shop/mcp/get_pet")
 	require.True(t, found)
-	assert.Equal(t, []string{"pet.read"}, operation.Capabilities)
 }
 
 func TestParserRejectsForeignFormatAndUnusableInput(t *testing.T) {
@@ -185,8 +183,7 @@ func TestAdapterHonoursItsOptions(t *testing.T) {
 	described.Services = append(described.Services, api.Service{
 		Name: "toolbox.shop.v1.HealthService",
 		Operations: []api.Operation{{
-			Name:         "Check",
-			Capabilities: []string{"health.read"},
+			Name: "Check",
 		}},
 	})
 	normalized, err := described.Normalize()
@@ -345,9 +342,6 @@ func TestNewServesAllThreeContracts(t *testing.T) {
 	assert.True(t, names[apiv1connect.ApiParserServiceName])
 	assert.True(t, names[apiv1connect.ApiAdapterServiceName])
 	assert.True(t, names[apiv1connect.ApiInvokerServiceName])
-	assert.Contains(t, descriptor.Capabilities, api.ParseCapability(FormatMCP))
-	assert.Contains(t, descriptor.Capabilities, api.RenderCapability(TargetMCP))
-	assert.Contains(t, descriptor.Capabilities, api.InvokeCapability(TransportMCP))
 }
 
 func TestDescriptorsAreStampedWithTheSubsystem(t *testing.T) {
@@ -389,12 +383,11 @@ func petAPI(t *testing.T) api.API {
 		Services: []api.Service{{
 			Name: "pets",
 			Operations: []api.Operation{{
-				Name:         "getPet",
-				Method:       "get",
-				Path:         "/pets/{petId}",
-				Summary:      "Fetch one pet",
-				Capabilities: []string{"pet.read"},
-				SideEffects:  []api.SideEffect{api.SideEffectReadOnly},
+				Name:        "getPet",
+				Method:      "get",
+				Path:        "/pets/{petId}",
+				Summary:     "Fetch one pet",
+				SideEffects: []api.SideEffect{api.SideEffectReadOnly},
 				Parameters: []api.Parameter{{
 					Name:     "petId",
 					In:       api.ParameterInPath,
