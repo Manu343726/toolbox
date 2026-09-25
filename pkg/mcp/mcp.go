@@ -22,7 +22,6 @@ import (
 	"strings"
 	"sync"
 
-	extension "github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/discovery"
 	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -84,10 +83,10 @@ type Options struct {
 	// ExposeNoFeatures to start with only the management/introspection tools
 	// and let a client grow its footprint deliberately.
 	InitialExposure InitialExposure
-	// IncludeInfrastructure includes reflection, health, registry, and
-	// documentation services in the generated catalog. It is false by
-	// default, matching the generated CLI's user-facing surface.
-	IncludeInfrastructure bool
+	// IncludeReflection includes the protocol's reflection services, which
+	// describe a contract rather than provide a capability. It is false by default,
+	// because a client that already knows the contract has no use for it.
+	IncludeReflection bool
 }
 
 // Feature is one reflected RPC method that can be exposed as an MCP tool.
@@ -122,6 +121,10 @@ type ServiceSummary struct {
 // server serve both.
 type featureEntry struct {
 	feature Feature
+	// owner is whatever tells this operation apart from one that would otherwise
+	// reduce to the same tool name: an API identifier, or the endpoint that serves
+	// the service. It is empty when nothing shares the name.
+	owner string
 	// inputSchema and outputSchema are JSON Schemas, produced either from a
 	// reflected protobuf message or from a standard API description.
 	inputSchema  map[string]any
@@ -172,10 +175,14 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 	if options.Policy == nil {
 		options.Policy = policyForSource(source, serviceNames)
 	}
-	server := newServer(options)
-	toolNames := make(map[string]string)
+	// Every advertised service is described, and every method it declares is a
+	// candidate. A service a deployment does not want is denied or hidden, not
+	// invisible: what the manifests declare is what the surface offers, and the
+	// policy decides what an agent gets.
+	entries := make([]*featureEntry, 0, 32)
+	candidates := make([]toolNameOwner, 0, 32)
 	for _, serviceName := range serviceNames {
-		if !options.IncludeInfrastructure && isInfrastructure(serviceName) {
+		if !options.IncludeReflection && isInfrastructure(serviceName) {
 			continue
 		}
 		schema, describeErr := source.DescribeService(ctx, serviceName)
@@ -187,55 +194,105 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 		}
 		metadata := serviceMetadata(source, serviceName)
 		for i := range schema.Methods {
-			// The policy answers once per method: an entry decides its own initial
-			// exposure, and both its allowance and its exposure come from here.
-			allowed := options.Policy.AllowFeature(serviceName, schema.Methods[i].Name)
 			method := schema.Methods[i]
 			if method.Name == "" || method.Input == nil || method.Output == nil {
 				return nil, fmt.Errorf("service %q contains an invalid reflected method at index %d", serviceName, i)
 			}
-			entry := &featureEntry{
-				feature: Feature{
-					ID:              featureID(serviceName, method.Name),
-					Service:         serviceName,
-					Method:          method.Name,
-					ToolName:        generatedToolName(serviceName, method.Name),
-					InputType:       string(method.Input.FullName()),
-					OutputType:      string(method.Output.FullName()),
-					ClientStreaming: method.ClientStreaming,
-					ServerStreaming: method.ServerStreaming,
-					Allowed:         allowed,
-					Callable:        !method.ClientStreaming && !method.ServerStreaming,
-					// The entry decides its own initial exposure, because what a
-					// source can say about it differs: a reflected method knows only
-					// the policy, while a catalog operation also knows what the
-					// catalog decided. An operation that cannot be called is never
-					// exposed, whatever decided that.
-					Exposed: allowed && !method.ClientStreaming && !method.ServerStreaming &&
-						options.InitialExposure == ExposeAllowedFeatures,
-					Capabilities: append([]string(nil), metadata.Capabilities...),
-				},
-				inputSchema:  jsonSchemaForMessage(method.Input, documentationParameters(documentationMethod(schema.Documentation, method.Name))),
-				outputSchema: jsonSchemaForMessage(method.Output, nil),
-				invoke: func(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error) {
-					return invokeProto(ctx, source, serviceName, method.Name, method.Input, arguments)
-				},
-				serviceDescription: serviceDescription(schema.Documentation),
-			}
-			if methodDoc := documentationMethod(schema.Documentation, method.Name); methodDoc != nil {
-				entry.feature.Description = methodDoc.Description
-				entry.documentation = methodDoc
-			}
-			if entry.feature.Description == "" {
-				entry.feature.Description = fmt.Sprintf("Call %s.%s through the Toolbox RPC gateway.", serviceName, method.Name)
-			}
-			if err := server.addEntry(entry, toolNames); err != nil {
-				return nil, err
-			}
+			entry := reflectedEntry(source, serviceName, method, schema, metadata, options)
+			entries = append(entries, entry)
+			candidates = append(candidates, toolNameOwner{
+				qualified: serviceName,
+				owner:     entry.owner,
+				method:    method.Name,
+			})
+		}
+	}
+	// Names are assigned across the whole surface, so an operation that shares a
+	// name with another is qualified rather than colliding with it. That is what
+	// several subsystems serving one contract produces, and it is by design.
+	sortOwners(candidates)
+	namer := newToolNamer(candidates)
+
+	server := newServer(options)
+	toolNames := make(map[string]string)
+	for _, entry := range entries {
+		if err := server.addEntry(entry, toolNames, namer); err != nil {
+			return nil, err
 		}
 	}
 	server.finish()
 	return server, nil
+}
+
+// reflectedEntry builds one candidate from a reflected method.
+func reflectedEntry(
+	source Source,
+	serviceName string,
+	method discovery.MethodSchema,
+	schema *discovery.ServiceSchema,
+	metadata ServiceMetadata,
+	options Options,
+) *featureEntry {
+	qualified := serviceName
+	// The policy answers once per method: an entry decides its own initial
+	// exposure, and both its allowance and its exposure come from here.
+	allowed := options.Policy.AllowFeature(serviceName, method.Name)
+	entry := &featureEntry{
+		feature: Feature{
+			ID:              featureID(qualified, method.Name),
+			Service:         qualified,
+			Method:          method.Name,
+			ToolName:        generatedToolName(qualified, method.Name),
+			InputType:       string(method.Input.FullName()),
+			OutputType:      string(method.Output.FullName()),
+			ClientStreaming: method.ClientStreaming,
+			ServerStreaming: method.ServerStreaming,
+			Allowed:         allowed,
+			// A streaming method has no unary invocation, so it is listed and
+			// describable but never offered as a tool.
+			Callable: !method.ClientStreaming && !method.ServerStreaming,
+			// The entry decides its own initial exposure, because what a
+			// source can say about it differs: a reflected method knows only
+			// the policy, while a catalog operation also knows what the
+			// catalog decided. An operation that cannot be called is never
+			// exposed, whatever decided that.
+			Exposed:      allowed && !method.ClientStreaming && !method.ServerStreaming && options.InitialExposure == ExposeAllowedFeatures,
+			Capabilities: append([]string(nil), metadata.Capabilities...),
+		},
+		// The endpoint that serves a service is what tells two operations with
+		// the same short name apart, so it is carried with the entry.
+		owner:        serviceOwner(source, serviceName),
+		inputSchema:  jsonSchemaForMessage(method.Input, documentationParameters(documentationMethod(schema.Documentation, method.Name))),
+		outputSchema: jsonSchemaForMessage(method.Output, nil),
+		invoke: func(ctx context.Context, arguments json.RawMessage) (json.RawMessage, error) {
+			return invokeProto(ctx, source, serviceName, method.Name, method.Input, arguments)
+		},
+		serviceDescription: serviceDescription(schema.Documentation),
+	}
+	if methodDoc := documentationMethod(schema.Documentation, method.Name); methodDoc != nil {
+		entry.feature.Description = methodDoc.Description
+		entry.documentation = methodDoc
+	}
+	if entry.feature.Description == "" {
+		entry.feature.Description = fmt.Sprintf("Call %s.%s through the Toolbox RPC gateway.", serviceName, method.Name)
+	}
+	return entry
+}
+
+// serviceOwner returns the endpoint that serves a service, when the source can say.
+// It is what disambiguates two operations that reduce to the same tool name.
+func serviceOwner(source Source, serviceName string) string {
+	provider, ok := source.(serviceOwnerProvider)
+	if !ok {
+		return ""
+	}
+	return provider.ServiceOwner(serviceName)
+}
+
+// serviceOwnerProvider is a source that can report which endpoint serves a service.
+type serviceOwnerProvider interface {
+	// ServiceOwner returns the endpoint name serving the service, or empty.
+	ServiceOwner(string) string
 }
 
 // newServer creates a server with the always-on management surface. The
@@ -254,9 +311,21 @@ func newServer(options Options) *Server {
 
 // addEntry registers one feature, refusing a duplicate identifier or tool name
 // because a collision would make one of the two unreachable.
-func (s *Server) addEntry(entry *featureEntry, toolNames map[string]string) error {
+//
+// A namer qualifies a name that more than one operation claims, which is what
+// several providers serving one contract produces. Without one, the short name is
+// used and a collision is an error, because a name that reaches the wrong operation
+// is worse than a refused server.
+func (s *Server) addEntry(entry *featureEntry, toolNames map[string]string, namer *toolNamer) error {
 	if _, exists := s.entries[entry.feature.ID]; exists {
 		return fmt.Errorf("duplicate feature %q", entry.feature.ID)
+	}
+	if namer != nil {
+		entry.feature.ToolName = namer.name(toolNameOwner{
+			qualified: entry.feature.Service,
+			owner:     entry.owner,
+			method:    entry.feature.Method,
+		})
 	}
 	if previous, exists := toolNames[entry.feature.ToolName]; exists {
 		return fmt.Errorf("generated MCP tool name %q collides for %q and %q", entry.feature.ToolName, previous, entry.feature.ID)
@@ -570,12 +639,10 @@ func normalizeFeatureID(id string) string {
 	return strings.TrimSpace(id)
 }
 
+// generatedToolName reduces a service and a method to a tool name. A name claimed
+// by more than one operation is qualified with its owner; see toolNamer.
 func generatedToolName(serviceName, methodName string) string {
-	parts := strings.Split(serviceName, ".")
-	short := parts[len(parts)-1]
-	short = strings.TrimSuffix(short, "Service")
-	name := snakeCase(short) + "__" + snakeCase(methodName)
-	return capToolName(name)
+	return shortToolName(serviceName, methodName)
 }
 
 func snakeCase(value string) string {
@@ -604,31 +671,16 @@ func capToolName(name string) string {
 	return name[:maxToolNameLength-len(suffix)-1] + "_" + suffix
 }
 
-// isInfrastructure reports whether a service belongs to the platform rather than
-// to a feature the user adopted.
+// isInfrastructure reports whether a service belongs to the protocol or the
+// framework rather than to a subsystem: the reflection services, which exist so a
+// client can discover a contract and are not a feature to call.
 //
-// The framework's API extension contracts belong here for a specific reason: many
-// provider subsystems serve the same contract on purpose, because that contract
-// is how a format or a transport is contributed. They are how the catalog reaches
-// a provider, not something an agent should call directly, so they stay out of
-// the generated tool surface and do not conflict with one another.
+// Nothing else is exempt. A subsystem's health check, its registry, and the
+// framework's own extension contracts are services like any other, and whether an
+// agent gets them is decided by what they declare and by exposure — not by a list
+// of names.
 func isInfrastructure(name string) bool {
-	return discovery.IsReflectionService(name) ||
-		strings.HasSuffix(name, ".HealthService") ||
-		strings.HasSuffix(name, ".DocumentationService") ||
-		strings.HasSuffix(name, ".RegistryService") ||
-		isExtensionContract(name)
-}
-
-// isExtensionContract reports whether a service name is one of the framework's
-// API introspection contracts.
-func isExtensionContract(name string) bool {
-	switch name {
-	case extension.ParserService, extension.AdapterService, extension.InvokerService:
-		return true
-	default:
-		return false
-	}
+	return discovery.IsReflectionService(name)
 }
 
 func serviceDescription(service *shareddocs.Service) string {

@@ -116,7 +116,7 @@ Every standalone subsystem command receives an automatic `mcp` subcommand:
 ./bin/workflow mcp
 ./bin/workflow mcp --service toolbox.workflow.v1.WorkflowService
 ./bin/workflow mcp --minimal
-./bin/workflow mcp --include-infrastructure
+./bin/workflow mcp --include-reflection
 ```
 
 `--service` is useful when one subsystem mounts multiple contracts. The
@@ -205,8 +205,21 @@ toolbox mcp --mcp-source catalog --component apitools --component knowledge
 Both name the same operations identically, so switching the source renames nothing
 an agent already uses. What the catalog adds is exposure per operation, the ability
 to re-publish a description in another format, and registrations that outlive the
-gateway. A subsystem whose services are all platform plumbing contributes no tools
-and is reported as skipped.
+gateway. Every started subsystem is registered whole, so a provider's extension
+contracts are part of the catalog like everything else; what an agent gets from
+them is decided by exposure, as with any other operation.
+
+Where several providers serve one contract, two operations reduce to the same short
+name, and a name more than one operation claims is qualified with the API that
+tells them apart:
+
+```text
+apimcp__api_parser__parse_api
+apigrpc__api_parser__parse_api
+```
+
+A name nothing else needs keeps the name an agent already learned, so adding a
+provider renames no tool that was unambiguous before.
 
 ## OpenCode sessions
 

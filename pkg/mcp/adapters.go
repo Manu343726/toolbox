@@ -69,9 +69,8 @@ func NewFromResolver(ctx context.Context, resolver core.Resolver, serviceNames [
 // explicit service declarations, never from reflection alone.
 func NewFromSubsystem(ctx context.Context, server *subsystem.Server, options Options) (*Server, error) {
 	// A standalone subsystem MCP represents that subsystem's own mounted
-	// services, including a health/documentation/registry service when that is
-	// the subsystem being launched.
-	options.IncludeInfrastructure = true
+	// services, so nothing is exempt from it: if the subsystem serves a health or
+	// registry service, that is part of what this command offers.
 	return newFromSubsystemServices(ctx, server, nil, options)
 }
 
@@ -83,9 +82,7 @@ func NewFromSubsystemService(ctx context.Context, server *subsystem.Server, serv
 	if serviceName == "" {
 		return nil, fmt.Errorf("service name is required")
 	}
-	// An explicitly selected service is the user's chosen surface, even when
-	// its name belongs to the infrastructure service family.
-	options.IncludeInfrastructure = true
+	// An explicitly selected service is the user's chosen surface.
 	return newFromSubsystemServices(ctx, server, []string{serviceName}, options)
 }
 

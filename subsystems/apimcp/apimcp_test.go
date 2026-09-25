@@ -200,12 +200,12 @@ func TestAdapterHonoursItsOptions(t *testing.T) {
 	require.NoError(t, err)
 	var plain map[string]any
 	require.NoError(t, json.Unmarshal(without.Msg.GetFiles()[0].GetContent(), &plain))
-	assert.Len(t, plain["tools"], 1, "platform plumbing is not a tool")
+	assert.Len(t, plain["tools"], 2, "every operation the description declares is published")
 
 	with, err := adapter.RenderApi(context.Background(), connect.NewRequest(&apiv1.RenderApiRequest{
 		Api:     normalized.ToProto(),
 		Target:  TargetMCP,
-		Options: map[string]string{"include-infrastructure": "true", "instructions": "Use sparingly."},
+		Options: map[string]string{"instructions": "Use sparingly."},
 	}))
 	require.NoError(t, err)
 	var inclusive map[string]any
@@ -214,6 +214,20 @@ func TestAdapterHonoursItsOptions(t *testing.T) {
 	server, ok := inclusive["server"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Use sparingly.", server["description"])
+}
+
+func TestAdapterRefusesASwitchThatNoLongerExists(t *testing.T) {
+	// The switch this replaces withheld operations by service name. Nothing is
+	// withheld by name any more, so it is refused rather than silently ignored:
+	// a caller that passes it should learn that it is not doing what it thinks.
+	_, err := NewAdapter(AdapterOptions{}).RenderApi(context.Background(), connect.NewRequest(&apiv1.RenderApiRequest{
+		Api:     petAPI(t).ToProto(),
+		Target:  TargetMCP,
+		Options: map[string]string{"include-infrastructure": "true"},
+	}))
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Contains(t, err.Error(), "unknown option")
 }
 
 func TestAdapterRefusesAnUnknownOption(t *testing.T) {

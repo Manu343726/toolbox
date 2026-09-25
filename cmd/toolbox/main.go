@@ -71,7 +71,12 @@ func newRootCommand() *cobra.Command {
 	mcpFlags.StringSlice("component", nil, "Subsystem names to expose; repeatable or comma-separated")
 	mcpFlags.Bool("all", false, "Expose all built-in subsystems")
 	mcpFlags.Bool("minimal", false, "Start with only introspection tools")
-	mcpFlags.Bool("include-infrastructure", false, "Include health, registry, documentation, and reflection services")
+	mcpFlags.Bool("include-reflection", false, "Include the protocol's reflection services, which describe contracts rather than provide capabilities")
+	// Kept so an existing command line keeps working. Nothing is excluded by name
+	// any more, so the flag it replaces only ever meant the reflection services.
+	mcpFlags.Bool("include-infrastructure", false, "Deprecated: use --include-reflection")
+	_ = mcpFlags.MarkDeprecated("include-infrastructure", "use --include-reflection; services are no longer excluded by name")
+	_ = mcpFlags.MarkHidden("include-infrastructure")
 	mcpFlags.String("mcp-source", "reflection", "Where the tool surface comes from: reflection reads served contracts directly, catalog registers every subsystem in the API catalog first")
 	mcpFlags.StringSlice("service", nil, "Only expose these fully-qualified services; repeatable or comma-separated")
 	root.AddCommand(mcpCommand)
@@ -94,9 +99,13 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	includeInfrastructure, err := cmd.Flags().GetBool("include-infrastructure")
+	includeReflection, err := cmd.Flags().GetBool("include-reflection")
 	if err != nil {
 		return err
+	}
+	// The replaced flag is read for compatibility and means the same thing now.
+	if legacy, err := cmd.Flags().GetBool("include-infrastructure"); err == nil && legacy {
+		includeReflection = true
 	}
 	serviceFilter, err := cmd.Flags().GetStringSlice("service")
 	if err != nil {
@@ -154,10 +163,10 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	bridge, err := toolboxmcp.NewFromDescriptors(cmd.Context(), descriptors, toolboxmcp.Options{
-		Name:                  "toolbox",
-		Description:           "Aggregated Model Context Protocol server for Toolbox subsystems.",
-		InitialExposure:       initialExposure,
-		IncludeInfrastructure: includeInfrastructure,
+		Name:              "toolbox",
+		Description:       "Aggregated Model Context Protocol server for Toolbox subsystems.",
+		InitialExposure:   initialExposure,
+		IncludeReflection: includeReflection,
 	})
 	if err != nil {
 		return err
@@ -175,11 +184,15 @@ func runCatalogMCP(
 	initialExposure toolboxmcp.InitialExposure,
 	minimal bool,
 ) error {
-	includeInfrastructure, err := cmd.Flags().GetBool("include-infrastructure")
+	includeReflection, err := cmd.Flags().GetBool("include-reflection")
 	if err != nil {
 		return err
 	}
-	seed, err := catalog.registerSubsystems(cmd.Context(), includeInfrastructure)
+	// The replaced flag is read for compatibility and means the same thing now.
+	if legacy, err := cmd.Flags().GetBool("include-infrastructure"); err == nil && legacy {
+		includeReflection = true
+	}
+	seed, err := catalog.registerSubsystems(cmd.Context(), includeReflection)
 	if err != nil {
 		return err
 	}
@@ -198,10 +211,10 @@ func runCatalogMCP(
 	}
 	bridge, err := toolboxmcp.NewFromAPICatalog(cmd.Context(), catalog.service.Catalog(), catalog.service.Invoker(), toolboxmcp.APICatalogOptions{
 		Options: toolboxmcp.Options{
-			Name:                  "toolbox",
-			Description:           "Model Context Protocol server for Toolbox subsystems, built from the API catalog.",
-			InitialExposure:       initialExposure,
-			IncludeInfrastructure: includeInfrastructure,
+			Name:              "toolbox",
+			Description:       "Model Context Protocol server for Toolbox subsystems, built from the API catalog.",
+			InitialExposure:   initialExposure,
+			IncludeReflection: includeReflection,
 		},
 	})
 	if err != nil {
@@ -352,12 +365,12 @@ type sharedCatalog struct {
 // services they belong to, the description is stored, and its exposable operations
 // are exposed. Nothing is written per subsystem, and nothing is exposed that no
 // declared capability covers.
-func (c *sharedCatalog) registerSubsystems(ctx context.Context, includeInfrastructure bool) (host.SeedResult, error) {
+func (c *sharedCatalog) registerSubsystems(ctx context.Context, includeReflection bool) (host.SeedResult, error) {
 	if c.host == nil {
 		return host.SeedResult{}, fmt.Errorf("the host is not composed yet")
 	}
 	return c.host.RegisterInto(ctx, c.service.Registrar(), protocontract.NewDescriptor(protocontract.Descriptor{}), host.SeedOptions{
-		IncludeInfrastructure: includeInfrastructure,
+		IncludeReflection: includeReflection,
 	})
 }
 

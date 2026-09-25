@@ -50,7 +50,9 @@ func describedShop(t *testing.T) api.API {
 				SideEffects:  []api.SideEffect{api.SideEffectIrreversible},
 			}},
 		}, {
-			// Platform plumbing, which a description an agent reads leaves out.
+			// A second service, so the tests can see that one is neither
+			// privileged nor dropped: a health check a subsystem declared a
+			// capability for is published like any other operation.
 			Name: "toolbox.shop.v1.HealthService",
 			Operations: []api.Operation{{
 				Name:         "Check",
@@ -66,7 +68,7 @@ func describedShop(t *testing.T) api.API {
 func TestRenderTurnsADescriptionIntoTools(t *testing.T) {
 	rendered, err := Render(describedShop(t), RenderOptions{})
 	require.NoError(t, err)
-	require.Len(t, rendered.Tools, 2, "the health service is plumbing, not a tool")
+	require.Len(t, rendered.Tools, 3, "the description declares three operations and all three are tools")
 
 	byName := map[string]ToolDefinition{}
 	for _, tool := range rendered.Tools {
@@ -111,10 +113,13 @@ func TestRenderNamesToolsTheSameWayTheGatewayDoes(t *testing.T) {
 	}
 }
 
-func TestRenderKeepsPlatformPlumbingWhenAsked(t *testing.T) {
-	rendered, err := Render(describedShop(t), RenderOptions{IncludeInfrastructure: true})
+func TestRenderOffersEveryDeclaredOperation(t *testing.T) {
+	// A subsystem's health service is a service it declared a capability for, so
+	// it is a tool like any other. What a deployment exposes is its decision, made
+	// through exposure — not something a list of names in this package decides.
+	rendered, err := Render(describedShop(t), RenderOptions{})
 	require.NoError(t, err)
-	assert.Len(t, rendered.Tools, 3)
+	assert.Len(t, rendered.Tools, 3, "every operation the description declares is published")
 }
 
 func TestRenderSelectsTools(t *testing.T) {
@@ -125,8 +130,12 @@ func TestRenderSelectsTools(t *testing.T) {
 
 	without, err := Render(describedShop(t), RenderOptions{ExcludeTools: []string{"getPet"}})
 	require.NoError(t, err)
-	require.Len(t, without.Tools, 1)
-	assert.Equal(t, "pets__delete_pet", without.Tools[0].Name)
+	names := make([]string, 0, len(without.Tools))
+	for _, tool := range without.Tools {
+		names = append(names, tool.Name)
+	}
+	assert.Equal(t, []string{"pets__delete_pet", "health__check"}, names,
+		"excluding one operation leaves the rest, in the order the description declares them")
 }
 
 func TestRenderReportsAStreamingOperationInsteadOfOfferingIt(t *testing.T) {
@@ -143,7 +152,7 @@ func TestRenderReportsAStreamingOperationInsteadOfOfferingIt(t *testing.T) {
 
 func TestRenderRefusesADescriptionWithNothingToOffer(t *testing.T) {
 	described := describedShop(t)
-	described.Services = described.Services[1:] // only the health service remains
+	described.Services = nil
 	_, err := Render(described, RenderOptions{})
 	require.Error(t, err, "an empty tool set is refused, not published as an empty server")
 	assert.Equal(t, api.KindInvalid, api.KindOf(err))
@@ -193,8 +202,11 @@ func TestRenderLeavesCapabilitiesEmptyWhenNothingDeclaredThem(t *testing.T) {
 	// A description that states no authorization facts must render tools with no
 	// capabilities, so a policy can still refuse them.
 	described := describedShop(t)
-	for i := range described.Services[0].Operations {
-		described.Services[0].Operations[i].Capabilities = nil
+	for i := range described.Services {
+		described.Services[i].Capabilities = nil
+		for j := range described.Services[i].Operations {
+			described.Services[i].Operations[j].Capabilities = nil
+		}
 	}
 	rendered, err := Render(described, RenderOptions{})
 	require.NoError(t, err)
@@ -254,7 +266,73 @@ func TestToolNameSegmentIsReadable(t *testing.T) {
 	// and is asserted here rather than discovered later.
 	assert.Equal(t, "knowledge__search", generatedToolName("toolbox.knowledge.v1.KnowledgeService", "Search"))
 	assert.Equal(t, "workflow__validate_workflow", generatedToolName("workflow", "ValidateWorkflow"))
-	assert.NotEmpty(t, generatedToolName("", ""))
+	// An unnamed operation has no name to offer. An empty name is refused by the
+	// boundaries that accept a name; a separator made of nothing is not.
+	assert.Empty(t, generatedToolName("", ""))
+	assert.Empty(t, generatedToolName("toolbox.shop.v1.", ""))
+}
+
+func TestToolNamesSharedBySeveralOperationsAreQualified(t *testing.T) {
+	// Several providers serving one contract is how a format is added, so two
+	// operations can reduce to the same name. The name each is given must still
+	// reach exactly one of them, and every other name must stay as it was.
+	shared := []toolNameOwner{{
+		qualified: "apimcp.toolbox.api.v1.ApiParserService",
+		owner:     "apimcp",
+		method:    "ParseApi",
+	}, {
+		qualified: "apigrpc.toolbox.api.v1.ApiParserService",
+		owner:     "apigrpc",
+		method:    "ParseApi",
+	}, {
+		qualified: "apimcp.toolbox.api.v1.ApiAdapterService",
+		owner:     "apimcp",
+		method:    "RenderApi",
+	}, {
+		qualified: "shop.shop.pets",
+		owner:     "shop",
+		method:    "getPet",
+	}}
+	sortOwners(shared)
+	namer := newToolNamer(shared)
+
+	names := make([]string, 0, len(shared))
+	for _, candidate := range shared {
+		names = append(names, namer.name(candidate))
+	}
+	assert.Equal(t, []string{
+		"apigrpc__api_parser__parse_api",
+		"api_adapter__render_api",
+		"apimcp__api_parser__parse_api",
+		"pets__get_pet",
+	}, names, "only the operations sharing a name are qualified; the rest keep the name a client already learned")
+
+	// The result must not depend on the order the operations were found in.
+	shuffled := []toolNameOwner{shared[3], shared[1], shared[2], shared[0]}
+	sortOwners(shuffled)
+	renamed := newToolNamer(shuffled)
+	for _, candidate := range shuffled {
+		assert.Equal(t, namer.name(candidate), renamed.name(candidate))
+	}
+}
+
+func TestToolNamesThatCollideEvenWhenQualifiedAreReported(t *testing.T) {
+	// A name that still reaches two operations after qualifying is the one case
+	// where nothing is left to say, so the surface falls back to the full service
+	// name rather than letting a client reach the wrong operation.
+	shared := []toolNameOwner{{
+		qualified: "shop.a.v1.Quote",
+		owner:     "shop",
+		method:    "Get",
+	}, {
+		qualified: "shop.b.v1.Quote",
+		owner:     "shop",
+		method:    "Get",
+	}}
+	sortOwners(shared)
+	namer := newToolNamer(shared)
+	assert.Equal(t, "shop.a.v1.quote__quote__get", namer.name(shared[0]))
+	assert.Equal(t, "shop.b.v1.quote__quote__get", namer.name(shared[1]))
 }
 
 func TestRenderSurfacesARequestValuesOwnArguments(t *testing.T) {

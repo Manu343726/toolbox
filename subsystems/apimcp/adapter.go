@@ -141,16 +141,14 @@ func (a *Adapter) StopApi(_ context.Context, request *connect.Request[apiv1.Stop
 // renderOptions reads the target's switches. A switch this target does not know is
 // refused rather than ignored, because a caller that misspelled one would otherwise
 // get a document that quietly differs from what it asked for.
+//
+// Every operation a description declares is published, so there is no switch for
+// keeping a service out: an operation is withheld by not being described, or by the
+// deployment that reads the manifest, not by a name matched here.
 func renderOptions(values map[string]string) (toolboxmcp.RenderOptions, error) {
 	options := toolboxmcp.RenderOptions{}
 	for name, value := range values {
 		switch api.NormalizeIdentifier(name) {
-		case "include-infrastructure":
-			flag, err := booleanOption(name, value)
-			if err != nil {
-				return toolboxmcp.RenderOptions{}, err
-			}
-			options.IncludeInfrastructure = flag
 		case "instructions":
 			options.Instructions = value
 		case "only":

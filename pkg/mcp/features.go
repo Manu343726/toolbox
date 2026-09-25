@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/Manu343726/toolbox/pkg/api"
-	"github.com/Manu343726/toolbox/pkg/discovery"
 )
 
 // This file holds the naming and schema decisions the two MCP paths share, so a
@@ -102,10 +101,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// isPlumbing reports whether a service belongs to the platform rather than to a
-// capability a user adopted, and so is not offered as a tool.
-func isPlumbing(name string, includeInfrastructure bool) bool {
-	return !includeInfrastructure && discovery.IsInfrastructureService(name)
 }

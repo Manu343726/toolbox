@@ -24,9 +24,10 @@ type MCPOptions struct {
 	// InitialExposure controls whether generated feature tools are present
 	// immediately. The zero value exposes all allowed unary features.
 	InitialExposure toolboxmcp.InitialExposure
-	// IncludeInfrastructure exposes health, registry, documentation, and
-	// reflection services in the MCP catalog.
-	IncludeInfrastructure bool
+	// IncludeReflection exposes the protocol's reflection services, which
+	// describe a contract rather than provide a capability. It is false by
+	// default, because a client that already knows the contract has no use for it.
+	IncludeReflection bool
 	// ServiceName optionally restricts the generated MCP to one mounted
 	// service. Empty includes every service on the subsystem.
 	ServiceName string
@@ -41,9 +42,9 @@ type Options struct {
 	// Factory constructs the subsystem server. It is the programmatic
 	// in-process entrypoint supplied by the subsystem package.
 	Factory subsystem.Factory
-	// IncludeInfrastructure exposes health, registry, and documentation RPCs
-	// in the generated command tree. It is false by default.
-	IncludeInfrastructure bool
+	// IncludeReflection exposes the protocol's reflection services, which
+	// describe a contract rather than provide a capability. It is false by default.
+	IncludeReflection bool
 	// Output receives generated command output. Defaults to os.Stdout.
 	Output io.Writer
 	// Args optionally supplies command arguments for programmatic callers and
@@ -72,9 +73,9 @@ func Run(ctx context.Context, options Options) error {
 
 	discoveryClient := discovery.New(server.Endpoint())
 	generator := cli.NewGenerator(discoveryClient, cli.Options{
-		CommandName:           options.Name,
-		Description:           options.Description,
-		IncludeInfrastructure: options.IncludeInfrastructure,
+		CommandName:       options.Name,
+		Description:       options.Description,
+		IncludeReflection: options.IncludeReflection || options.MCP.IncludeReflection,
 	})
 	serviceNames := make([]string, 0)
 	for _, service := range server.Services() {
@@ -105,7 +106,7 @@ func Run(ctx context.Context, options Options) error {
 			if err != nil {
 				return err
 			}
-			includeInfrastructure, err := cmd.Flags().GetBool("include-infrastructure")
+			includeReflection, err := cmd.Flags().GetBool("include-reflection")
 			if err != nil {
 				return err
 			}
@@ -121,11 +122,15 @@ func Run(ctx context.Context, options Options) error {
 				initialExposure = toolboxmcp.ExposeNoFeatures
 			}
 			mcpOptions := toolboxmcp.Options{
-				Name:                  options.Name,
-				Description:           options.Description,
-				Policy:                options.MCP.Policy,
-				InitialExposure:       initialExposure,
-				IncludeInfrastructure: includeInfrastructure || options.MCP.IncludeInfrastructure,
+				Name:            options.Name,
+				Description:     options.Description,
+				Policy:          options.MCP.Policy,
+				InitialExposure: initialExposure,
+				// A standalone subsystem command serves that subsystem's own
+				// surface, so a health or registry service it mounts is part of
+				// what the command offers. What an agent gets is decided by the
+				// policy and by exposure, not by the name of a service.
+				IncludeReflection: includeReflection || options.MCP.IncludeReflection,
 			}
 			var bridge *toolboxmcp.Server
 			if serviceName != "" {
@@ -141,7 +146,13 @@ func Run(ctx context.Context, options Options) error {
 	}
 	mcpFlags := mcpCommand.Flags()
 	mcpFlags.Bool("minimal", false, "Start with only introspection tools; expose RPC features explicitly")
-	mcpFlags.Bool("include-infrastructure", false, "Include health, registry, documentation, and reflection services")
+	mcpFlags.Bool("include-reflection", false, "Include the protocol's reflection services, which describe contracts rather than provide capabilities")
+	// The flag this replaces excluded services by name. Nothing is excluded by name
+	// any more, so it only ever meant the reflection services; it is kept so an
+	// existing command line keeps working.
+	mcpFlags.Bool("include-infrastructure", false, "Deprecated: use --include-reflection")
+	_ = mcpFlags.MarkDeprecated("include-infrastructure", "use --include-reflection; services are no longer excluded by name")
+	_ = mcpFlags.MarkHidden("include-infrastructure")
 	mcpFlags.String("service", "", "Expose only one mounted service by fully-qualified protobuf name")
 	root.AddCommand(mcpCommand)
 	if options.Output != nil {

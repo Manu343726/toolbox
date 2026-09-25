@@ -158,7 +158,9 @@ func describedFixture(t *testing.T) api.API {
 				{Name: "DeleteThing", Method: "DeleteThing"},
 			},
 		}, {
-			// Platform plumbing, which a catalog an agent reads leaves out.
+			// A second service with no capability behind it: it is registered
+			// because the subsystem serves it, and none of its operations is
+			// exposed because nothing declared one.
 			Name:       "toolbox.fixture.v1.HealthService",
 			Operations: []api.Operation{{Name: "Check", Method: "Check"}},
 		}},
@@ -181,8 +183,8 @@ func TestRegisterIntoDescribesAndExposesAHostSubsystem(t *testing.T) {
 	assert.Equal(t, "fixture", entry.Subsystem)
 	assert.Equal(t, "fixture", entry.ServerID)
 	assert.Equal(t, "fixture", entry.APIID)
-	assert.Equal(t, 1, entry.Services, "platform plumbing is not registered")
-	assert.Equal(t, 2, entry.Operations)
+	assert.Equal(t, 2, entry.Services, "every service the subsystem serves is registered")
+	assert.Equal(t, 3, entry.Operations)
 	assert.Equal(t, 2, entry.Exposed, "the capabilities the manifest declared cover both operations")
 	assert.Equal(t, 1, result.Exposed())
 
@@ -198,7 +200,7 @@ func TestRegisterIntoDescribesAndExposesAHostSubsystem(t *testing.T) {
 	// joined to the service they belong to.
 	stored, ok := catalog.apis["fixture"]
 	require.True(t, ok)
-	require.Len(t, stored.Services, 1)
+	require.Len(t, stored.Services, 2)
 	assert.Equal(t, []string{api.InvokeCapability("http"), api.ParseCapability("openapi")}, stored.Services[0].Capabilities,
 		"the capabilities the manifest declared, joined to the service they belong to")
 
@@ -225,7 +227,7 @@ func TestRegisterIntoExposesNothingWithoutACapability(t *testing.T) {
 	result, err := stripped.RegisterInto(context.Background(), catalog, describer, SeedOptions{})
 	require.NoError(t, err)
 	require.Len(t, result.Seeded, 1)
-	assert.Equal(t, 2, result.Seeded[0].Operations)
+	assert.Equal(t, 3, result.Seeded[0].Operations)
 	assert.Zero(t, result.Seeded[0].Exposed, "an operation no capability covers is not a tool")
 	assert.Zero(t, result.Exposed())
 	assert.Empty(t, catalog.exposure)
@@ -241,7 +243,7 @@ func TestRegisterIntoReportsWhatPolicyRefuses(t *testing.T) {
 	require.NoError(t, err)
 	// Seeding never forces an operation past a policy: it reports and moves on.
 	assert.Zero(t, result.Seeded[0].Exposed)
-	require.Len(t, result.Warnings, 2)
+	require.Len(t, result.Warnings, 2, "every operation that asked to be exposed and was refused is reported")
 	assert.Contains(t, result.Warnings[0], "stays hidden")
 	assert.Empty(t, catalog.exposure)
 }
@@ -269,15 +271,25 @@ func TestRegisterIntoSelectsSubsystems(t *testing.T) {
 	assert.Zero(t, describer.calls, "a subsystem the options did not select is not even described")
 }
 
-func TestRegisterIntoCanKeepInfrastructure(t *testing.T) {
+func TestRegisterIntoRegistersEveryServiceUnlessExcluded(t *testing.T) {
 	h := startFixtureSubsystem(t)
 	catalog := newMemoryCatalog()
 	describer := &stubDescriber{described: describedFixture(t)}
 
-	result, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{IncludeInfrastructure: true})
+	// Nothing is dropped by name: a health service is registered because the
+	// subsystem declared it, and left out only when a deployment says so.
+	result, err := h.RegisterInto(context.Background(), catalog, describer, SeedOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, 2, result.Seeded[0].Services, "a deployment that asks for the plumbing gets it")
+	assert.Equal(t, 2, result.Seeded[0].Services)
 	assert.Equal(t, 3, result.Seeded[0].Operations)
+
+	excluded := newMemoryCatalog()
+	filtered, err := h.RegisterInto(context.Background(), excluded, describer, SeedOptions{
+		ExcludeServices: []string{"toolbox.fixture.v1.HealthService"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, filtered.Seeded[0].Services, "an excluded service is left out on request")
+	assert.Equal(t, 2, filtered.Seeded[0].Operations)
 }
 
 func TestRegisterIntoRequiresBothCollaborators(t *testing.T) {
@@ -327,7 +339,7 @@ func TestGatewayExposesWhatTheCatalogExposed(t *testing.T) {
 	require.NoError(t, err)
 
 	features := gateway.Features()
-	require.Len(t, features, 2, "the health service is plumbing and never becomes a tool")
+	require.Len(t, features, 3, "every operation the description declares is part of the surface")
 	byID := map[string]mcp.Feature{}
 	for _, feature := range features {
 		byID[feature.ID] = feature
@@ -354,7 +366,7 @@ func TestGatewayExposesWhatTheCatalogExposed(t *testing.T) {
 	), mcp.APICatalogOptions{})
 	require.NoError(t, err)
 	features = hidden.Features()
-	require.Len(t, features, 2)
+	require.Len(t, features, 3)
 	for _, feature := range features {
 		if feature.Method == "DeleteThing" {
 			assert.False(t, feature.Exposed, "a hidden operation is not offered")
@@ -385,9 +397,20 @@ func TestRealContractIsReadFromARealEndpoint(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Len(t, result.Seeded, 1)
-	// The fixture's only service is the framework's parser contract, which is
-	// infrastructure, so nothing is registered — and that is the right answer: an
-	// extension contract is how the platform works, not something an agent calls.
-	assert.Contains(t, result.Seeded[0].Skipped, "no service a user adopted")
-	assert.Empty(t, catalog.apis)
+	// The parser contract is registered like any other contract. Several providers
+	// serve it on purpose, and a provider subsystem exists to serve it, so hiding
+	// it from a catalog would hide the mechanism the catalog itself is made of.
+	// Whether an agent gets it is decided by exposure.
+	assert.Equal(t, 1, result.Seeded[0].Services)
+	assert.Equal(t, 1, result.Seeded[0].Operations)
+	stored, ok := catalog.apis["framework"]
+	require.True(t, ok)
+	require.Len(t, stored.Services, 1)
+	assert.Equal(t, apiv1connect.ApiParserServiceName, stored.Services[0].Name)
+	operation, ok := stored.Operation("framework/" + apiv1connect.ApiParserServiceName + "/ParseApi")
+	require.True(t, ok, "the operation was read from real reflection, by its contract name")
+	assert.Equal(t, "ParseApi", operation.Method)
+	require.NotNil(t, operation.Request)
+	assert.Equal(t, "toolbox.api.v1.ParseApiRequest", operation.Request.Ref,
+		"the request is named by its protobuf message, read from real reflection")
 }

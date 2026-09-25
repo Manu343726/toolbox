@@ -38,9 +38,14 @@ type Options struct {
 	CommandName string
 	// Description is displayed in root help.
 	Description string
-	// IncludeInfrastructure includes reflection, health, registry, and
-	// documentation services. It is false by default.
-	IncludeInfrastructure bool
+	// IncludeReflection includes the protocol's reflection services, which
+	// describe a contract rather than provide a capability. It is false by
+	// default, because a caller that already knows the contract has no use for it.
+	//
+	// Nothing else is excluded. A health check, a registry, and a documentation
+	// service are commands a caller may want, and a subsystem that mounts one has
+	// said so by declaring its capability.
+	IncludeReflection bool
 }
 
 // Generator creates a command tree from a discovery source.
@@ -81,7 +86,7 @@ func (g *Generator) Generate(ctx context.Context, serviceNames ...string) (*cobr
 		root.Short = "Generated Toolbox service commands"
 	}
 	for _, name := range serviceNames {
-		if !g.options.IncludeInfrastructure && isInfrastructure(name) {
+		if !g.options.IncludeReflection && isInfrastructure(name) {
 			continue
 		}
 		schema, err := g.source.DescribeService(ctx, name)
@@ -494,8 +499,11 @@ func firstEnumValue(field protoreflect.FieldDescriptor) string {
 	return string(field.Enum().Values().Get(0).Name())
 }
 
+// isInfrastructure reports whether a service belongs to the protocol rather than
+// to a subsystem: the reflection services, which exist so a client can discover a
+// contract. They are not a capability, so they are not commands.
 func isInfrastructure(name string) bool {
-	return discovery.IsReflectionService(name) || strings.HasSuffix(name, ".HealthService") || strings.HasSuffix(name, ".DocumentationService") || strings.HasSuffix(name, ".RegistryService")
+	return discovery.IsReflectionService(name)
 }
 
 func shortServiceName(name string) string {

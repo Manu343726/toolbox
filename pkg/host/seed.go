@@ -48,14 +48,15 @@ type SeedOptions struct {
 	// is false by default: an operation nobody declared a capability for is not a
 	// tool, and "it was registered" is not a reason to make it callable.
 	ExposeAll bool
-	// ExcludeServices drops services from each description by name, in addition to
-	// the platform's own plumbing.
+	// ExcludeServices drops services from each description by name. It is the
+	// deployment's own list: the framework excludes nothing on its own, so what a
+	// subsystem serves is what a catalog holds unless somebody says otherwise.
 	ExcludeServices []string
-	// IncludeInfrastructure keeps the platform's own services in each description:
-	// health, the registry, the documentation service, and the framework's
-	// extension contracts. It is false by default, because an agent does not need
-	// the plumbing a subsystem runs to offer them something else.
-	IncludeInfrastructure bool
+	// IncludeReflection keeps the protocol's reflection services in each
+	// description. They exist so a client can discover a contract and provide no
+	// capability, so they are not part of an API and are left out by default.
+	// Nothing else is left out on the framework's own initiative.
+	IncludeReflection bool
 	// Only restricts registration to the named subsystems. Empty registers all.
 	Only []string
 }
@@ -224,8 +225,9 @@ func exposedAlready(ctx context.Context, registrar api.Registrar, operationID st
 	return exposures[operationID].Exposed
 }
 
-// describe reads one endpoint's contract and drops the platform's plumbing, so a
-// catalog an agent reads offers only what a user adopted.
+// describe reads one endpoint's contract and drops what a deployment excluded. What
+// remains is the subsystem's whole surface: a subsystem is not reduced to the part
+// of it somebody found useful.
 func (h *Host) describe(
 	ctx context.Context,
 	describer Describer,
@@ -242,26 +244,37 @@ func (h *Host) describe(
 		return api.API{}, err
 	}
 	enriched := described.API
+	if !options.IncludeReflection {
+		filtered := make([]api.Service, 0, len(enriched.Services))
+		for _, service := range enriched.Services {
+			if !discovery.IsReflectionService(service.Name) {
+				filtered = append(filtered, service)
+			}
+		}
+		enriched.Services = filtered
+	}
+	// Every service the subsystem serves is registered, including a provider's
+	// extension contracts. A provider subsystem exists to serve them, and a
+	// deployment that wants them as tools says so by exposing the operations; a
+	// subsystem is not hidden because of what it happens to implement.
 	kept := make([]api.Service, 0, len(enriched.Services))
 	for _, service := range enriched.Services {
-		if isPlumbing(service.Name, options) {
+		if isExcluded(service.Name, options) {
 			continue
 		}
 		kept = append(kept, service)
 	}
 	enriched.Services = kept
 	if len(enriched.Services) == 0 {
-		return api.API{}, fmt.Errorf("the subsystem serves no service a user adopted")
+		return api.API{}, fmt.Errorf("every service the subsystem serves was excluded")
 	}
 	return enriched, nil
 }
 
-// isPlumbing reports whether a service belongs to the platform rather than to a
-// capability a user adopted, and so stays out of the catalog by default.
-func isPlumbing(name string, options SeedOptions) bool {
-	if !options.IncludeInfrastructure && discovery.IsInfrastructureService(name) {
-		return true
-	}
+// isExcluded reports whether a deployment asked for a service to be left out of
+// the catalog. Exclusion is something a deployment states, not something the
+// framework decides from a name.
+func isExcluded(name string, options SeedOptions) bool {
 	for _, candidate := range options.ExcludeServices {
 		if strings.TrimSpace(candidate) == name {
 			return true

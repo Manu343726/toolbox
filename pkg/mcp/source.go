@@ -47,13 +47,51 @@ type EndpointSource struct {
 	mu        sync.RWMutex
 	endpoints []ServiceEndpoint
 	byService map[string]string
-	clients   map[string]*discovery.Client
+	// owners records every endpoint that serves a service, so a shared contract
+	// keeps all of its owners rather than one of them.
+	owners  map[string][]string
+	clients map[string]*discovery.Client
+}
+
+// ServiceOwner returns the endpoint that serves a service, or an empty name when
+// no endpoint does.
+//
+// A contract several subsystems serve has one owner on this path: reflection
+// reaches a service by name, so it reaches the endpoint that registered it, and
+// the first registration stands. That is the limit of what a name can address,
+// and it is why the catalog is where providers are told apart — there each one is
+// a separate API with its own identifier.
+func (s *EndpointSource) ServiceOwner(serviceName string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.byService[strings.TrimSpace(serviceName)]
+}
+
+// SharedServices returns the services more than one endpoint serves, in a stable
+// order.
+//
+// A contract several subsystems serve is how a format is contributed, so this is
+// not a fault. It is reported because a service name reaches one endpoint: a
+// deployment whose two subsystems claim the same contract by accident is looking
+// at the same list, and the only sign it has is that list.
+func (s *EndpointSource) SharedServices() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	shared := make([]string, 0, len(s.owners))
+	for service, owners := range s.owners {
+		if len(owners) > 1 {
+			shared = append(shared, service)
+		}
+	}
+	sort.Strings(shared)
+	return shared
 }
 
 // NewEndpointSource creates a routing source for the supplied endpoints.
 func NewEndpointSource(endpoints ...ServiceEndpoint) (*EndpointSource, error) {
 	source := &EndpointSource{
 		byService: make(map[string]string),
+		owners:    make(map[string][]string),
 		clients:   make(map[string]*discovery.Client),
 	}
 	for _, endpoint := range endpoints {
@@ -84,19 +122,15 @@ func (s *EndpointSource) addEndpoint(endpoint ServiceEndpoint) error {
 		if service.Name == "" {
 			return fmt.Errorf("service endpoint %q contains an unnamed service", endpoint.Name)
 		}
-		if previous, exists := s.byService[service.Name]; exists {
-			// A feature service advertised twice is a genuine conflict: two
-			// subsystems claim the same contract, and a caller could not tell
-			// which one it reached. The framework's extension contracts are
-			// different: every provider serves them on purpose, and the catalog
-			// reaches a specific one by identifier, so the first registration
-			// stands for reflection purposes only.
-			if isExtensionContract(service.Name) {
-				continue
-			}
-			return fmt.Errorf("service %q is advertised by both %q and %q", service.Name, previous, endpoint.Name)
+		// Several subsystems serving one contract is expected — that is how a
+		// format is added — so the name is recorded once, to the first endpoint that
+		// advertised it, and every owner is kept. A caller that needs a specific
+		// provider names it; a caller that reaches for the name alone is reaching
+		// for a shared surface.
+		if _, recorded := s.byService[service.Name]; !recorded {
+			s.byService[service.Name] = endpoint.Name
 		}
-		s.byService[service.Name] = endpoint.Name
+		s.owners[service.Name] = append(s.owners[service.Name], endpoint.Name)
 	}
 	s.endpoints = append(s.endpoints, endpoint)
 	return nil

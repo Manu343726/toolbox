@@ -20,7 +20,9 @@ import (
 func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	h, catalog, err := buildHost()
 	require.NoError(t, err)
-	require.NoError(t, h.Select("knowledge", "workflow", "apigrpc", "apitools"))
+	// Health and registry are started on purpose: their services declare
+	// capabilities, so the uniform rule has to hold for them too.
+	require.NoError(t, h.Select("knowledge", "workflow", "apigrpc", "apitools", "health", "registry"))
 	require.NoError(t, h.Start(context.Background()))
 	defer func() { require.NoError(t, h.Shutdown(context.Background())) }()
 
@@ -29,23 +31,28 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	require.NotEmpty(t, seed.Seeded, "the started subsystems are described from their own contracts")
 
 	registered := 0
-	// A provider subsystem serves only the framework's extension contracts, which
-	// are how the platform works rather than something an agent calls, so it is
-	// skipped. A feature subsystem registers.
-	skipped := map[string]bool{}
+	// Every started subsystem registers, including a provider: a provider exists
+	// to serve the framework's extension contracts, and a catalog that hid them
+	// would be hiding the mechanism it is made of. What an agent gets from them is
+	// decided by exposure, not by the name of a contract.
+	providers := map[string]bool{}
 	for _, entry := range seed.Seeded {
 		if entry.Skipped != "" {
-			skipped[entry.Subsystem] = true
-			assert.Contains(t, entry.Skipped, "no service a user adopted",
-				"only plumbing is skipped, and it says so")
+			assert.Contains(t, entry.Skipped, "every service the subsystem serves was excluded",
+				"a subsystem is skipped only when a deployment excluded all of it, and it says so")
 			continue
 		}
 		assert.Positive(t, entry.Operations, "subsystem %s registers its operations", entry.Subsystem)
 		if entry.Exposed > 0 {
 			registered++
 		}
+		if entry.APIID == "apigrpc" || entry.APIID == "apiopenapi" || entry.APIID == "apimcp" {
+			providers[entry.APIID] = true
+		}
 	}
-	assert.True(t, skipped["apigrpc"], "a provider subsystem contributes plumbing, not tools")
+	// This host started one provider, apigrpc, and it registers like any other API.
+	assert.Equal(t, map[string]bool{"apigrpc": true}, providers,
+		"a provider is registered as an ordinary API, with its own operations")
 	assert.Positive(t, registered, "at least one subsystem contributes tools")
 	for _, warning := range seed.Warnings {
 		assert.NotContains(t, warning, "stays hidden", "no declared operation is left unexposed: %v", warning)
@@ -79,14 +86,13 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	assert.True(t, byTool["knowledge__search"], "a declared operation is offered as a tool")
 	assert.True(t, byTool["workflow__validate_workflow"], "every subsystem contributes its declared operations")
 
-	// The health and registry services a subsystem also serves are plumbing, so
-	// they never become tools.
-	for name, exposed := range byTool {
-		assert.NotContains(t, name, "health", "platform plumbing is not a tool")
-		assert.NotContains(t, name, "registry", "platform plumbing is not a tool")
-		if exposed {
-			assert.NotContains(t, name, "reflection", "reflection is not a tool")
-		}
+	// A service is a tool because it declared a capability, whoever serves it: a
+	// health check or a registry is offered like any other, and the reflection
+	// services are not offered because they provide no capability at all.
+	assert.True(t, byTool["health__check"], "a declared capability is offered, whatever service declares it")
+	assert.True(t, byTool["registry__list_services"], "a declared capability is offered, whatever service declares it")
+	for name := range byTool {
+		assert.NotContains(t, name, "reflection", "reflection is not a tool")
 	}
 
 	// A call goes through the catalog's invoker to the real subsystem. The search

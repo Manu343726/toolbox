@@ -9,7 +9,6 @@ import (
 
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
-	"github.com/Manu343726/toolbox/pkg/discovery"
 )
 
 // This file is the MCP adapter for the standard API model. It reads a catalog of
@@ -84,11 +83,29 @@ func NewFromAPICatalog(ctx context.Context, catalog api.Catalog, invoker api.Inv
 	// The catalog's exposure decisions are read once, for every operation, so the
 	// gateway and the catalog cannot disagree about a single one.
 	exposures := readExposures(ctx, catalog, selected, catalogOptions.IgnoreExposure)
+	// Names are assigned across the whole surface before any tool is named, so an
+	// operation that shares a name with another is qualified rather than colliding
+	// with it — which is what several providers serving one contract produces.
+	candidates := make([]toolNameOwner, 0, 32)
+	for _, described := range selected {
+		for _, service := range described.Services {
+			for _, operation := range service.Operations {
+				candidates = append(candidates, toolNameOwner{
+					qualified: apiFeatureName(described, operation.Service),
+					owner:     described.ID,
+					method:    operation.Method,
+				})
+			}
+		}
+	}
+	sortOwners(candidates)
+	namer := newToolNamer(candidates)
+
 	server := newServer(options)
 	toolNames := make(map[string]string)
 	for _, described := range selected {
 		for _, entry := range apiFeatures(described, byID, invoker, options.Policy, exposures, options.InitialExposure) {
-			if err := server.addEntry(entry, toolNames); err != nil {
+			if err := server.addEntry(entry, toolNames, namer); err != nil {
 				return nil, err
 			}
 		}
@@ -154,12 +171,6 @@ func apiFeatures(
 ) []*featureEntry {
 	entries := make([]*featureEntry, 0, len(described.Operations()))
 	for _, service := range described.Services {
-		if discovery.IsInfrastructureService(service.Name) {
-			// A subsystem's own plumbing is not a tool: health checks, the registry,
-			// the documentation service, and the framework's extension contracts are
-			// how the platform works, not what a user adopted.
-			continue
-		}
 		for _, operation := range service.Operations {
 			entries = append(entries, apiFeatureEntry(described, service, operation, servers, invoker, policy, exposures, initialExposure))
 		}
@@ -230,6 +241,10 @@ func apiFeatureEntry(
 			Callable:        callable,
 			Capabilities:    tool.Capabilities,
 		},
+		// The API the operation belongs to is what tells it apart from an
+		// operation in another API that reduces to the same tool name — which
+		// is what several providers serving one contract produces.
+		owner:              described.ID,
 		inputSchema:        tool.InputSchema,
 		outputSchema:       tool.OutputSchema,
 		serviceDescription: firstNonEmpty(service.Description, described.Description),

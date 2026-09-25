@@ -21,7 +21,7 @@ by every agent, workflow, and model.
 | External tool calls               | Declared tool capabilities and policy-gated invocation               | Real capability manifests, permission scopes, sandboxing, typed results    |
 | Multi-agent definition and coordination | Versioned agent profiles with capability references             | Coordination contract, handoffs, shared-context rules, escalation, loop guards |
 | Workflow definition               | Versioned workflow definitions with validation                       | Execution, branching, retries, approvals, auditable run record            |
-| API integration                   | Standard description, reusable format packages for OpenAPI, protobuf contracts, and MCP with addressable provider subsystems, catalog with format index, automatic exposure of a host's own subsystems, on-demand operation exposure, OpenAPI translation and adapted serving | A package, and optionally a subsystem, for each format a user wants; nothing framework-side |
+| API integration                   | Standard description, reusable format packages for OpenAPI, protobuf contracts, and MCP with addressable provider subsystems, catalog with format index, automatic exposure of a host's own subsystems, on-demand operation exposure, OpenAPI translation and adapted serving, one exposure rule for every feature | A package, and optionally a subsystem, for each format a user wants; nothing framework-side |
 
 The supporting framework is green and independently buildable; the capability
 services are reference implementations, and the product pillars above are the
@@ -62,6 +62,8 @@ P0/P1 roadmap.
 - `pkg/mcp` MCP gateway built on the official Go MCP SDK.
 - Runtime feature exposure, documentation introspection, and generic `call_rpc`.
 - Independent subsystem MCP commands and an aggregated host `mcp` command.
+- One exposure rule for every feature: no service is withheld by name, and a tool
+  name several operations claim is qualified with the API that tells them apart.
 - Graceful server startup and shutdown.
 
 ### Reference subsystems

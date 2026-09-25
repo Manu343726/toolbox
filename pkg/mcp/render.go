@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/Manu343726/toolbox/pkg/api"
-	"github.com/Manu343726/toolbox/pkg/discovery"
 )
 
 // This file is the translation from the standard model to an MCP tool.
@@ -65,11 +64,6 @@ type Rendered struct {
 
 // RenderOptions configures a translation.
 type RenderOptions struct {
-	// IncludeInfrastructure keeps a subsystem's own services — health, the
-	// registry, the documentation service, and the framework's extension
-	// contracts. It is false by default, because an agent does not need a
-	// platform's plumbing offered to it.
-	IncludeInfrastructure bool
 	// ExcludeTools drops the named tools.
 	ExcludeTools []string
 	// Only keeps the named tools.
@@ -88,7 +82,10 @@ func Render(described api.API, options RenderOptions) (Rendered, error) {
 	keep := toolFilter(options)
 	tools := make([]ToolDefinition, 0, len(described.Operations()))
 	warnings := make([]string, 0)
-	for _, feature := range describeFeatures(described, options.IncludeInfrastructure) {
+	// Every operation the description declares is a candidate, whoever declared
+	// it. What a deployment exposes is decided by exposure, not by the name of the
+	// service it came from.
+	for _, feature := range describeFeatures(described) {
 		if !keep(feature.operation.Name) {
 			continue
 		}
@@ -197,12 +194,9 @@ func declaresEffect(operation api.Operation, effect api.SideEffect) bool {
 
 // describeFeatures turns a description's operations into features, in the order a
 // client sees them.
-func describeFeatures(described api.API, includeInfrastructure bool) []feature {
+func describeFeatures(described api.API) []feature {
 	features := make([]feature, 0, len(described.Operations()))
 	for _, service := range described.Services {
-		if !includeInfrastructure && discovery.IsInfrastructureService(service.Name) {
-			continue
-		}
 		for _, operation := range service.Operations {
 			features = append(features, feature{
 				described: described,

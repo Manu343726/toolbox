@@ -250,11 +250,19 @@ A host can register what it runs in the catalog, with nothing written per subsys
    capability covers is not a tool, and an operation the catalog's policy refuses
    is reported rather than forced.
 
-Subsystems whose services are all platform plumbing — health, the registry, the
-documentation service, and the framework's extension contracts — are skipped, with
-a reason. The MCP gateway can build its tool surface from that catalog, naming the
-same operations as the reflection path, so the source of the surface can be chosen
-per deployment.
+Every started subsystem is registered whole. Nothing is left out because of what it
+happens to serve: health, the registry, and the framework's own extension contracts
+are services like any other, and a provider subsystem exists to serve the extension
+contracts. Whether an agent gets one is decided by whether it declared a capability
+and whether the deployment exposes it, never by a list of service names. A
+deployment that wants a service out of the catalog says so by name.
+
+The MCP gateway can build its tool surface from that catalog, naming the same
+operations as the reflection path, so the source of the surface can be chosen per
+deployment. Several providers serve one contract, so two operations can reduce to
+the same short tool name. A name more than one operation claims is qualified with
+the API or the endpoint that tells them apart, and a name nothing else needs is left
+alone, so a name an agent already learned does not change.
 
 The Model Context Protocol is itself one of these formats, in the same package that
 serves it: a live MCP server is read through its own tool list, a published manifest
@@ -294,8 +302,15 @@ Each generated MCP instance owns its feature-exposure state. A subsystem
 command creates an instance for its mounted services; `toolbox mcp` creates
 one instance over all selected host descriptors. Introspection tools remain
 available when the initial feature surface is empty, allowing an agent to
-list, read documentation for, expose, and hide individual methods. See
-[`docs/mcp.md`](mcp.md) for the tool contract and deployment commands.
+list, read documentation for, expose, and hide individual methods.
+
+Every service a subsystem serves is a candidate. A tool appears because a
+capability was declared for it and the deployment exposed it, not because of
+what its service is called, so a health check and a provider's extension
+contract are treated exactly like a feature subsystem's own operations. Only
+the protocol's reflection services are left out, because they provide no
+capability to expose. See [`decisions/0007-one-rule-for-every-feature.md`](decisions/0007-one-rule-for-every-feature.md)
+and [`docs/mcp.md`](mcp.md) for the tool contract and deployment commands.
 
 ## 9. Composition modes
 
