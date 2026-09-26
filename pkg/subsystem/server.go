@@ -88,6 +88,14 @@ type Config struct {
 	HandshakeWriter io.Writer
 	// Dependencies are subsystem-level dependencies merged into the descriptor.
 	Dependencies []string
+	// Configure contributes to the composition this subsystem is part of, rather than only
+	// serving one. See compose.go for what a contribution is and is not.
+	//
+	// It is a field rather than a second registration because contributing is a property of
+	// the subsystem: the same built server contributes in one deployment and merely runs in
+	// another, and a composition that had to be told which of its subsystems were
+	// contributors would be a second list of everything.
+	Configure func(context.Context, Compositor) error
 }
 
 // Handshake is emitted by a running subsystem for a supervising process.

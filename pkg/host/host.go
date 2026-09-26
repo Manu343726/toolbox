@@ -111,13 +111,33 @@ func (h *Host) Start(ctx context.Context) error {
 	h.startOrder = nil
 	h.mu.Unlock()
 
+	// Build everything that was selected, before any of it is started, so a contributing
+	// subsystem has a composition to contribute to and a failure in construction is a
+	// startup failure rather than a half-running deployment.
+	built := make([]*subsystem.Server, 0, len(names))
 	for _, name := range names {
-		factory := factories[name]
-		server, err := factory()
+		server, err := factories[name]()
 		if err != nil {
-			_ = h.Shutdown(context.Background())
 			return fmt.Errorf("construct subsystem %q: %w", name, err)
 		}
+		built = append(built, server)
+	}
+
+	// Then the contributions, in full, before anything is asked to work. See compose.go
+	// for why the phases are separate: a deployment that resolved while a contributor was
+	// still deciding what it contributes would see a configuration that is not the one
+	// anybody wrote.
+	configured, err := h.contribute(ctx, built)
+	if err != nil {
+		return err
+	}
+	built = configured
+
+	// Then start, and register, what actually serves. A subsystem that only contributed is
+	// finished: it has no listener, no port and no registry entry, because there is nothing
+	// to reach it for.
+	for _, server := range registering(built) {
+		name := server.Descriptor().SubsystemName
 		if err := server.Start(ctx); err != nil {
 			_ = h.Shutdown(context.Background())
 			return fmt.Errorf("start subsystem %q: %w", name, err)
@@ -169,6 +189,18 @@ func (h *Host) Shutdown(ctx context.Context) error {
 }
 
 // Servers returns a snapshot of currently started servers by host name.
+// StartOrder is the order the deployment's subsystems started in.
+//
+// It is the selection order, then whatever the contributions added in the order they were
+// contributed, minus anything that serves nothing. It is reported because a deployment's
+// start order is a fact somebody debugging a startup needs, and reconstructing it from the
+// order of a map is not possible.
+func (h *Host) StartOrder() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.startOrder...)
+}
+
 func (h *Host) Servers() map[string]*subsystem.Server {
 	h.mu.Lock()
 	defer h.mu.Unlock()
