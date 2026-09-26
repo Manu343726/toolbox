@@ -118,10 +118,71 @@ The format also allows `license`, `compatibility`, `metadata` and `allowed-tools
 fields. **Not yet decided:** which of these the framework carries through, and
 `allowed-tools` in particular has a security question attached to it — see *Security*.
 
-## Where skills come from: catalogs
+## Toolbox skills are templates; what is served is distilled
 
-Skills do not live in one place. They live in **catalogs**, and a project says which
-ones it wants.
+A skill in a Toolbox catalog is a **template**. It is written in the standard format
+and it is portable, and it is also allowed to carry Toolbox's own frontmatter
+properties — under the reverse-domain prefix
+`com.github.manu343726.toolbox/`, following the convention the MCP Skills extension
+uses for its own reserved keys.
+
+What the MCP skills feature returns is **not the template**. It is a distillation of
+the template, produced for the client that is asking, from what that client is
+actually able to do with it.
+
+This is the difference between a file and a served artifact, and it is the reason
+distillation exists at all: a standard skill is written for the union of all readers,
+and a particular client may read only part of it. Serving the template unaltered hands
+every client the whole thing and lets it decide what to ignore, which is the client
+doing the framework's work.
+
+The first targets are the common cases:
+
+| Client | Known shape |
+|---|---|
+| **opencode** | Reads `SKILL.md` directories (`.agents/skills/`) natively; over MCP it models resources with `uri`/`mimeType`/`description` and surfaces a skill as a command with `source: "skill"` |
+| **Claude Code** | `SKILL.md` directories; frontmatter `name` and `description` are what it selects on |
+| **Codex** | *Not verified — see below* |
+| **VS Code Copilot** | *Not verified — see below* |
+
+**Not yet decided, and it is the substance of this phase:** what distillation *does*.
+For each target it has to be stated what is preserved, what is dropped, and what is
+rewritten — and the answer is a property of the client, not a preference. Three
+questions carry most of it:
+
+- **Selection.** `name` and `description` are the only fields the standard requires,
+  and they are what a host reads to decide whether to load a skill. Does distillation
+  rewrite the description to mention the tools this client has, or is the description
+  the author's and left alone?
+- **Supporting files.** The manifest is complete on the wire whatever the client can
+  do with it. Does a client that will not follow a reference into `references/` get a
+  manifest without it, or the whole skill with the file present and unread?
+- **Executable content.** A `scripts/` file is text either way. Is it in the manifest
+  for a client that cannot run it, and does `allowed-tools` — ignored, per *Security* —
+  leave any trace at all in the distilled output?
+
+### What a Toolbox extension may add
+
+A template may carry Toolbox properties. `enabled` is one: a local skill whose
+frontmatter says it is not enabled is part of the project and is not served. This is
+how a skill a person put in their own project gets switched off, and it is a property
+of the template rather than of the project's configuration, which is why a project does
+not need a second list to hold exclusions.
+
+**Not yet decided:** the exact property names and their types, and whether the
+distilled output carries them. They are namespaced under the prefix above precisely so
+a client that does not know them ignores them, and so a future Toolbox can add more
+without a second naming scheme.
+
+**Answered by checking rather than assuming:** the Agent Skills standard has **no**
+`enabled` flag. Its frontmatter is exactly `name`, `description`, `license`,
+`compatibility`, `metadata` and `allowed-tools`. It is also *silent* on unknown fields
+— it defines what each field means and never declares another key invalid — and the MCP
+Skills extension reserves only `io.modelcontextprotocol/`-prefixed keys *inside*
+`metadata`. So an extension is permitted, and a namespaced key is the shape least
+likely to upset a reader that is strict about its own.
+
+## Catalogs
 
 A **catalog** is a source of skills. It is a role a subsystem can play, in the same
 way `parser`, `adapter` and `invoker` are roles in the API layer: a role has a
@@ -299,12 +360,41 @@ What it is not yet pinned down, because it is a provider rather than part of the
 how it enumerates (`skills.sh` presents a browsable directory and a
 `npx skills add <owner/repo>` install path, and no public JSON API was found at the
 obvious endpoints), how a skill's files are obtained, how a version or a pin is
-expressed, how it behaves offline, and what a skill from it is trusted to be. The last
-of these is not a detail — see *Security*.
+expressed, and how it behaves with no network.
 
-**Not yet decided:** what a skill from this catalog is trusted to be, and how a project
-pins one. Both are in *Security* and in the catalog's own design rather than in the
-model above.
+### The git catalog
+
+The second catalog implementation is backed by a **git repository**, and it is
+**read-write**: adding a skill to it is a change to a repository.
+
+Its storage is the subsystem's own, not a checkout wherever the project happens to be:
+
+```text
+<deployment data>/skillcatalogs/<name>/     a clone, kept by the catalog
+```
+
+The repository is always present as a clone in that storage. A modification is synced
+by **committing and pushing**, and a catalog can also be **synced from its remote**,
+which is a `git pull --rebase`.
+
+**A conflict is reported, never resolved by guessing.** If a sync cannot be completed,
+the error says so and names the path to the repository, because the person who has to
+look at it is the person who can decide what it meant. A catalog that resolved its own
+conflicts would be choosing a side in someone else's repository.
+
+**Not yet decided:** the identity a commit is made with, and whether the catalog commits
+on every modification or batches them. Both are visible facts in somebody's history,
+and neither should be a default nobody chose.
+
+### Copying and moving between catalogs
+
+The skills subsystem offers **two independent operations** — `copy` and `move` — and
+neither is defined in terms of the other, so neither acquires the other's failure cases.
+
+Both are refused when the **target** cannot be written: a read-only catalog does not
+accept a skill, and saying so is the point of declaring one. A `move` also needs a
+source it can remove from, which is its own condition rather than an inference from
+copying.
 
 ## Serving skills over MCP
 
@@ -499,13 +589,12 @@ Open:
   its content. A catalog prefix is not the same thing as an origin: a skill from
   `skills.sh` is third-party content, and a project that includes one should be able to
   see that before the skill's text reaches a model.
-- **Not yet decided:** whether the framework may rewrite a person's `config.yaml` when
-  an agent asks it to add a skill. This is the sharpest question in the feature. It is a
-  write to a file a human owns and edits by hand, inside a directory that is theirs, and
-  an agent doing it changes what their next review will contain. The options are not
-  equally attractive: refuse the write and have the tool report the reference to add,
-  permit it and make the write loud and reversible, or require an explicit
-  per-deployment opt-in for the write tools.
+- **A change to a project's configuration file is confirmed by the user.** Settled,
+  and settled as a general framework rule rather than a skills one: a person writes and
+  reviews their project's configuration, so an operation that would change it asks first
+  and names the file and the change. It is AGENTS.md rule 17, and it applies to any
+  feature whose job involves a project saying something new about itself — so the tools
+  that add, enable and disable a skill go through it, and so does anything added later.
 - **Not yet decided:** what a skill from a third-party catalog is trusted to be,
   including whether including one is a decision a project must make by name — which the
   qualified-reference model already gives a place to record.

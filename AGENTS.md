@@ -145,6 +145,16 @@ Read these before making architectural changes:
     contributes**, because first-match-wins cannot express "everything to the file
     and this project's problems also to the pager".
 
+17. **A change to a project's configuration file is the user's to confirm.** Not
+    because a configuration file is fragile — it is text — but because it is the one
+    file in a project that states what the deployment *is*, and a person writes and
+    reviews it. An agent that changes it changes what that person's next review will
+    contain, in a way they did not type. So a framework operation that would write a
+    project's configuration asks first, and its answer names the file and the change
+    rather than making it quietly. This is a general rule and not a per-feature one:
+    any feature whose job involves a project saying something new about itself goes
+    through it.
+
 ## OpenCode MCP sessions
 
 The project `opencode.json` registers two local MCP servers for OpenCode
