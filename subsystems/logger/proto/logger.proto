@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+package toolbox.logger.v1;
+
+option go_package = "github.com/Manu343726/toolbox/subsystems/logger/loggerv1;loggerv1";
+
+// LoggerService exposes a deployment's log fanout to callers that are not
+// this process, so an agent or a service it started can send entries
+// through the same routes the rest of the deployment uses.
+//
+// The fanout itself is not configurable here for a running deployment. The
+// sinks a deployment has and the routes between them belong to its
+// configuration file; this service reads that file, reports it, and
+// accepts entries. What an entry reaches is decided by the deployment,
+// not by the caller.
+service LoggerService {
+  // @toolbox.side-effects read_only
+  // GetConfig returns the deployment's fanout as it is currently
+  // configured: its minimum level, the sinks it has, the routes between
+  // them, and which project the answers are about.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // @toolbox.side-effects writes_state
+  // SetConfig records a project scope for entries the caller sends, so a
+  // route that matches on a project can tell which entries are that
+  // project's.
+  //
+  // It does not change where entries go. A deployment's routes are its
+  // own configuration, and a caller that could widen the fanout by RPC
+  // would be a caller that could send anything anywhere.
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
+
+  // @toolbox.side-effects writes_state
+  // Log records one entry.
+  //
+  // The entry reaches every route that matches it, which is the same
+  // answer an in-process slog call gets. An entry that matches no route
+  // is not an error: it was recorded by nobody because nothing asked for
+  // it, and the count of those is reported by GetConfig.
+  rpc Log(LogRequest) returns (LogResponse);
+}
+
+// LogLevel is a severity, ordered from most to least verbose.
+enum LogLevel {
+  // No level was supplied. The entry is treated as info.
+  LOG_LEVEL_UNSPECIFIED = 0;
+  // Fine-grained detail, off unless a deployment asked for it.
+  LOG_LEVEL_DEBUG = 1;
+  // Normal progress.
+  LOG_LEVEL_INFO = 2;
+  // Something is wrong but the work continued.
+  LOG_LEVEL_WARN = 3;
+  // Something failed.
+  LOG_LEVEL_ERROR = 4;
+}
+
+// LogValue is one attribute on an entry.
+//
+// A string message with key/value pairs is the shape the standard
+// library's structured logging has, and a caller that had to flatten its
+// own attributes into a string to send them would have to parse them
+// again on the other side.
+message LogValue {
+  // The attribute's key.
+  string key = 1;
+  // The attribute's value, rendered as text.
+  //
+  // It is text because a log entry is read by people and by systems that
+  // each want their own types, and because the standard library renders
+  // any value as text when a sink is text.
+  string value = 2;
+}
+
+// LogHandler declares one sink in a deployment's fanout.
+message LogHandler {
+  // The name routes refer to this sink by.
+  string name = 1;
+  // The backend that produces it, such as text, json, null or logfile.
+  string provider = 2;
+  // The minimum severity this sink receives.
+  LogLevel level = 3;
+  // The backend's own settings, which are the provider's business.
+  map<string, string> options = 4;
+}
+
+// LogRoute describes one way entries reach sinks.
+message LogRoute {
+  // The route's name, for a diagnostic.
+  string name = 1;
+  // The minimum severity an entry must reach to match, or unspecified
+  // when the route said none.
+  LogLevel level = 2;
+  // Attributes an entry must carry to match, as key/value pairs.
+  map<string, string> attributes = 3;
+  // The names of the sinks this route sends to.
+  repeated string handlers = 4;
+  // Attributes attached to whatever the route matches.
+  map<string, string> add = 5;
+}
+
+// GetConfigRequest asks for a deployment's fanout.
+message GetConfigRequest {
+  // The project whose fanout is wanted, which is the deployment's own
+  // when empty.
+  //
+  // A project may be given its own configuration file, so the answer is
+  // the fanout that project would actually log into.
+  string workspace = 1;
+}
+
+// GetConfigResponse describes a deployment's fanout.
+message GetConfigResponse {
+  // The minimum severity an entry must reach to be routed at all.
+  LogLevel level = 1;
+  // The sinks, in a stable order.
+  repeated LogHandler handlers = 2;
+  // The delivery plan, in order.
+  repeated LogRoute routes = 3;
+  // The project this fanout belongs to, empty for the deployment's own.
+  string workspace = 4;
+  // The backends this deployment can name, so a caller asking to send
+  // somewhere can find out where it may send.
+  repeated string providers = 5;
+  // How many entries a sink refused to write.
+  int64 failures = 6;
+  // How many entries matched no route and reached no sink.
+  int64 unrouted = 7;
+}
+
+// SetConfigRequest declares the project a caller is acting for.
+message SetConfigRequest {
+  // The project name, recorded for the entries the caller then sends.
+  //
+  // It is recorded rather than applied because routes are the
+  // deployment's: a caller may say which project it is working for, and
+  // a route that matches on a project decides where that goes.
+  string workspace = 1;
+}
+
+// SetConfigResponse confirms the project a caller is acting for.
+message SetConfigResponse {
+  // The project recorded, which is what later entries are tagged with.
+  string workspace = 1;
+}
+
+// LogRequest is one entry.
+message LogRequest {
+  // The message a person reads.
+  string message = 1;
+  // The entry's severity, treated as info when unspecified.
+  LogLevel level = 2;
+  // The entry's attributes, in the order the caller sent them.
+  repeated LogValue attributes = 3;
+  // The project the entry belongs to, which is the caller's recorded
+  // project when empty.
+  string workspace = 4;
+  // The component that produced the entry, which is the attribute routes
+  // most often match on.
+  string logger = 5;
+}
+
+// LogResponse reports what happened to one entry.
+message LogResponse {
+  // Whether the entry reached at least one sink.
+  bool routed = 1;
+  // The names of the sinks it reached, so a caller can see where its
+  // entry went without reading the deployment's logs.
+  repeated string handlers = 2;
+}

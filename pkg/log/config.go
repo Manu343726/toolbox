@@ -45,6 +45,17 @@ type HandlerConfig struct {
 	Options map[string]any
 }
 
+// LevelOrInfo is the sink's minimum, or info when the configuration named none.
+//
+// A sink that named none is reporting that it has no opinion, and info is the severity a
+// reader should assume in that case: it is the standard library's own zero value.
+func (h HandlerConfig) LevelOrInfo() slog.Level {
+	if h.Level == nil {
+		return slog.LevelInfo
+	}
+	return *h.Level
+}
+
 // Route decides which sinks receive an entry.
 type Route struct {
 	// Name identifies the route in a diagnostic and in the configuration it came from.

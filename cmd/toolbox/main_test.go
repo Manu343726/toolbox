@@ -2,27 +2,28 @@ package main
 
 import (
 	"context"
-	"github.com/Manu343726/toolbox/pkg/config"
 	"net/http"
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/Manu343726/toolbox/pkg/config"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 	registryv1connect "github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBuildHostRegistersIndependentSubsystems(t *testing.T) {
-	h, _, err := buildHost(config.Config{}, "")
+	h, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
 	require.NoError(t, err)
 	assert.NoError(t, h.Select("workflow"))
 	assert.NoError(t, h.Select("agent", "knowledge"))
 }
 
 func TestAllModeRegistersEndpoints(t *testing.T) {
-	h, _, err := buildHost(config.Config{}, "")
+	h, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
 	require.NoError(t, err)
 	require.NoError(t, h.Start(context.Background()))
 	defer func() { require.NoError(t, h.Shutdown(context.Background())) }()
@@ -36,8 +37,20 @@ func TestAllModeRegistersEndpoints(t *testing.T) {
 	assert.Len(t, response.Msg.GetServices(), len(h.Servers()))
 }
 
+// rootFor builds the real command in a directory of its own.
+//
+// A deployment that was given no configuration file writes its default log into the working
+// directory, which is the right behaviour for a real deployment and would otherwise leave log
+// files in the source tree. Every test that composes the command goes through here, so the
+// isolation is one line rather than one per test.
+func rootFor(t *testing.T) *cobra.Command {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	return newRootCommand()
+}
+
 func TestRootCommandFlags(t *testing.T) {
-	command := newRootCommand()
+	command := rootFor(t)
 	// Persistent, because every subcommand resolves the same four things. A local
 	// root flag is invisible to a subcommand, which a user meets as "flag accessed
 	// but not defined" on `toolbox mcp` rather than as anything a test would
@@ -50,13 +63,13 @@ func TestRootCommandFlags(t *testing.T) {
 	// flag only reaches a command's own flag set during parsing, so a static check
 	// would pass while the command still failed at run time — which is exactly how
 	// this broke.
-	parsed := newRootCommand()
+	parsed := rootFor(t)
 	parsed.SetArgs([]string{"mcp", "--core", "core.internal:7000", "--port", "7100", "--scope", "acme", "--help"})
 	require.NoError(t, parsed.Execute(), "every flag is reachable from the subcommand")
 }
 
 func TestRootCommandIncludesAggregatedMCP(t *testing.T) {
-	command := newRootCommand()
+	command := rootFor(t)
 	mcpCommand, _, err := command.Find([]string{"mcp"})
 	require.NoError(t, err)
 	assert.Equal(t, "mcp", mcpCommand.Name())

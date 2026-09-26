@@ -74,6 +74,10 @@ const (
 	KeyMCPHost      = "mcp.host"
 	KeyMCPPort      = "mcp.port"
 	KeyPolicy       = "policy"
+	// KeyLogging is the deployment's log fanout: which sinks exist and which entries go to
+	// which of them. It is stated as a section rather than as individual keys because its
+	// shape belongs to pkg/log and the logger subsystem, not here.
+	KeyLogging = "logging"
 )
 
 // Launch is how the daemon's lifecycle is managed. It is a Go enum rather than a protobuf
@@ -185,6 +189,22 @@ type Config struct {
 	Scope string
 	// Path is the configuration file that was read, or empty when none was.
 	Path string
+	// Logging is the deployment's log fanout as the configuration file states it, and empty
+	// when the file has no logging section.
+	//
+	// It is a generic map on purpose: its shape is pkg/log's and the logger subsystem's
+	// business, and this package's job is to find the file, refuse a key nobody understands
+	// at the top level, and hand the section over. It is read from the file alone, because a
+	// deployment's routes are the deployment's rather than an invocation's.
+	Logging map[string]any
+	// LoggingBaseDir is what a relative handler path in the logging section resolves against.
+	//
+	// It is the directory holding the configuration file, except for a project's file: that
+	// lives in a .toolbox directory inside the project, and a project saying its logs go to
+	// "logs/project.log" means a file in the project rather than a directory called logs
+	// inside its configuration directory. Resolving against the file's own directory is what
+	// would otherwise happen, and it is never what anyone means.
+	LoggingBaseDir string
 	// sources records where each value came from, keyed by configuration key.
 	sources map[string]Source
 }
@@ -225,6 +245,19 @@ var knownKeys = map[string]bool{
 	KeyMCPHost:      true,
 	KeyMCPPort:      true,
 	KeyPolicy:       true,
+	KeyLogging:      true,
+}
+
+// opaqueKeys are sections a configuration file may state whose contents this package does not
+// validate.
+//
+// The logging fanout is one. A second reader of the same keys would be a second thing to keep
+// in step with the first, and a fanout validated twice is a fanout validated by whichever
+// reader happened to be stricter. Listing the section as known and stopping here means a
+// misspelled key inside it is still caught — by the reader that owns it, with its own message
+// naming the settings it accepts.
+var opaqueKeys = map[string]bool{
+	KeyLogging: true,
 }
 
 // Loader reads the configuration layers in order and reports what each value resolved to.
@@ -380,6 +413,19 @@ func SearchPath(workDir string) []string {
 	return candidates
 }
 
+// baseDirFor is the directory a relative path in a configuration file resolves against.
+func baseDirFor(path string) string {
+	dir := filepath.Dir(path)
+	if filepath.Base(dir) == ProjectDir {
+		// A project's own file, so the project is the directory above its .toolbox directory.
+		// A user-level file is not in one, and stays where it is.
+		if root := filepath.Dir(dir); root != "" && root != dir {
+			return root
+		}
+	}
+	return dir
+}
+
 // projectFile walks up from a directory looking for a per-project configuration file.
 //
 // Walking up is what makes a project's configuration work the same in a subdirectory as at
@@ -488,7 +534,7 @@ func flattenKeys(settings map[string]any, prefix string) []string {
 		if prefix != "" {
 			key = prefix + "." + name
 		}
-		if nested, ok := value.(map[string]any); ok {
+		if nested, ok := value.(map[string]any); ok && !opaqueKeys[key] {
 			keys = append(keys, flattenKeys(nested, key)...)
 			continue
 		}
@@ -553,6 +599,15 @@ func (l *Loader) Resolve(explicit string) (Config, error) {
 		Scope:      l.scope(),
 		Path:       l.path,
 		sources:    l.provenance(),
+	}
+	if l.path != "" {
+		// The base directory is a property of the file rather than of the section, so a
+		// deployment whose configuration has no logging section still resolves a relative
+		// path against its own project.
+		resolved.LoggingBaseDir = baseDirFor(l.path)
+		if l.viper.InConfig(KeyLogging) {
+			resolved.Logging = l.viper.GetStringMap(KeyLogging)
+		}
 	}
 
 	launch, err := ParseLaunch(l.viper.GetString(KeyDaemonLaunch))
@@ -677,7 +732,7 @@ func validPort(port int, what string) error {
 // that could have supplied the value.
 func (l *Loader) provenance() map[string]Source {
 	sources := make(map[string]Source, 6)
-	for _, key := range []string{KeyDaemonHost, KeyDaemonPort, KeyDaemonLaunch, KeyMCPHost, KeyMCPPort, KeyPolicy} {
+	for _, key := range []string{KeyDaemonHost, KeyDaemonPort, KeyDaemonLaunch, KeyMCPHost, KeyMCPPort, KeyPolicy, KeyLogging} {
 		switch {
 		case l.flagChanged(key):
 			sources[key] = SourceFlag
@@ -784,4 +839,26 @@ func (c Config) sourcesPhrase() string {
 		return string(host)
 	}
 	return string(host) + " host, " + string(port) + " port"
+}
+
+// LoggingRoutes reports how many routes the deployment's fanout has, for a reader that wants
+// to say something about it without knowing its shape.
+//
+// It is a count rather than a description because the shape belongs to the reader that owns
+// it, and a count is the one fact about a fanout that is true whatever the shape turns out to
+// be.
+func (c Config) LoggingRoutes() (handlers, routes int) {
+	for name, value := range c.Logging {
+		switch name {
+		case "handlers":
+			if table, ok := value.(map[string]any); ok {
+				handlers = len(table)
+			}
+		case "routes":
+			if list, ok := value.([]any); ok {
+				routes = len(list)
+			}
+		}
+	}
+	return handlers, routes
 }

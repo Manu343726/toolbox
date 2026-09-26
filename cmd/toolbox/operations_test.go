@@ -33,7 +33,7 @@ func TestEveryOperationInTheContractIsACommand(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, names, "%s serves no contract, so this test proves nothing", subsystem)
 
-			root := newRootCommand()
+			root := rootFor(t)
 			offered := 0
 			for _, service := range names {
 				schema, err := cli.DescribeLinkedService(service)
@@ -60,7 +60,7 @@ func TestEveryOperationInTheContractIsACommand(t *testing.T) {
 // and the test looks for them where they are rather than where a flat list would be easier
 // to assert on.
 func TestTheDeploymentCommandsAndTheOperationsCoexist(t *testing.T) {
-	root := newRootCommand()
+	root := rootFor(t)
 	names := commandNames(root)
 	for _, wanted := range []string{"daemon", "mcp", "knowledge", "registry", "workflow"} {
 		assert.Contains(t, names, wanted)
@@ -78,7 +78,7 @@ func TestTheDeploymentCommandsAndTheOperationsCoexist(t *testing.T) {
 // Every operation command carries the flags its contract declares, typed as the contract
 // declares them. A command that lost a field cannot make the call its contract describes.
 func TestEveryOperationCommandCarriesItsContractFlags(t *testing.T) {
-	search := findCommand(newRootCommand(), "Search")
+	search := findCommand(rootFor(t), "Search")
 	require.NotNil(t, search)
 
 	// SearchRequest declares query, limit and tags.
@@ -93,7 +93,7 @@ func TestEveryOperationCommandCarriesItsContractFlags(t *testing.T) {
 // A nested message is flattened, in the main CLI as in a subsystem command. The rule is one
 // rule; a second implementation here would be a second rule, free to disagree.
 func TestANestedMessageIsFlattenedInTheMainCLI(t *testing.T) {
-	put := findCommand(newRootCommand(), "PutSource")
+	put := findCommand(rootFor(t), "PutSource")
 	require.NotNil(t, put)
 
 	require.NotNil(t, put.Flags().Lookup("source"), "the message is addressable")
@@ -106,7 +106,7 @@ func TestANestedMessageIsFlattenedInTheMainCLI(t *testing.T) {
 // the method exists can, and a caller who tries is told why it cannot be called — which is a
 // different answer from a connection failure, and points at a different fix.
 func TestAStreamingMethodIsOfferedAndRefused(t *testing.T) {
-	require.NotNil(t, findCommand(newRootCommand(), "WatchServices"),
+	require.NotNil(t, findCommand(rootFor(t), "WatchServices"),
 		"the method is a command")
 
 	_, _, err := runRoot(t, "registry", "watch-services")
@@ -161,7 +161,7 @@ func TestTheMainCLIAndTheSubsystemCommandOfferTheSameFlags(t *testing.T) {
 	standalone := subsystemFlagsFor(t, "knowledge", "Search")
 	require.NotEmpty(t, standalone, "the subsystem command declares flags, or this proves nothing")
 
-	main := findCommand(newRootCommand(), "Search")
+	main := findCommand(rootFor(t), "Search")
 	require.NotNil(t, main)
 	for name, kind := range standalone {
 		flag := main.Flags().Lookup(name)
@@ -176,7 +176,7 @@ func TestTheMainCLIAndTheSubsystemCommandOfferTheSameFlags(t *testing.T) {
 // The help of an operation command names the contract it came from, so a reader who found a
 // command by guessing can find the contract that defines it.
 func TestAnOperationCommandNamesItsContract(t *testing.T) {
-	search := findCommand(newRootCommand(), "Search")
+	search := findCommand(rootFor(t), "Search")
 	require.NotNil(t, search)
 	assert.Contains(t, search.Long, "toolbox.knowledge.v1.KnowledgeService/Search")
 	assert.Contains(t, search.Short, "relevant passages",
@@ -187,7 +187,7 @@ func TestAnOperationCommandNamesItsContract(t *testing.T) {
 // starting it.
 func serviceNamesFor(t *testing.T, subsystem string) ([]string, error) {
 	t.Helper()
-	composed, _, err := buildHost(config.Config{}, "")
+	composed, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func serviceNamesFor(t *testing.T, subsystem string) ([]string, error) {
 // contract.
 func subsystemFlagsFor(t *testing.T, subsystem, method string) map[string]string {
 	t.Helper()
-	composed, _, err := buildHost(config.Config{}, "")
+	composed, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
 	require.NoError(t, err)
 	require.NoError(t, composed.Select(subsystem))
 	require.NoError(t, composed.Start(t.Context()))
@@ -303,7 +303,7 @@ func runRootInContext(t *testing.T, ctx context.Context, args ...string) (string
 	t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	root := newRootCommand()
+	root := rootFor(t)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)

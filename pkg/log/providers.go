@@ -170,12 +170,13 @@ func truthy(value any) bool {
 // started, in one place, so a configuration names a backend and does not care which kind it
 // is.
 type Registry struct {
-	// BaseDir is what a relative path in a configuration is resolved against — the directory
-	// holding the file that declared it.
+	// BaseDir is what a relative path in a configuration is resolved against — the project
+	// or directory the declaring file belongs to.
 	//
 	// It is what makes "this project's logs go to a file in this project" mean that. The
-	// alternative, a path relative to wherever the process happened to start, would put a
-	// project's log in a directory that has nothing to do with the project.
+	// alternatives both put a project's log somewhere it has nothing to do with: relative to
+	// wherever the process happened to start, or relative to the configuration directory
+	// rather than the project it configures.
 	BaseDir string
 
 	providers map[string]Provider
@@ -252,7 +253,12 @@ func (r *Registry) Build(cfg Config) (*Router, error) {
 		}
 		handlers[declared.Name] = handler
 	}
-	return NewRouter(RouterOptions{Level: cfg.Level, Handlers: handlers, Routes: cfg.Routes})
+	router, err := NewRouter(RouterOptions{Level: cfg.Level, Handlers: handlers, Routes: cfg.Routes})
+	if err != nil {
+		return nil, err
+	}
+	router.config = cfg
+	return router, nil
 }
 
 // resolve gives a provider its own options, with the two the framework owns applied: the

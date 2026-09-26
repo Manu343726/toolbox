@@ -53,6 +53,13 @@ type Router struct {
 	// failures counts entries a sink refused, so a deployment whose logging is broken can be
 	// told on a line rather than by noticing its log is empty.
 	failures int
+	// unrouted counts entries that matched no route and so reached no sink. It is counted
+	// because it is the failure mode a log cannot report: a deployment whose routes no longer
+	// match what it logs has an empty log and no error anywhere.
+	unrouted int
+	// config is what this router was built from, kept so a caller outside the process can be
+	// told where entries go without the router having to reconstruct it.
+	config Config
 }
 
 // delivery is one route reduced to what it actually sends.
@@ -64,6 +71,10 @@ type delivery struct {
 	// handlers is the fanout this route sends to, or nil when the route introduced nothing
 	// because an earlier route already claimed every handler it named.
 	handlers slog.Handler
+	// names are the handlers this route delivers to, kept alongside the fanout because a
+	// caller outside this process is told which sinks its entry reached and the fanout does
+	// not remember what it was built from.
+	names []string
 }
 
 // RouterOptions configure a Router.
@@ -114,12 +125,28 @@ func (r *Router) addRoute(index int, route Route, claimed map[string]bool) error
 				plan.name, name)
 		}
 		if claimed[name] {
+			// The handler was named here too but an earlier route already delivers to it, so
+			// it is still this route's to report reaching: the entry goes there once, and the
+			// route that claimed it is the one that says so.
+			plan.names = append(plan.names, name)
 			continue
 		}
 		claimed[name] = true
 		introduced = append(introduced, handler)
+		plan.names = append(plan.names, name)
 	}
 	if len(introduced) == 0 {
+		if len(route.Add) > 0 {
+			// A route that tags entries and sends them nowhere is a route that does not do
+			// what it says, and the only sign would be a project whose logs cannot be found
+			// among the deployment's. The tag is what a reader is looking for, so it is
+			// refused rather than dropped — and the message says which route and why,
+			// because the fix is to declare the sink as this route's own.
+			return fmt.Errorf("the route %q adds attributes but every handler it names is "+
+				"already sent to by an earlier route, so nothing it adds would ever be written: "+
+				"give it a handler of its own, or put it before the route that claims them",
+				plan.name)
+		}
 		r.routes = append(r.routes, plan)
 		return nil
 	}
@@ -164,23 +191,41 @@ func (r *Router) Enabled(ctx context.Context, level slog.Level) bool {
 // error is reported on standard error and counted, so a deployment whose logging is broken is
 // told so on a line rather than by noticing its log is empty.
 func (r *Router) Handle(ctx context.Context, record slog.Record) error {
+	r.Deliver(ctx, record)
+	return nil
+}
+
+// Deliver routes one record and reports the sinks it reached.
+//
+// It is Handle's own work with an answer attached, because a caller outside this process needs
+// one: an agent that sent an entry has to be able to learn whether anything recorded it, and
+// "no error" does not say so — a record matching no route is delivered successfully to
+// nobody. The names are the ones routes refer to handlers by, so they are the same names
+// GetConfig reports.
+func (r *Router) Deliver(ctx context.Context, record slog.Record) []string {
 	// A project carried on the context is put on the entry before any sink sees it. A route
 	// can already match it, but a route is not the only reader: a log collector filtering by
-	// project reads the line, and a caller deep in a call should not have to add an
-	// attribute to every log call for that to work.
+	// project reads the line, and a caller deep in a call should not have to add an attribute
+	// to every log call for that to work.
 	delivered := record
 	if workspace := WorkspaceFrom(ctx); workspace != "" && !carries(r.bound, record, WorkspaceKey, workspace) {
 		delivered.AddAttrs(slog.String(WorkspaceKey, workspace))
 	}
+
+	var reached []string
 	for _, plan := range r.snapshot() {
 		if plan.handlers == nil || !plan.match.matches(ctx, r.bound, delivered) {
 			continue
 		}
+		reached = append(reached, plan.names...)
 		if err := plan.handlers.Handle(ctx, delivered); err != nil {
 			r.reportFailure(plan.name, err)
 		}
 	}
-	return nil
+	if len(reached) == 0 {
+		r.countUnrouted()
+	}
+	return reached
 }
 
 // WithAttrs binds attributes to every route's fanout.
@@ -223,6 +268,18 @@ func (r *Router) rewired(added []slog.Attr, transform func(slog.Handler) slog.Ha
 	return bound
 }
 
+// Config returns the configuration this router was built from: its minimum, its sinks with
+// their providers and settings, and its routes in order.
+//
+// It is the read side of the same value Build took, so what a caller outside this process is
+// told is the fanout that is actually in use rather than a description that could differ from
+// it.
+func (r *Router) Config() Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.config
+}
+
 // Level is the deployment's minimum.
 func (r *Router) Level() slog.Level {
 	r.mu.RLock()
@@ -235,6 +292,23 @@ func (r *Router) Failures() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.failures
+}
+
+// Unrouted reports how many entries matched no route and reached no sink.
+//
+// It is the one logging failure that cannot announce itself: nothing errored, and the log is
+// simply empty. A deployment that reports this number can tell that apart from a quiet
+// period.
+func (r *Router) Unrouted() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.unrouted
+}
+
+func (r *Router) countUnrouted() {
+	r.mu.Lock()
+	r.unrouted++
+	r.mu.Unlock()
 }
 
 func (r *Router) reportFailure(where string, err error) {

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,6 +30,7 @@ import (
 	documentation "github.com/Manu343726/toolbox/subsystems/documentation"
 	health "github.com/Manu343726/toolbox/subsystems/health"
 	knowledge "github.com/Manu343726/toolbox/subsystems/knowledge"
+	logger "github.com/Manu343726/toolbox/subsystems/logger"
 	model "github.com/Manu343726/toolbox/subsystems/model"
 	policy "github.com/Manu343726/toolbox/subsystems/policy"
 	prompt "github.com/Manu343726/toolbox/subsystems/prompt"
@@ -353,6 +355,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // answering from one policy and one address.
 func buildHost(resolved config.Config, registryAddress string, mounts ...subsystem.Mount) (*host.Host, *sharedCatalog, error) {
 	h := host.New()
+
+	// The fanout is built before anything starts, because a deployment must be able to log
+	// about the fact that a subsystem failed to start. It is built once and shared: the
+	// in-process handlers and the logger subsystem route through the same router, so an entry
+	// an agent sends and an entry this process writes are governed by the same routes.
+	fanout, err := buildFanout(resolved)
+	if err != nil {
+		return nil, nil, err
+	}
+	// slog.SetDefault is the whole integration. Every dependency in the process — including
+	// ones that have never heard of Toolbox — logs through the standard library's package
+	// logger, and that is the fanout above.
+	slog.SetDefault(slog.New(fanout.Router))
 	// The API catalog is given the host's own provider directory, so it finds the
 	// parsers, adapters, and invokers this process starts without importing a
 	// single provider subsystem.
@@ -398,9 +413,17 @@ func buildHost(resolved config.Config, registryAddress string, mounts ...subsyst
 		"documentation": func() (*subsystem.Server, error) { return documentation.New(documentation.Options{}) },
 		"health":        func() (*subsystem.Server, error) { return health.New(health.Options{}) },
 		"knowledge":     func() (*subsystem.Server, error) { return knowledge.New(knowledge.Options{}) },
-		"model":         func() (*subsystem.Server, error) { return model.New(model.Options{}) },
-		"policy":        func() (*subsystem.Server, error) { return policy.New(policy.Options{}) },
-		"prompt":        func() (*subsystem.Server, error) { return prompt.New(prompt.Options{}) },
+		"logger": func() (*subsystem.Server, error) {
+			return logger.New(logger.Options{
+				Router:    fanout.Router,
+				Registry:  fanout.Registry,
+				Providers: fanout.Registry.Providers(),
+				WorkDir:   workDir(),
+			})
+		},
+		"model":  func() (*subsystem.Server, error) { return model.New(model.Options{}) },
+		"policy": func() (*subsystem.Server, error) { return policy.New(policy.Options{}) },
+		"prompt": func() (*subsystem.Server, error) { return prompt.New(prompt.Options{}) },
 		// The registry is the core's own endpoint, so a daemon gives it the configured
 		// address. An in-process core passes none and keeps the ephemeral loopback
 		// port: nothing outside the process needs to find it.

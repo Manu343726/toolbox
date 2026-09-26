@@ -12,3 +12,8 @@ pkg/**/proto/**/*.pb
 
 # a stray build in a module directory is never source
 cmd/toolbox/toolbox
+
+# a deployment's default log, wherever a command was run without a configuration file
+toolbox.log
+logger.log
+*.log

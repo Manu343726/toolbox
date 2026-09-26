@@ -12,6 +12,7 @@ use (
 	./subsystems/health
 	./subsystems/knowledge
 	./subsystems/logfile
+	./subsystems/logger
 	./subsystems/model
 	./subsystems/policy
 	./subsystems/prompt
