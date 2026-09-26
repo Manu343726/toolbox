@@ -104,7 +104,11 @@ func New(endpoint string, options ...Option) *Client {
 	return client
 }
 
-// Endpoint returns the normalized base URL.
+// Endpoint returns the address the client was given, trimmed of surrounding space and of a
+// trailing slash.
+//
+// It is not otherwise rewritten: a scheme is not added, because the address came from whoever
+// resolved it and inventing one here would be a second place for that decision to be wrong.
 func (c *Client) Endpoint() string {
 	return c.endpoint
 }
