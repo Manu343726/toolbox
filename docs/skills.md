@@ -152,55 +152,35 @@ would reveal the guess.
 
 ### What distillation does
 
-Two things, and neither is a rewrite:
+**Distillation is the process of adapting a Toolbox skill to the skills features a
+client supports.** Every skill goes through it before being served to anybody, which
+is why **every skill is visible to every client** — a client never fails to see a skill
+because of what it can do, only ever receives it in the form it can act on.
 
-- **It removes what the client does not support.** The manifest that comes back is
-  built for the client that asked: a file this client cannot use is not in it. This is
-  the substance — the served surface is what the client can actually act on, rather than
-  the whole skill with the client left to discard what it cannot reach.
-- **It substitutes what it removes.** Where a feature is missing and the skill depends
-  on it, the distillation can add instructions that tell the model how to achieve the
-  same thing by other means. The author's `description` is **never** rewritten: it
-  reaches the model as written, because two clients reading different descriptions of
-  one skill means the model is reasoning about something the author did not write.
+It changes **content, never the file set**:
 
-Toolbox's own frontmatter extension is **kept on the template and not carried into the
-output**. The served frontmatter is the standard's fields, so another reader gets a
-skill it recognises, and a property about how *this* deployment treats a skill stays on
-the template where it belongs.
+- **The manifest is always complete.** Every file of the skill is listed, each exactly
+  once, with the URI of `SKILL.md` among them. This is the specification's requirement
+  and distillation does not come near it, because a file is never dropped from a skill
+  to suit a client.
+- **The instructions are adapted.** Where a skill depends on something the client cannot
+  do, the distilled `SKILL.md` gains instructions appended to its body that say how to
+  achieve the same thing another way. The skill the model reads is coherent and complete;
+  it simply carries an extra passage explaining how to work here.
+- **The author's `description` is never rewritten.** It reaches the model as written,
+  because two clients reading different descriptions of one skill means the model is
+  reasoning about something the author did not write.
+- **Toolbox's own frontmatter extension is kept on the template and not carried into
+  the output.** The served frontmatter is the standard's fields, so another reader gets
+  a skill it recognises, and a property about how *this* deployment treats a skill stays
+  on the template where it belongs.
 
-**Not yet decided, and it is the sharpest question in the feature:** a manifest built
-by removing files is *incomplete*, and the specification says an array manifest
-**MUST** be complete — every file of the skill, each exactly once. Distillation and that
-rule do not obviously coexist. See *Distillation and manifest completeness* below.
+Because the body can differ per client, so do the digests — and that is what a digest
+is for. The entry describes what this server serves to this client, and a client that
+verifies what it fetched against the entry it was given gets the right answer.
 
-### Distillation and manifest completeness
-
-The specification is unambiguous:
-
-> When `resources` is an array, it **MUST** be complete. It lists every file of the
-> skill, each exactly once, including an entry whose `uri` equals the skill's top-level
-> `uri`.
-
-A manifest with a file removed is not that. So distillation as described needs one of
-these to be true, and the choice is a conformance decision rather than a preference:
-
-1. **A distilled skill is a different skill.** It has its own URI, its own complete
-   manifest of exactly what it contains, and its own digests. Completeness holds, because
-   the served artifact is complete *for what it is*. The cost is that the same
-   `code-review` has several identities depending on who asks, and a client's approval
-   of one does not carry to another.
-2. **The manifest is marked `"dynamic"`.** The specification's stated escape hatch, for
-   content "generated such that stable digests cannot be published". We *do* have
-   stable digests, so this is honest only if a distilled skill genuinely has no stable
-   identity — which is close to true, since it varies by client. It also forfeits
-   content verification for every client, which is a real loss.
-3. **An incomplete manifest is served and the deviation is recorded.** Simplest, and a
-   documented departure from a MUST that clients may rely on for approval binding.
-
-**Not yet decided.** This is the question to settle before the distillation code is
-written, because the answer changes the shape of the entry, the digests, and what an
-approval means.
+**Not yet decided:** what the "skills features" are that distillation adapts to, and what
+a client that has no skills support at all is given. See below.
 
 ### What a Toolbox extension may add
 
