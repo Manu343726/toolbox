@@ -65,16 +65,29 @@ P0/P1 roadmap.
 - One exposure rule for every feature: no service is withheld by name, and a tool
   name several operations claim is qualified with the API that tells them apart.
 - Graceful server startup and shutdown.
+- A deployment log fanout as a `slog.Handler`: `pkg/log` decides which
+  handlers an entry reaches, and the rest is `slog` — `MultiHandler`,
+  `HandlerOptions`, each sink's own `WithAttrs`/`WithGroup` — plus
+  lumberjack for a rotating file. `slog.SetDefault` puts the fanout in
+  every dependency's way.
+- Per-project log fanouts: a project states its own `logging:` section, and
+  a relative handler path in it means a file inside that project.
 
 ### Reference subsystems
 
-Twelve subsystem modules exist:
+Sixteen subsystem modules exist:
 
 ```text
 agent
+apitools
+apiopenapi
+apigrpc
+apimcp
 documentation
 health
 knowledge
+logfile
+logger
 model
 policy
 prompt
@@ -86,8 +99,15 @@ workflow
 ```
 
 They provide versioned in-memory stores, validation, metadata search, simple
-rendering, capability declarations, policy decisions, and a deterministic model
-provider. They are useful for integration and as executable contract examples.
+rendering, capability declarations, policy decisions, a deterministic model
+provider, a rotating-file log backend, and an RPC into a deployment's log
+fanout for callers that are not in the process. They are useful for integration
+and as executable contract examples.
+
+`logfile` is a provider with no contract, command or binary: a logging backend
+has no operations to address, so it is composed in process and declared in the
+catalog. That is the one place a subsystem is not separately deployable, and it is
+deliberate — see [`decisions/0012-logging.md`](decisions/0012-logging.md).
 
 ## Validation
 

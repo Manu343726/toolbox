@@ -14,7 +14,9 @@ This directory is the canonical project documentation for Toolbox.
 8. [Protocol conventions](protocol.md) — RPC naming, metadata, errors, versioning, and documentation conventions.
 9. [MCP gateway](mcp.md) — generated MCP tools, introspection, exposure control, and deployment commands.
 10. [Policy](policy.md) — the document that decides which operations a deployment's agents may call.
-11. [Architecture decisions](decisions/README.md) — accepted decisions and their consequences.
+11. [Logging](logging.md) — the `slog` fanout, its backends, and per-project routing.
+12. [Deployment configuration](configuration.md) — the file, its keys, and what wins.
+13. [Architecture decisions](decisions/README.md) — accepted decisions and their consequences.
 
 ## Documentation ownership
 

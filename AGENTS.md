@@ -100,6 +100,40 @@ Read these before making architectural changes:
    in a provider collapses into "internal" and destroys the distinction between a
    caller's mistake and a misconfigured deployment.
 
+13. **Logging is `slog`, and so is everything under it.** Go code logs with
+    `log/slog` and nothing else. Do not introduce a logging facade: no framework
+    `Entry`, no `Handler` interface, no `Level` constants, no line format, no
+    filtering wrapper, no rotating file. The fanout within a route is
+    `slog.MultiHandler`; a sink's minimum is a `slog.HandlerOptions.Level`;
+    attribute binding and nesting are each sink's own `WithAttrs` and `WithGroup`;
+    rotation is `gopkg.in/natefinch/lumberjack.v2`; syslog, Loki and the rest are
+    the handlers already written for them. `slog.SetDefault` is what pulls a
+    dependency's logs into the deployment's fanout, which is the whole reason for
+    choosing `slog`. `pkg/log` contributes one thing — the routing decision, as a
+    `slog.Handler` in front of a set of `slog.MultiHandler`s — and must not grow
+    past it. A `slog.Level` is not a sentinel: `Debug -4, Info 0, Warn 4, Error 8`
+    means an unset level field cannot mean "no opinion" unless it is a pointer,
+    and getting that wrong silently drops every line below info.
+
+14. **A logging backend is a provider, and it has no contract.** Declare it with
+    the role `loghandler` and implement `log.Provider` — one method returning a
+    `slog.Handler`, honouring the `level` option through `slog.HandlerOptions`.
+    Hand entries to handlers **in process**, never over ConnectRPC: the rule in
+    paragraph 3 exists to separate lifecycles, and a sink is not a peer. A provider
+    with no operations to address gets no proto, no command and no binary, and the
+    root `build` skips a subsystem without a `cmd/` directory. See
+    `docs/decisions/0012-logging.md`.
+
+15. **A configuration file is refused, not guessed at.** An unknown key, a
+    misspelled provider, a misspelled level, a bare number where text belongs and
+    a route that sends nowhere are all errors naming what was wrong and what is
+    accepted. Each of them is otherwise a fanout that is quietly not the one that
+    was written, and a log that quietly records nothing reports nothing. Two
+    consequences worth stating: a section one package locates and another reads is
+    validated once, by the reader that owns it; and **every matching route
+    contributes**, because first-match-wins cannot express "everything to the file
+    and this project's problems also to the pager".
+
 ## OpenCode MCP sessions
 
 The project `opencode.json` registers two local MCP servers for OpenCode
@@ -262,6 +296,7 @@ Project-specific skills live in `.agents/skills/`:
 - `toolbox-testing/SKILL.md` — testify, unit, integration, and race-test rules.
 - `documentation-cli/SKILL.md` — descriptor documentation and generated CLI work.
 - `toolbox-mcp/SKILL.md` — generated MCP tools, introspection, exposure, and transports.
+- `toolbox-logging/SKILL.md` — the `slog` fanout, backends, routes, and what not to reinvent.
 
 Load the relevant skill before editing files in its domain. Skills are
 instructions, not generated build artifacts; keep them concise and executable.

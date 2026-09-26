@@ -308,6 +308,7 @@ Engineering detail:
 - [MCP gateway](docs/mcp.md) — agent tooling, exposure control, client setup
 - [Command line](docs/cli.md) — every operation as a command, with its contract's own flags
 - [Deployment configuration](docs/configuration.md) — the config file, and how the daemon is launched
+- [Logging](docs/logging.md) — the `slog` fanout, its backends, and per-project routing
 - [Policy](docs/policy.md) — the document deciding what an agent may call
 - [Development guide](docs/development.md) — build, contracts, code generation
 - [Testing guide](docs/testing.md) — test layers and required checks

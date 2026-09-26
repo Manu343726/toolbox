@@ -21,12 +21,29 @@ mcp:
   host: 127.0.0.1     # empty means the daemon's host
   port: 9181          # 0 means the daemon's port
 policy: ./ops.policy
+logging:
+  level: info          # the deployment's log fanout; see logging.md
+  handlers:
+    machine:
+      provider: json
+      options:
+        path: logs/machine.log
+  routes:
+    - name: everything
+      handlers: [machine]
 ```
 
-Those six keys are all of them. **A key nobody understands is refused, by name**, with the
-list of keys that are allowed — because a file that silently ignores what it does not
-understand cannot be trusted to state what it does, and a misspelled `prot` is otherwise
-indistinguishable from a deliberate default.
+Those are all the keys. **A key nobody understands is refused, by name**, with the list of keys
+that are allowed — because a file that silently ignores what it does not understand cannot be
+trusted to state what it does, and a misspelled `prot` is otherwise indistinguishable from a
+deliberate default.
+
+`logging:` is a section rather than a set of individual keys, and it is read from the file
+alone. Its shape belongs to [`pkg/log`](logging.md) and the `logger` subsystem; this
+document finds it, refuses a key nobody understands at the top level, and hands it over. A
+key *inside* the section is refused by the reader that owns it, with that reader's own message
+naming the settings it accepts — a fanout validated twice is a fanout validated by whichever
+reader happened to be stricter.
 
 ## Where it lives
 
@@ -173,6 +190,22 @@ what keeps it one port. When they differ it gets a second listener. Either way i
 *mount* rather than a service: it is not a protobuf contract, and putting it in reflection
 would be a lie.
 
+## The logging section
+
+`logging:` describes the deployment's log fanout: which sinks exist and which entries go to
+which of them. It is the file's own, and no flag or environment variable overrides it, because
+a deployment's routes are the deployment's.
+
+The section is fully documented in [`logging.md`](logging.md), including the provider list and
+the per-project fanout. Two things belong here rather than there, because they are about where
+a configuration file is rather than about logging:
+
+- A **relative handler path resolves against the project the file belongs to** — for a
+  project's own file, that is the directory *above* its `.toolbox` directory, so
+  `path: logs/project.log` is a file inside the project and not inside `.toolbox/logs`.
+- A project with **no** `logging:` section logs into the deployment's fanout, which is what it
+  would get without the `logger` subsystem and so what it should not lose by using it.
+
 ## The workspace selector
 
 `--scope` and `TOOLBOX_SCOPE` exist, and a configuration file may not carry them. A
@@ -185,5 +218,6 @@ share one.
 - [`cli.md`](cli.md) — the operations, and where a call goes.
 - [`mcp.md`](mcp.md) — the same surface, for an agent.
 - [`policy.md`](policy.md) — the `policy:` key, and what an agent may call.
+- [`logging.md`](logging.md) — the `logging:` key, the fanout, and per-project routing.
 - [`decisions/0011-deployment-configuration.md`](decisions/0011-deployment-configuration.md) —
   why the file holds what it holds.

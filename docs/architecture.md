@@ -164,6 +164,7 @@ SDK behavior.
 | `pkg/api`       | Standard, provider-neutral description of an API: `API`, `Service`, `Operation`, `Schema`, `Server`, plus indexed format and transport descriptors and the framework's own extension contract. Also the framework's Go interfaces — `Catalog`, `Registrar`, `Invoker`, `ExposureSource` — and the failure classification every provider reports |
 | `pkg/protocontract` | Reads a protobuf service contract, from a FileDescriptorSet or a live endpoint's reflection, and calls the operations it declares. A plain Go package: no transport, no service registration |
 | `pkg/openapi`   | Reads, renders, serves, and calls APIs described by OpenAPI 3.x documents, with no transport of its own |
+| `pkg/log`       | The deployment's log fanout, as a `slog.Handler`: routes deciding which handlers an entry reaches and what it is tagged with, the `log.Provider` interface a backend implements, and the configuration reader. `slog` and its ecosystem do everything else — `MultiHandler`, `HandlerOptions`, `WithAttrs`, `WithGroup`, lumberjack |
 
 A subsystem implements its own service and may import any of these packages. It
 may also depend on another feature subsystem and call it: resolve the callee
