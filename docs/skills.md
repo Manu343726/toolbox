@@ -10,24 +10,24 @@ decided* are open questions, and a section that is marked as such is not yet
 implemented — this document records intent as well as fact, and the two are labelled
 separately for that reason.
 
-**Status: the specification is being agreed. Phases 2 to 6 of the plan below are open,
-and nothing is implemented.**
+**Status: the specification is being agreed. Phases 3, 7 and part of 8 are open, and
+nothing is implemented.**
 
 ## The plan
 
-Eight phases. Phases 1 and 8 are settled; the specification is phases 2 through 7, and
-each closes before the next opens.
+Nine phases. Each closes before the next opens.
 
 | # | Phase | State | Produces |
 |---|---|---|---|
 | 1 | **Upgrade the MCP Go SDK to v1.8.0** | **decided** | A dependency that negotiates `2026-07-28` and implements `server/discover` |
 | 2 | **The catalog model** | **decided** | A catalog role, aggregation, and fully-qualified references |
 | 3 | **The catalog RPC contract** | open | The provider contract a catalog subsystem implements |
-| 4 | **The aggregate contract** | **decided** | `SkillService`: list, get, read file, validate |
-| 5 | **The reader: the format in a root package** | **decided** | `pkg/skills`, mounted by whichever subsystem serves a catalog |
-| 6 | **The project configuration** | open | What the `skills:` list names, and how it resolves |
-| 7 | **Security posture** | partly decided | `allowed-tools` ignored; the rest open |
-| 8 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
+| 4 | **The canonical skill and distillation** | **decided** | The union of every client's features, projected per client |
+| 5 | **The aggregate contract** | **decided** | `SkillService`: list, get, read file, validate |
+| 6 | **The reader: the format in a root package** | **decided** | `pkg/skills`, mounted by whichever subsystem serves a catalog |
+| 7 | **The project configuration** | **decided** | `skills:` names qualified references; `local` is implicit |
+| 8 | **Security posture** | partly decided | `allowed-tools` ignored; config writes confirmed; the rest open |
+| 9 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
 
 ### Phase 1 — upgrade the SDK
 
@@ -46,7 +46,7 @@ It is its own commit because it is a change to a dependency every module shares 
 a change to this feature. Verified by the full suite, `make vet`, the independent-module
 sweep with `GOWORK=off`, and the CI workflow.
 
-### Phase 8 — implement
+### Phase 9 — implement
 
 **Decided**, and in scope for this work. The deliverable is a deployment whose
 aggregated MCP server serves `io.modelcontextprotocol/skills`, so that a skill written
@@ -140,7 +140,88 @@ The first targets are the common cases, and what each supports is taken from tha
 vendor's own documentation rather than assumed. **All four support skills**, so no
 client needs a fallback for having none.
 
+### The canonical Toolbox skill is the union
+
+**A Toolbox skill supports every feature any supported client has.** It is the union
+of the Agent Skills standard and the extensions the four clients define. An author
+writes against the union and gets every one of them, because distillation is what
+guarantees it: a feature no target client has is not a feature of the format.
+
+This is the whole point of the arrangement. A standard skill is written for the union
+of readers anyway, and a person writing one should not have to choose between Claude
+Code's `when_to_use` and Copilot's `argument-hint`. The union is what makes "write once,
+works in the client you are in" true rather than aspirational.
+
+The union, as fields:
+
+| Field | From | Notes |
+|---|---|---|
+| `name` | standard | Required. 1–64 chars, lowercase and digits with single hyphens, matching the directory |
+| `description` | standard | Required. 1–1024 chars, and the field every client selects on |
+| `license` | standard | |
+| `compatibility` | standard | |
+| `metadata` | standard | String to string |
+| `allowed-tools` | standard | **Not acted on.** See below |
+| `when_to_use` | Claude Code | Appended to the description in a listing, and counts toward its 1,536-character cap |
+| `argument-hint` | Claude Code, Copilot | Same name and sense in both |
+| `arguments` | Claude Code | Named positional arguments for substitution |
+| `disable-model-invocation` | Claude Code, Copilot | Same name and sense in both |
+| `user-invocable` | Claude Code, Copilot | Same name and sense in both |
+| `disallowed-tools` | Claude Code | Narrows the tool pool while the skill is active |
+| `model` | Claude Code | |
+| `effort` | Claude Code | |
+| `context` | Claude Code, Copilot | `fork` runs the skill in a subagent |
+| `com.github.manu343726.toolbox/enabled` | Toolbox | Whether the skill is part of the project at all |
+
+And as files, because a skill's features are not only its frontmatter:
+
+| File | From | Notes |
+|---|---|---|
+| `SKILL.md` | standard | Required |
+| `references/`, `scripts/`, `assets/` | standard | Conventional; any supporting file is permitted |
+| `agents/openai.yaml` | Codex | **Not frontmatter** — a separate file. Carries `interface` display metadata, `policy.allow_implicit_invocation`, and declared tool `dependencies` |
+
+`agents/openai.yaml` being a file rather than a field is why the manifest's completeness
+is not in tension with per-client behaviour. A template that includes one carries it for
+every client; the three that do not read it ignore it, and it is listed either way.
+
+### The distillation projection
+
+Distillation takes the union and projects it for one client. What it does, per feature:
+
+| Feature in the template | Distilled for a client that has it | Distilled for a client that does not |
+|---|---|---|
+| `name`, `description` | Carried unchanged | Carried unchanged |
+| `argument-hint`, `user-invocable`, `disable-model-invocation`, `context` | Carried unchanged — same names, same senses | Left in place; the client ignores it |
+| `when_to_use`, `arguments`, `disallowed-tools`, `model`, `effort` | Carried unchanged | Left in place; the client ignores it |
+| `license`, `compatibility`, `metadata` | Carried unchanged | Left in place; the client ignores it |
+| `allowed-tools` | Never carried, to any client | — |
+| `agents/openai.yaml` | Carried unchanged | Left in place; the client ignores it |
+| A dependency on executing `scripts/`, when the client cannot run them | — | **Instructions appended to the body** saying how to achieve the same thing otherwise |
+| `toolbox/enabled: false` | Not served at all | Not served at all |
+
+Three things fall out of that table, and they are the design:
+
+- **Nothing is dropped and nothing is renamed.** Every client ignores a field it does
+  not recognise, and three of the four say so in their documentation. The projection is
+  therefore not a filter; it is the union with the body adapted.
+- **The only content change is an appended passage.** A template that depends on running
+  a script reaches a client that cannot run one as the same skill plus instructions for
+  doing it by other means. The author's `description` and instructions are otherwise
+  exactly as written.
+- **`allowed-tools` is the one field never carried.** One client of four treats it as a
+  request to elevate its own permissions and the other three ignore it, so carrying it
+  would give the field two meanings depending on who read it. This is the concrete
+  reason, and it was a decision before it was evidence.
+
+**A consequence worth stating:** because distillation appends, a skill's distilled body
+is a *superset* of the author's instructions, never a different skill. Two clients
+differing means one of them was given extra guidance, not a different opinion about what
+the skill says.
+
 ### What each client actually supports
+
+The evidence the union is built from:
 
 | | opencode | Claude Code | Codex | VS Code Copilot |
 |---|---|---|---|---|
@@ -148,24 +229,19 @@ client needs a fallback for having none.
 | `license` | yes | — | — | — |
 | `compatibility` | yes | — | — | — |
 | `metadata` | yes, string to string | — | — | — |
-| `allowed-tools` | **no** | **yes** — pre-approves tools for the turn | via `agents/openai.yaml` dependencies | — |
-| Frontmatter it defines beyond the standard | — | `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `disallowed-tools`, `model`, `effort`, `context` | — | `argument-hint`, `user-invocable`, `disable-model-invocation`, `context` |
+| `allowed-tools` | **no** | **yes** | via `openai.yaml` dependencies | — |
+| Frontmatter beyond the standard | — | `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `disallowed-tools`, `model`, `effort`, `context` | — | `argument-hint`, `user-invocable`, `disable-model-invocation`, `context` |
 | Supporting files read on reference | yes | yes, "loaded when needed" | yes | yes, "only when referenced" |
 | Runs `scripts/` | yes | yes | yes | yes |
 | Slash-command invocation | — | yes, `/name` | yes, `/skills` or `$` | yes, `/name` |
-| Progressive disclosure | yes, via the skill tool | yes | yes, with a 2%-of-context or 8000-character budget on the initial listing | yes, three levels |
+| Progressive disclosure | yes, via the skill tool | yes | yes, with a 2%-of-context or 8000-character budget | yes, three levels |
 | Unknown frontmatter fields | ignored | ignored, "without reporting an error" | — | — |
 | Switching a skill off | `permission.skill` in `opencode.json` | `disable-model-invocation` | `[[skills.config]] enabled = false` in `config.toml` | `disable-model-invocation` |
 
-**What this establishes, and it is the substance of the distillation model:**
+**What this establishes:**
 
-- **Only `name` and `description` are universal.** Every other field in the standard is
-  read by some clients and ignored by others. A template may use them; a client that
-  does not know one silently ignores it, which is what all four do.
-- **Only Claude Code honours `allowed-tools`.** That is the concrete reason this
-  framework ignores it. A field one host of four treats as a request to elevate its own
-  permissions, and three ignore, cannot be carried into a distillation without the field
-  meaning two different things depending on who read it.
+- **Only `name` and `description` are universal.** Every other field in the union is read
+  by some clients and ignored by others.
 - **The clients' `disable-model-invocation` is not our `enabled`, and the sense
   differs.** Claude Code and Copilot read it as *the model may not invoke this by
   itself*, on a skill the model still loads when relevant. opencode and Codex control
