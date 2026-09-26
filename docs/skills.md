@@ -25,6 +25,7 @@ Nine phases. Each closes before the next opens.
 | 5 | **The aggregate contract** | **decided** | `SkillService`, plus a read of which pinned skills have gone out of date |
 | 6 | **The reader: the format in a root package** | **decided** | `pkg/skills`, one typed representation, two input dialects |
 | 7 | **The project configuration** | **decided** | `skills:` names qualified references; `local` is implicit |
+| 7a | **Git-backed catalogs** | **decided** | The concept, hosted many times over; register, create, sync, unregister, delete |
 | 8 | **Security posture** | **decided** | Authority never widened; the project's list is the permission; drift is reported |
 | 9 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
 
@@ -579,12 +580,19 @@ how it enumerates (`skills.sh` presents a browsable directory and a
 obvious endpoints), how a skill's files are obtained, how a version or a pin is
 expressed, and how it behaves with no network.
 
-### The git catalog
+### Git-backed catalogs
 
-The second catalog implementation is backed by a **git repository**, and it is
-**read-write**: adding a skill to it is a change to a repository.
+The second catalog implementation is the **concept** of a catalog backed by a git
+repository, and the subsystem implements that concept **many times over** — once per
+registered repository. It is not one catalog with one remote hardcoded into it.
 
-Its storage is the subsystem's own, not a checkout wherever the project happens to be:
+So the git subsystem is a **provider host**. Each registered remote is a separate
+`SkillCatalogService` provider with its own identifier, its own storage, and its own
+sync state, and the aggregator resolves `<catalog>.<name>` to whichever of them owns
+the prefix. This is the same shape as the registry's: one subsystem, many registrations,
+each resolved by identifier.
+
+Its storage is the subsystem's own, and it holds one clone per registered catalog:
 
 ```text
 <deployment data>/skillcatalogs/<name>/     a clone, kept by the catalog
@@ -605,7 +613,46 @@ history that shows one commit per thing is a history somebody can read.
 **The commit identity is configured, not assumed.** It is stated in the deployment's
 configuration file, and a project may override it — because the deployment is a machine
 and the project is where the work is, and the person whose repository it is should get
-the last word on whose name is on the commit.
+the last word on whose name is on the commit. One identity governs the subsystem's
+commits across every catalog it holds, because it is the same person on the same
+machine making them.
+
+### Registering and creating catalogs
+
+The subsystem's tools manage the set of git-backed catalogs, not just the skills inside
+one:
+
+| Operation | What it does |
+|---|---|
+| register a catalog | Take a git remote and a name, clone it, and serve it as a catalog under that name |
+| create a catalog | `git init` a new repository, commit it, and serve it — pushing only if a remote was given |
+| sync a catalog | `git pull --rebase` its remote |
+| unregister a catalog | Stop serving a registered remote. The clone stays on disk |
+| delete a catalog | Unregister it **and** remove the clone. A separate operation, named for what it does |
+
+**Creating a catalog is local.** A new repository is made where the deployment runs and
+served from there, and it is pushed only when a remote is named. No forge is contacted
+and no token is needed to start a catalog — which means a deployment can offer
+git-backed catalogs on a machine with no account anywhere, and publishing one is a
+separate, deliberate act.
+
+**The name is supplied when registering**, and it is refused if taken. Two checkouts of
+one repository can therefore both be registered, which is occasionally what somebody
+wants, and a name already in use is an error rather than two catalogs silently sharing
+one.
+
+**Unregistering and deleting are two operations.** Unregistering forgets the remote and
+leaves the clone where it is: the skills are still readable on disk, and nothing is
+removed without being asked for twice. Deleting removes the clone as well, and it is
+named for that so the destructive one is never reached by accident.
+
+**Registration is state that outlives the process.** A catalog registered yesterday is
+still registered after a restart, because a deployment that forgot its catalogs on
+reboot would serve a different set of skills each time it came up — and the project's
+`skills:` list would then name references that resolve to nothing.
+
+**Credentials are deployment configuration.** A clone may be private, and a project
+says which catalogs it wants while the deployment is what can reach them.
 
 ### Copying and moving between catalogs
 
