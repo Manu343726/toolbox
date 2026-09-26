@@ -136,19 +136,46 @@ and a particular client may read only part of it. Serving the template unaltered
 every client the whole thing and lets it decide what to ignore, which is the client
 doing the framework's work.
 
-The first targets are the common cases:
+The first targets are the common cases, and what each supports is taken from that
+vendor's own documentation rather than assumed. **All four support skills**, so no
+client needs a fallback for having none.
 
-| Client | Known shape |
-|---|---|
-| **opencode** | Reads `SKILL.md` directories (`.agents/skills/`) natively; over MCP it models resources with `uri`/`mimeType`/`description` and surfaces a skill as a command with `source: "skill"` |
-| **Claude Code** | `SKILL.md` directories; frontmatter `name` and `description` are what it selects on |
-| **Codex** | *Not verified — see below* |
-| **VS Code Copilot** | *Not verified — see below* |
+### What each client actually supports
 
-**The client says which it is.** The identity comes from the connection — what the
-client reports when it initialises — and not from configuration, because a distillation
-that guessed wrong hands a client content it cannot use, and nothing in the result
-would reveal the guess.
+| | opencode | Claude Code | Codex | VS Code Copilot |
+|---|---|---|---|---|
+| `name` + `description` | required | `description` recommended, `name` defaults to the directory | required | required |
+| `license` | yes | — | — | — |
+| `compatibility` | yes | — | — | — |
+| `metadata` | yes, string to string | — | — | — |
+| `allowed-tools` | **no** | **yes** — pre-approves tools for the turn | via `agents/openai.yaml` dependencies | — |
+| Frontmatter it defines beyond the standard | — | `when_to_use`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `disallowed-tools`, `model`, `effort`, `context` | — | `argument-hint`, `user-invocable`, `disable-model-invocation`, `context` |
+| Supporting files read on reference | yes | yes, "loaded when needed" | yes | yes, "only when referenced" |
+| Runs `scripts/` | yes | yes | yes | yes |
+| Slash-command invocation | — | yes, `/name` | yes, `/skills` or `$` | yes, `/name` |
+| Progressive disclosure | yes, via the skill tool | yes | yes, with a 2%-of-context or 8000-character budget on the initial listing | yes, three levels |
+| Unknown frontmatter fields | ignored | ignored, "without reporting an error" | — | — |
+| Switching a skill off | `permission.skill` in `opencode.json` | `disable-model-invocation` | `[[skills.config]] enabled = false` in `config.toml` | `disable-model-invocation` |
+
+**What this establishes, and it is the substance of the distillation model:**
+
+- **Only `name` and `description` are universal.** Every other field in the standard is
+  read by some clients and ignored by others. A template may use them; a client that
+  does not know one silently ignores it, which is what all four do.
+- **Only Claude Code honours `allowed-tools`.** That is the concrete reason this
+  framework ignores it. A field one host of four treats as a request to elevate its own
+  permissions, and three ignore, cannot be carried into a distillation without the field
+  meaning two different things depending on who read it.
+- **The clients' `disable-model-invocation` is not our `enabled`, and the sense
+  differs.** Claude Code and Copilot read it as *the model may not invoke this by
+  itself*, on a skill the model still loads when relevant. opencode and Codex control
+  availability from configuration instead — by permission pattern, and by path. A
+  Toolbox `enabled` is a different fact: whether the skill is part of the project at
+  all. It is not translated into any of these.
+- **Progressive disclosure is universal, and three of the four budget the initial
+  listing.** A very large skill set is a real condition rather than a hypothetical:
+  Codex shortens descriptions and may omit skills entirely, and Claude Code truncates a
+  skill's combined description text at 1,536 characters.
 
 ### What distillation does
 
@@ -178,6 +205,12 @@ It changes **content, never the file set**:
 Because the body can differ per client, so do the digests — and that is what a digest
 is for. The entry describes what this server serves to this client, and a client that
 verifies what it fetched against the entry it was given gets the right answer.
+
+**The client says which it is.** The identity comes from the connection — what the
+client reports when it initialises — and not from configuration, because a distillation
+that guessed wrong hands a client content it cannot use and nothing in the result would
+reveal the guess. A client this framework has never heard of gets the common
+denominator: `name`, `description`, and the complete file set.
 
 **Not yet decided:** what the "skills features" are that distillation adapts to, and what
 a client that has no skills support at all is given. See below.
