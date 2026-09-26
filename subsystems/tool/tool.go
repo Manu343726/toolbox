@@ -141,7 +141,10 @@ func (h *Handler) InvokeTool(ctx context.Context, req *connect.Request[toolv1.In
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("marshal tool result: %w", err))
+		// The tool's name is in the message because a deployment registers many of them and
+		// "marshal tool result" on its own says nothing about which one misbehaved.
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf(
+			"the result of tool %q cannot be encoded as JSON: %w", req.Msg.GetName(), err))
 	}
 	return connect.NewResponse(&toolv1.InvokeToolResponse{ResultJson: string(encoded)}), nil
 }
