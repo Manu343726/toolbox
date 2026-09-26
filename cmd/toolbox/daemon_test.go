@@ -132,7 +132,7 @@ func TestASubsystemThatDidNotStartInsideTheCoreCanRegister(t *testing.T) {
 		Version: "0.1.0",
 		Services: []subsystem.Service{{
 			Name:    "toolbox.fixture.v1.FixtureService",
-			Path:    "/toolbox.fixture.v1.FixtureService",
+			Path:    "/toolbox.fixture.v1.FixtureService/",
 			Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
 		}},
 	})

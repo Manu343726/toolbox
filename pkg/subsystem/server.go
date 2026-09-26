@@ -406,6 +406,16 @@ func validateService(service Service) error {
 	if !strings.HasPrefix(service.Path, "/") {
 		return fmt.Errorf("service %q path must start with '/'", service.Name)
 	}
+	// A service path is a prefix, not an exact match: a request for a method lands at
+	// "<path><Method>", and net/http's mux matches a pattern without a trailing slash
+	// exactly. So a path without one mounts a handler nothing can reach, and the service
+	// answers 404 for every method while starting and reporting itself healthy — which is
+	// the kind of failure nobody finds by reading the code.
+	if !strings.HasSuffix(service.Path, "/") {
+		return fmt.Errorf(
+			"service %q path %q must end with '/': it is the prefix a request for %q lands under",
+			service.Name, service.Path, service.Name+"Method")
+	}
 	return nil
 }
 

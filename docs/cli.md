@@ -88,6 +88,31 @@ toolbox knowledge put-source --core 127.0.0.1:9180 --source.id notes --source.lo
 toolbox knowledge get-source --core 127.0.0.1:9180 --id notes     # a different process
 ```
 
+A standalone subsystem command takes the same flag, and reaches the same state:
+
+```sh
+knowledge --core 127.0.0.1:9180 put-source --source.id notes --source.location mem://notes
+toolbox knowledge get-source --core 127.0.0.1:9180 --id notes
+```
+
+A core's address is its **registry's**, not the address of every service it hosts — so a
+command pointed at a core asks the core where the peer is, and a core that hosts nothing
+says so. A command given a core and a way to reach it never starts a subsystem of its own.
+
+Two commands only make sense with a subsystem in this process: `serve` and `mcp`. Pointed at
+a core they refuse, and say why:
+
+```
+$ knowledge --core 127.0.0.1:9180 serve
+serving the subsystem needs a subsystem in this process, and this command is pointed at
+the core at http://127.0.0.1:9180: the core is already serving. Run it without --core to
+serve knowledge here
+```
+
+They are not hidden. A hidden command is one whose absence a caller has to guess at, and
+"can this serve anything?" is a question worth answering — it is answered with the reason
+rather than with silence.
+
 ## The policy does not apply here
 
 A policy states what an *agent* may call. An operator at a shell is the deployment's own

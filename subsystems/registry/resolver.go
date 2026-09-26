@@ -3,66 +3,59 @@ package registry
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 
-	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/core"
-	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
-	"github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
+	"github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 )
 
-// Resolver adapts the standalone registry service to core.Resolver. It is
-// intentionally an adapter in the registry subsystem, so other independent
-// subsystems depend only on core.Resolver and never import registry code.
-type Resolver struct {
-	client registryv1connect.RegistryServiceClient
-}
+// A core is at one address, and that address is the registry's. The subsystems a core hosts
+// are at addresses of their own, and the registry is how a client finds them — so a client
+// that knows only the core's address asks the registry, and the registry answers with an
+// endpoint per service.
+//
+// That is why a client cannot simply treat the core's address as the address of every
+// service: the core is where the directory is, not where everything is. A command that
+// assumed otherwise would send a call to a path the core does not serve and get a 404, which
+// reads as "that operation does not exist" rather than as "you asked the wrong place".
+//
+// So the resolver lives here, beside the contract it reads. A root package cannot depend on
+// it, because a contract belongs to the subsystem that owns it; a command that wants to reach
+// a core asks for one here, which is one line and no new machinery.
 
-// NewResolver creates a resolver backed by a registry endpoint.
-func NewResolver(endpoint string, httpClient *http.Client) *Resolver {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+// CoreResolver returns a resolver for a core at an address, and a function that releases it.
+//
+// The resolver is live before it is returned: the first read has already happened, so a
+// caller that gets a resolver has a directory that knows what the core holds, rather than one
+// that would discover it on the first call and report every service as missing until then.
+//
+// A core that cannot be reached is an error, not an empty directory. A directory that has
+// never synced knows nothing, and a caller handed that would read "this deployment has no
+// services" where the truth is "the core is down" — two problems with two different fixes.
+func CoreResolver(endpoint string) (core.Resolver, func(), error) {
+	address := strings.TrimSpace(endpoint)
+	if address == "" {
+		return nil, nil, fmt.Errorf("a core address is required")
 	}
-	return &Resolver{client: registryv1connect.NewRegistryServiceClient(httpClient, endpoint)}
-}
-
-// Resolve accepts either a subsystem name or a fully-qualified service name.
-func (r *Resolver) Resolve(ctx context.Context, serviceName string) (core.Endpoint, error) {
-	if r == nil || r.client == nil {
-		return core.Endpoint{}, fmt.Errorf("registry resolver is not configured")
+	if !strings.Contains(address, "://") {
+		address = "http://" + address
 	}
-	name := strings.TrimSpace(serviceName)
-	if name == "" {
-		return core.Endpoint{}, fmt.Errorf("%w: empty service name", core.ErrNotFound)
-	}
-
-	// Fast path for a subsystem name.
-	response, err := r.client.ListServices(ctx, connect.NewRequest(&registryv1.ListServicesRequest{SubsystemName: name}))
-	if err == nil {
-		for _, descriptor := range response.Msg.GetServices() {
-			if descriptor.GetSubsystemName() == name {
-				return endpointFromDescriptor(descriptor), nil
-			}
-		}
-	}
-
-	// Service names are indexed by the registry only as metadata, so scan the
-	// list for a matching fully-qualified service contract.
-	response, err = r.client.ListServices(ctx, connect.NewRequest(&registryv1.ListServicesRequest{}))
+	directory, err := NewDirectory(DirectoryOptions{Endpoint: address})
 	if err != nil {
-		return core.Endpoint{}, fmt.Errorf("list registry services: %w", err)
+		return nil, nil, err
 	}
-	for _, descriptor := range response.Msg.GetServices() {
-		for _, advertised := range descriptor.GetServiceNames() {
-			if advertised == name {
-				return endpointFromDescriptor(descriptor), nil
-			}
-		}
+	if err := directory.Start(context.Background()); err != nil {
+		return nil, nil, fmt.Errorf("the core at %s did not answer: %w", address, err)
 	}
-	return core.Endpoint{}, fmt.Errorf("%w: %s", core.ErrNotFound, name)
+	return directory, directory.Close, nil
 }
 
+// endpointFromDescriptor converts a registration into the endpoint a caller resolves to.
+//
+// The capabilities the registration once carried are gone: what invoking an operation does
+// is declared by the contract, not announced by whoever registered it, and a directory that
+// reported a capability list would be reporting a deployment's opinion rather than a fact.
+// What is left is what a caller needs to make a call.
 func endpointFromDescriptor(descriptor *registryv1.ServiceDescriptor) core.Endpoint {
 	return core.Endpoint{
 		Name:         descriptor.GetSubsystemName(),

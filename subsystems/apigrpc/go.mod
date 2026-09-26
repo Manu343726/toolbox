@@ -5,6 +5,7 @@ go 1.27
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/Manu343726/toolbox v0.0.0
+	github.com/Manu343726/toolbox/subsystems/registry v0.0.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.11
 )
@@ -31,3 +32,5 @@ replace github.com/Manu343726/toolbox => ../..
 replace github.com/Manu343726/toolbox/subsystems/apiopenapi => ../apiopenapi
 
 replace github.com/Manu343726/toolbox/subsystems/testecho => ../testecho
+
+replace github.com/Manu343726/toolbox/subsystems/registry => ../registry
