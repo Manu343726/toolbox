@@ -1006,22 +1006,16 @@ func catalogError(err error) error {
 	}
 }
 
-// providerError wraps a provider failure. A provider that is unavailable is a
-// precondition failure of this call, not an internal failure of the catalog,
-// and an error the provider itself rejected is reported with its own code.
+// providerError maps a failure from a provider subsystem onto the code its kind
+// calls for.
+//
+// The mapping is the framework's, not this catalog's, and it keeps a failure the
+// provider had already classified. The narrower version this replaced reported
+// anything it did not recognise as an internal failure, which turned a caller's
+// own cancellation into "internal error" and told it to look for a bug here
+// rather than in the request it had just abandoned.
 func providerError(err error) error {
-	var connectErr *connect.Error
-	if errors.As(err, &connectErr) {
-		switch connectErr.Code() {
-		case connect.CodeUnavailable:
-			return connect.NewError(connect.CodeUnavailable, err)
-		case connect.CodeInvalidArgument, connect.CodeNotFound, connect.CodePermissionDenied, connect.CodeFailedPrecondition:
-			return connect.NewError(connectErr.Code(), err)
-		default:
-			return connect.NewError(connect.CodeInternal, err)
-		}
-	}
-	return connect.NewError(connect.CodeInternal, err)
+	return api.ConnectError(err)
 }
 
 // descriptionBytes resolves the description a request carries: a document as bytes

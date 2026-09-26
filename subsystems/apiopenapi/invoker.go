@@ -91,8 +91,5 @@ func (i *Invoker) InvokeApi(ctx context.Context, request *connect.Request[apiv1.
 // ConnectRPC code, so the classification survives the transport instead of being
 // re-derived from a message.
 func providerError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return connect.NewError(connectCode(api.KindOf(err)), err)
+	return api.ConnectError(err)
 }

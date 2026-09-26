@@ -13,29 +13,10 @@ import (
 type discoveryClientAlias = discovery.Client
 
 // connectCode maps a classified failure onto the canonical ConnectRPC code. The
-// classification is the single source of truth, so the codes a caller sees mean
-// the same thing whichever provider produced them.
+// classification is the single source of truth and so is the mapping, which lives
+// in the framework rather than in each provider that needs it.
 func connectCode(kind api.ErrorKind) connect.Code {
-	switch kind {
-	case api.KindInvalid:
-		return connect.CodeInvalidArgument
-	case api.KindNotFound:
-		return connect.CodeNotFound
-	case api.KindFailedPrecondition:
-		return connect.CodeFailedPrecondition
-	case api.KindDenied:
-		return connect.CodePermissionDenied
-	case api.KindAlreadyExists:
-		return connect.CodeAlreadyExists
-	case api.KindUnsupported:
-		return connect.CodeUnimplemented
-	case api.KindUnavailable:
-		return connect.CodeUnavailable
-	case api.KindInternal:
-		return connect.CodeInternal
-	default:
-		return connect.CodeInternal
-	}
+	return api.ConnectCode(kind)
 }
 
 // Descriptor is the in-process contract reader this subsystem serves, so a host
@@ -48,8 +29,5 @@ func Descriptor(options protocontract.Descriptor) *protocontract.Descriptor {
 // ConnectRPC code, so the classification survives the transport instead of being
 // re-derived from a message.
 func providerError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return connect.NewError(connectCode(api.KindOf(err)), err)
+	return api.ConnectError(err)
 }

@@ -6,9 +6,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/Manu343726/toolbox/pkg/api"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	modelv1 "github.com/Manu343726/toolbox/subsystems/model/modelv1"
 	"github.com/Manu343726/toolbox/subsystems/model/modelv1/modelv1connect"
@@ -54,9 +56,11 @@ func NewHandler(options Options) *Handler {
 	}
 	generate := options.Generate
 	if generate == nil {
+		// The reference provider classifies its own failure, so the code a caller
+		// sees comes from what went wrong rather than from a guess made here.
 		generate = func(_ context.Context, req *modelv1.GenerateRequest) (string, error) {
 			if req.GetModelId() != "reference/echo" {
-				return "", fmt.Errorf("model %q is not available", req.GetModelId())
+				return "", api.Errorf(api.KindNotFound, "model %q is not available", req.GetModelId())
 			}
 			return req.GetPrompt(), nil
 		}
@@ -88,7 +92,10 @@ func New(options Options) (*subsystem.Server, error) {
 func (h *Handler) ListModels(_ context.Context, req *connect.Request[modelv1.ListModelsRequest]) (*connect.Response[modelv1.ListModelsResponse], error) {
 	provider := ""
 	if req != nil && req.Msg != nil {
-		provider = req.Msg.GetProvider()
+		// A filter of only whitespace is no filter, the same as an absent one, so a
+		// client that built the field from an unset variable is not answered with
+		// an empty catalog.
+		provider = strings.TrimSpace(req.Msg.GetProvider())
 	}
 	h.mu.RLock()
 	result := make([]*modelv1.ModelDescriptor, 0)
@@ -104,12 +111,19 @@ func (h *Handler) ListModels(_ context.Context, req *connect.Request[modelv1.Lis
 
 // Generate invokes the configured provider implementation.
 func (h *Handler) Generate(ctx context.Context, req *connect.Request[modelv1.GenerateRequest]) (*connect.Response[modelv1.GenerateResponse], error) {
-	if req == nil || req.Msg == nil || req.Msg.GetModelId() == "" {
+	// A model identifier that is only whitespace names nothing, and accepting it
+	// would hand the provider a request it cannot match — which answers not-found
+	// and sends the caller looking for a model that is right there in the catalog.
+	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetModelId()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("model_id is required"))
 	}
 	text, err := h.generate(ctx, req.Msg)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		// A provider says what went wrong and the mapping turns that into a code.
+		// Reporting every failure as not-found sent a caller looking for a model
+		// that exists, and told a caller that cancelled to investigate a request it
+		// had already abandoned.
+		return nil, api.ConnectError(err)
 	}
 	return connect.NewResponse(&modelv1.GenerateResponse{ModelId: req.Msg.GetModelId(), Text: text}), nil
 }
