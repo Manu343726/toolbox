@@ -115,8 +115,9 @@ The rules the format sets, which this framework enforces rather than interprets:
   `assets/` are conventional, not required.
 
 The format also allows `license`, `compatibility`, `metadata` and `allowed-tools`
-fields. **Not yet decided:** which of these the framework carries through, and
-`allowed-tools` in particular has a security question attached to it — see *Security*.
+fields. All are carried through to a client that reads them, and `allowed-tools` is the
+one exception — see *Security*, and *A request for more authority is not a statement of
+need* for the distinction that decides it.
 
 ## Toolbox skills are templates; what is served is distilled
 
@@ -321,8 +322,9 @@ that guessed wrong hands a client content it cannot use and nothing in the resul
 reveal the guess. A client this framework has never heard of gets the common
 denominator: `name`, `description`, and the complete file set.
 
-**Not yet decided:** what the "skills features" are that distillation adapts to, and what
-a client that has no skills support at all is given. See below.
+All four target clients support skills, so no client needs a fallback for having none.
+A client this framework has never heard of gets the common denominator: `name`,
+`description`, and the complete file set.
 
 ### What a Toolbox extension may add
 
@@ -332,10 +334,14 @@ how a skill a person put in their own project gets switched off, and it is a pro
 of the template rather than of the project's configuration, which is why a project does
 not need a second list to hold exclusions.
 
-**Not yet decided:** the exact property names and their types, and whether the
-distilled output carries them. They are namespaced under the prefix above precisely so
-a client that does not know them ignores them, and so a future Toolbox can add more
-without a second naming scheme.
+**Decided:** the namespaced properties are **not carried into the distilled output**. The
+served frontmatter is the standard's fields, so another reader gets a skill it
+recognises and a property about how *this* deployment treats a skill stays on the
+template where it belongs.
+
+**Not yet decided:** the exact property names beyond `enabled`, and their types. They
+are namespaced precisely so a client that does not know them ignores them, and so a
+future Toolbox can add more without a second naming scheme.
 
 **Answered by checking rather than assuming:** the Agent Skills standard has **no**
 `enabled` flag. Its frontmatter is exactly `name`, `description`, `license`,
@@ -409,10 +415,10 @@ cannot be forgotten; a remote skill is named explicitly, so the configuration fi
 records that this project depends on somebody else's content — which is a fact worth
 being able to read, diff, and review.
 
-**Not yet decided:** how a local skill is *disabled*. It is implicitly included, so
-there is no entry to remove, and a skill a person put in their own project is not
-obviously one they want switched off at runtime. Either there is a way to exclude one,
-or the honest answer is that disabling applies only to skills that were named.
+**A local skill is disabled by the template itself**, through
+`com.github.manu343726.toolbox/enabled` in its own frontmatter. It is implicitly
+included, so there is no entry in the project's configuration to remove, and a skill a
+person put in their own project is switched off in the same place they put it.
 
 ### Fully-qualified references and the URI
 
@@ -450,9 +456,8 @@ read and verified where the catalog keeps it, and a project gains access to it b
 it. This is what keeps the read-only claim about every catalog true, and it is why a
 read-only catalog is not a limitation here rather than a missing feature.
 
-**Not yet decided:** whether the framework may rewrite a person's configuration file at
-all when an agent asks. That is a write to a file a human owns and edits, and it is
-treated below under *Security* rather than assumed.
+A change to a project's configuration file is confirmed by the user. See *Security*, and
+AGENTS.md rule 17, which states it as a general rule rather than a skills one.
 
 ### The aggregate
 
@@ -503,12 +508,12 @@ effects: each declares what invoking it does, and a policy decides whether an ag
 invoke it. A tool that adds a remote skill to a project is `create`-shaped, and one that
 lists or finds is `read_only`.
 
-**Not yet decided:** whether `find` searches through the catalogs or searches only
-their local index. A catalog is a provider; whether it can answer a query, or must be
-enumerated and filtered here, changes the contract every catalog has to satisfy.
+**`find` pushes the query to the catalogs.** A catalog is a provider and it answers its
+own query, so a large catalog is not shipped to be filtered here. This is part of the
+catalog contract in phase 3.
 
-**Not yet decided:** whether the write tools are available at all without an explicit
-opt-in, and if so, what they are allowed to write. See *Security*.
+The write tools are subject to the configuration-confirmation rule, so an agent adding a
+skill is asked before the file changes.
 
 ### The `skills.sh` catalog
 
@@ -769,9 +774,10 @@ Open:
   and names the file and the change. It is AGENTS.md rule 17, and it applies to any
   feature whose job involves a project saying something new about itself — so the tools
   that add, enable and disable a skill go through it, and so does anything added later.
-- **Not yet decided:** what a skill from a third-party catalog is trusted to be,
-  including whether including one is a decision a project must make by name — which the
-  qualified-reference model already gives a place to record.
+- **A skill is a skill.** The framework does not classify skills by origin, and a
+  catalog prefix is not a trust tier. What a project does have is a place to record
+  that it depends on somebody else's content: the `skills:` list names every non-local
+  skill by qualified reference, so the dependency is visible in a file a person reads.
 
 ## What exists today
 
