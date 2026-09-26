@@ -20,6 +20,7 @@ require (
 	github.com/Manu343726/toolbox/subsystems/prompt v0.0.0
 	github.com/Manu343726/toolbox/subsystems/registry v0.0.0
 	github.com/Manu343726/toolbox/subsystems/skill v0.0.0
+	github.com/Manu343726/toolbox/subsystems/skillgit v0.0.0-00010101000000-000000000000
 	github.com/Manu343726/toolbox/subsystems/tool v0.0.0
 	github.com/Manu343726/toolbox/subsystems/workflow v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -84,6 +85,8 @@ replace github.com/Manu343726/toolbox/subsystems/prompt => ../../subsystems/prom
 replace github.com/Manu343726/toolbox/subsystems/registry => ../../subsystems/registry
 
 replace github.com/Manu343726/toolbox/subsystems/skill => ../../subsystems/skill
+
+replace github.com/Manu343726/toolbox/subsystems/skillgit => ../../subsystems/skillgit
 
 replace github.com/Manu343726/toolbox/subsystems/tool => ../../subsystems/tool
 
