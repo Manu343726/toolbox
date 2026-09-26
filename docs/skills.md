@@ -155,16 +155,45 @@ It needs no configuration entry to exist. A project with no `skills/` directory 
 empty `local` catalog, and an empty catalog is a project that offers nothing, not a
 project that failed to start.
 
-**Not yet decided:** whether `local` is read-only or read-write. A person's answer is
-that they edit the files; the framework's answer would be that installing a catalog's
-skill into a project writes into this directory. Those are different claims about the
-same directory and only one of them can be true.
+**`local` is read-only.** The framework reads this directory and never writes to it. A
+person owns these files and edits them as they would any file in their project.
 
-### Fully-qualified references
+### What a project includes
+
+A project's `skills:` list in its configuration file names **fully-qualified skill
+references**:
+
+```yaml
+skills:
+  - skills.sh.pull-request-review
+  - some-team.coding-standards
+```
+
+Skills in the `local` catalog are **included implicitly**: every skill under
+`.toolbox/skills/` is part of the project without being named, because a person who put
+a skill in their own project has already said they want it.
+
+So the project's effective set is:
+
+```text
+  every skill in the local catalog          (implicit, never listed)
++ every reference named in skills:          (explicit, each qualified)
+```
+
+The distinction is what the two halves are for. A local skill needs no ceremony and
+cannot be forgotten; a remote skill is named explicitly, so the configuration file
+records that this project depends on somebody else's content — which is a fact worth
+being able to read, diff, and review.
+
+**Not yet decided:** how a local skill is *disabled*. It is implicitly included, so
+there is no entry to remove, and a skill a person put in their own project is not
+obviously one they want switched off at runtime. Either there is a way to exclude one,
+or the honest answer is that disabling applies only to skills that were named.
+
+### Fully-qualified references and the URI
 
 A skill is named `<catalog>.<name>`. `local.code-review` is the `code-review` skill in
-the `local` catalog; `skills.sh.some-owner-some-skill` is a skill from the remote
-catalog.
+the `local` catalog; `skills.sh.pull-request-review` is a skill from the remote catalog.
 
 The catalog prefix is not decoration. Two catalogs may both hold a skill called
 `code-review`, and the specification is explicit that skill names are *not* unique and
@@ -172,12 +201,34 @@ that a host must resolve them per origin — so the thing that identifies a skil
 framework is the pair, and dropping the catalog from a reference would reintroduce
 exactly the collision the qualification exists to prevent.
 
-**Not yet decided:** how the qualified reference maps onto the MCP URI. The
-specification requires the *final* path segment to equal the skill name, and allows
-leading segments as a server-chosen organisational prefix, so `skill://<catalog>/<name>/SKILL.md`
-satisfies it. Whether the implicit `local` catalog is spelled out or elided is open —
-and it should be one or the other, because two spellings of one skill is the ambiguity
-the qualification was introduced to remove.
+**The catalog is always spelled in the URI**, including for a project skill:
+
+```text
+skill://local/code-review/SKILL.md
+skill://skills.sh/pull-request-review/SKILL.md
+```
+
+The specification requires the final path segment to equal the skill name and allows
+leading segments as a server-chosen prefix, so this satisfies it. One spelling per
+skill means the string in a configuration file and the string in a URI are the same
+fact, and there is no rule to learn about when the prefix disappears.
+
+### Adding and removing a skill never writes a catalog
+
+`local` is read-only, and an agent can add a skill to a project, enable one and disable
+one. Those are consistent, and the reconciliation is the important part: **"adding a
+skill to the project" means adding a reference to the project's configuration file, not
+copying files into it.**
+
+So the framework's write surface for skills is exactly one thing — the `skills:` list in
+`pkg/config` — and the catalogs themselves are never written. A remote skill is fetched,
+read and verified where the catalog keeps it, and a project gains access to it by naming
+it. This is what keeps the read-only claim about every catalog true, and it is why a
+read-only catalog is not a limitation here rather than a missing feature.
+
+**Not yet decided:** whether the framework may rewrite a person's configuration file at
+all when an agent asks. That is a write to a file a human owns and edits, and it is
+treated below under *Security* rather than assumed.
 
 ### The aggregate
 
@@ -191,6 +242,49 @@ several implementations of one contract, selected at the point of use, with a
 deployment deciding which are present. The consequence to carry through the design is
 the one that applies to every provider in this framework — resolution is by *identifier*,
 not by contract name, because several providers serve the same contract on purpose.
+
+### The subsystem
+
+`subsystems/skill` is **reshaped** into the aggregator. Its existing versioned in-memory
+catalogue of skill metadata is not a catalog in this sense — no files, no digests,
+nothing to aggregate — and it goes.
+
+The reshaped subsystem does three things, which is why it is one subsystem rather than
+three:
+
+1. **Aggregates.** It holds the registered catalogs and resolves a qualified reference
+   to the one that owns it.
+2. **Serves over MCP.** It is the deployment's `io.modelcontextprotocol/skills`
+   endpoint, so skills reach an agent through the same client that already sees the
+   deployment's tools.
+3. **Offers agent tools.** It is how an agent finds, adds, enables and disables skills.
+
+### The agent tools
+
+An agent needs to *discover* skills, not only be handed the ones a project already
+names — otherwise a project cannot use the catalog it integrated until a human has read
+its index. The subsystem therefore exposes tools for:
+
+| Tool | Does |
+|---|---|
+| find a skill | Search the integrated catalogs for skills matching something an agent wants |
+| add a skill to the project | Add a qualified reference to the project's `skills:` list |
+| enable a skill | Add a reference that is present but not included |
+| disable a skill | Remove a reference from the project's `skills:` list |
+
+These are **not** the same thing as the `skills/*` MCP methods, and the difference
+matters. `skills/list` reports what the project may use; these tools change what that
+is, and a tool that changes state is governed by the framework's rules about side
+effects: each declares what invoking it does, and a policy decides whether an agent may
+invoke it. A tool that adds a remote skill to a project is `create`-shaped, and one that
+lists or finds is `read_only`.
+
+**Not yet decided:** whether `find` searches through the catalogs or searches only
+their local index. A catalog is a provider; whether it can answer a query, or must be
+enumerated and filtered here, changes the contract every catalog has to satisfy.
+
+**Not yet decided:** whether the write tools are available at all without an explicit
+opt-in, and if so, what they are allowed to write. See *Security*.
 
 ### The `skills.sh` catalog
 
@@ -208,10 +302,9 @@ obvious endpoints), how a skill's files are obtained, how a version or a pin is
 expressed, how it behaves offline, and what a skill from it is trusted to be. The last
 of these is not a detail — see *Security*.
 
-**Not yet decided:** whether the aggregator is a reshape of `subsystems/skill` or a new
-subsystem beside it. The existing `subsystems/skill` holds a versioned in-memory
-catalogue of skill metadata, which is not a catalog in this sense: it has no files, no
-digests, and nothing to aggregate.
+**Not yet decided:** what a skill from this catalog is trusted to be, and how a project
+pins one. Both are in *Security* and in the catalog's own design rather than in the
+model above.
 
 ## Serving skills over MCP
 
@@ -387,19 +480,35 @@ prompt-injection surface in a way a tool call is not: a served skill can place
 server-authored bytes in front of a model and direct it to act on them with the host's
 own tools.
 
-What this framework must therefore decide, step by step:
+Decided:
 
-- **Not yet decided:** whether a skill's `allowed-tools` frontmatter is ignored
-  outright, or ignored unless a deployment has explicitly approved that grant for
-  that skill. The specification is explicit that a remote server populating
-  `allowed-tools` is requesting elevated access on the host, not describing its own
-  environment — so a default of "honour it" is not available.
-- **Not yet decided:** what approval, if any, a skill load requires in this framework,
-  and whether approval is bound to the entry's `resources` set.
+- **`allowed-tools` is ignored**, and that is a decision rather than a gap. The
+  specification is explicit that a remote server populating this field is *requesting
+  elevated access on the host*, not describing its own environment — so a default of
+  "honour it" is not available. A skill naming `allowed-tools` is served, the field is
+  not acted on, and the reason is recorded here so it can be revisited deliberately
+  rather than rediscovered.
+
+Open:
+
+- **Not yet decided:** what approval, if any, a skill load requires, and whether an
+  approval is bound to the entry's `resources` set. The specification requires that
+  binding wherever a host persists approvals, because a changed set means the content a
+  person agreed to is no longer the content being loaded.
 - **Not yet decided:** how a skill's origin is made visible to a model that receives
   its content. A catalog prefix is not the same thing as an origin: a skill from
   `skills.sh` is third-party content, and a project that includes one should be able to
   see that before the skill's text reaches a model.
+- **Not yet decided:** whether the framework may rewrite a person's `config.yaml` when
+  an agent asks it to add a skill. This is the sharpest question in the feature. It is a
+  write to a file a human owns and edits by hand, inside a directory that is theirs, and
+  an agent doing it changes what their next review will contain. The options are not
+  equally attractive: refuse the write and have the tool report the reference to add,
+  permit it and make the write loud and reversible, or require an explicit
+  per-deployment opt-in for the write tools.
+- **Not yet decided:** what a skill from a third-party catalog is trusted to be,
+  including whether including one is a decision a project must make by name — which the
+  qualified-reference model already gives a place to record.
 
 ## What exists today
 
