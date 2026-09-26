@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Manu343726/toolbox/pkg/config"
 	"github.com/Manu343726/toolbox/pkg/host"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
@@ -61,10 +64,19 @@ func (d *deferredHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // runDaemon runs the core until it is interrupted.
+//
+// A deployment whose launch mode is "disabled" cannot run one, and the subcommand is
+// refused rather than hidden: somebody who typed it is asking for something this
+// installation has said it does not do, and the answer is the reason, not an absent command.
 func runDaemon(cmd *cobra.Command, _ []string) error {
 	resolved, err := resolveConfig(cmd)
 	if err != nil {
 		return err
+	}
+	if resolved.Launch == config.LaunchDisabled {
+		return fmt.Errorf(
+			"daemon.launch is %q, so this installation does not run a daemon: "+
+				"set it to %q or %q to have one", config.LaunchDisabled, config.LaunchAuto, config.LaunchExplicit)
 	}
 	reportConfig(cmd, resolved)
 	out := cmd.ErrOrStderr()
@@ -81,15 +93,26 @@ func runDaemon(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	// The core is the registry, and it owns the address. Every other subsystem keeps
-	// an ephemeral loopback port: a subsystem this process started needs no address to
-	// be found at, and giving one would imply it could be found by a peer.
+	// The core is the registry, and it owns the daemon address. Every other subsystem keeps
+	// an ephemeral loopback port: a subsystem this process started needs no address to be
+	// found at, and giving one would imply it could be found by a peer.
+	//
+	// The Model Context Protocol endpoint binds an address of its own. When that address is
+	// the daemon's, the endpoint is mounted on the registry's server and the deployment is
+	// one port; when it is not, it gets a second listener. Either way it is a mount rather
+	// than a service, because it is not a protobuf contract and putting it in reflection
+	// would be a lie.
 	mcp := &deferredHandler{}
-	h, catalog, err := buildHost(resolved, resolved.Core.Addr(), subsystem.Mount{
-		Path:        MCPPath,
-		Handler:     mcp,
-		Description: "The core's Model Context Protocol endpoint.",
-	})
+	sameAddress := config.SameAddress(resolved.Daemon, resolved.MCP)
+	var mounts []subsystem.Mount
+	if sameAddress {
+		mounts = []subsystem.Mount{{
+			Path:        MCPPath,
+			Handler:     mcp,
+			Description: "The core's Model Context Protocol endpoint.",
+		}}
+	}
+	h, catalog, err := buildHost(resolved, resolved.Daemon.Addr(), mounts...)
 	if err != nil {
 		return err
 	}
@@ -135,12 +158,39 @@ func runDaemon(cmd *cobra.Command, _ []string) error {
 	// Endpoint is already a URL, scheme included, because that is what a client dials.
 	coreURL := registryServer.Endpoint()
 	fmt.Fprintf(out, "toolbox: core listening on %s\n", coreURL)
-	fmt.Fprintf(out, "toolbox: Model Context Protocol on %s%s\n", coreURL, MCPPath)
-	fmt.Fprintf(out, "toolbox: point a client at it with --core %s\n", resolved.Core.Addr())
 
-	// The registry's server is already serving the mount, so the daemon's job is to
-	// stay alive and let the signal through rather than to hold a listener of its
-	// own. A second listener on the same port would be the wrong answer twice.
+	// The second listener, when the endpoint has an address of its own. It is started after
+	// the handler is installed, so the endpoint never answers with an empty tool list, and
+	// it is shut down with the signal so a stopped daemon releases both ports rather than
+	// leaving one that answers and one that does not.
+	var endpointServer *http.Server
+	if !sameAddress {
+		listener, err := net.Listen("tcp", resolved.MCP.Addr())
+		if err != nil {
+			return fmt.Errorf("the Model Context Protocol endpoint cannot listen on %s: %w", resolved.MCP.Addr(), err)
+		}
+		mux := http.NewServeMux()
+		mux.Handle(MCPPath, bridge.HTTPHandler())
+		endpointServer = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if serveErr := endpointServer.Serve(listener); serveErr != nil &&
+				!errors.Is(serveErr, http.ErrServerClosed) {
+				fmt.Fprintf(out, "toolbox: the Model Context Protocol endpoint stopped: %v\n", serveErr)
+			}
+		}()
+		defer func() {
+			bounded, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = endpointServer.Shutdown(bounded)
+		}()
+		fmt.Fprintf(out, "toolbox: Model Context Protocol on %s%s\n", resolved.MCP.URL(), MCPPath)
+	} else {
+		fmt.Fprintf(out, "toolbox: Model Context Protocol on %s%s\n", coreURL, MCPPath)
+	}
+	fmt.Fprintf(out, "toolbox: point a client at it with --core %s\n", resolved.Daemon.Addr())
+
+	// The registry's server is already serving, so the daemon's job is to stay alive and
+	// let the signal through.
 	<-ctx.Done()
 	fmt.Fprintf(out, "toolbox: core stopping\n")
 	return shutdownDaemon(ctx, h)

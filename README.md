@@ -213,12 +213,25 @@ Start with an empty surface and let the assistant ask for what it needs as it go
 The same operations are commands, with the same flags, for you rather than for an
 assistant — `toolbox knowledge search --query …` reaches the knowledge subsystem, and a
 policy does not stand between you and your own deployment. A core keeps the state between
-invocations:
+invocations, and one starts itself the first time you need it, the way a tmux server does:
 
 ```sh
-./bin/toolbox daemon --all &                                   # one address, long-lived
 ./bin/toolbox knowledge put-source --source.id notes --source.location mem://notes
 ./bin/toolbox knowledge get-source --id notes                  # a different process, same data
+```
+
+How an installation is wired is a small file, and it covers the addresses, the policy, and
+who starts the core:
+
+```yaml
+# .toolbox/config.yaml
+daemon:
+  port: 9180
+  launch: auto            # auto starts one when needed, explicit leaves it to systemd,
+                          # disabled runs everything from this machine
+mcp:
+  port: 9181              # an address of its own, for an agent surface to be firewalled
+policy: ./ops.policy
 ```
 
 [`docs/cli.md`](docs/cli.md) covers what the generated commands do with nested messages,
@@ -294,6 +307,7 @@ Engineering detail:
 - [Architecture](docs/architecture.md) — boundaries, runtime layers, composition, constraints
 - [MCP gateway](docs/mcp.md) — agent tooling, exposure control, client setup
 - [Command line](docs/cli.md) — every operation as a command, with its contract's own flags
+- [Deployment configuration](docs/configuration.md) — the config file, and how the daemon is launched
 - [Policy](docs/policy.md) — the document deciding what an agent may call
 - [Development guide](docs/development.md) — build, contracts, code generation
 - [Testing guide](docs/testing.md) — test layers and required checks

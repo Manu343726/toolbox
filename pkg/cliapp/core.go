@@ -124,41 +124,32 @@ func (t *target) coreAddress() string {
 	return normaliseCoreAddress(configuredCoreAddress(t.options))
 }
 
-// configuredCoreAddress resolves a core address from the environment or a configuration
-// file, and reports whether one was asked for at all.
-func configuredCoreAddress(options Options) string {
-	if os.Getenv(config.EnvCore) != "" || os.Getenv(config.EnvPort) != "" {
-		if resolved, err := resolveFromConfig(); err == nil {
-			return resolved
-		}
-	}
-	if resolved, err := resolveFromConfig(); err == nil && resolved != "" {
-		return resolved
-	}
-	return ""
-}
-
-// resolveFromConfig reads the configuration chain, reporting whether a core was named.
+// configuredCoreAddress resolves a core address from the environment or a configuration file,
+// and returns nothing when nobody asked for one.
 //
 // Only an address somebody asked for counts. Every client has a default address, and treating
-// the default as configured would point every subsystem command at a core that is not
-// running and report an unreachable deployment where there is none.
-func resolveFromConfig() (string, error) {
-	workDir, err := os.Getwd()
+// the default as configured would point every subsystem command at a core that is not running
+// and report an unreachable deployment where there is none. The resolver is the same one the
+// host uses, so a subsystem command and the host agree about a deployment by construction.
+func configuredCoreAddress(options Options) string {
+	resolved, err := config.New(config.Options{WorkDir: workDir()}).Resolve("")
 	if err != nil {
-		return "", nil
+		return ""
 	}
-	resolved, err := config.Resolve(config.Overrides{
-		ConfigFile: os.Getenv(config.EnvConfigFile),
-	}, workDir)
+	if resolved.SourceOf(config.KeyDaemonHost) == config.SourceDefault &&
+		resolved.SourceOf(config.KeyDaemonPort) == config.SourceDefault {
+		return ""
+	}
+	return resolved.Daemon.Addr()
+}
+
+// workDir is where a project configuration file is searched from.
+func workDir() string {
+	dir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "."
 	}
-	asked := os.Getenv(config.EnvCore) != "" || os.Getenv(config.EnvPort) != "" || resolved.Path != ""
-	if !asked {
-		return "", nil
-	}
-	return resolved.Core.Addr(), nil
+	return dir
 }
 
 func normaliseCoreAddress(address string) string {

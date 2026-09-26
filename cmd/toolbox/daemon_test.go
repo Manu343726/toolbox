@@ -64,7 +64,7 @@ func startCore(t *testing.T, components ...string) (*hostHandle, *deferredHandle
 	t.Helper()
 	address := freeAddress(t)
 	deferred := &deferredHandler{}
-	h, catalog, err := buildHost(config.Config{Core: config.Core{Host: "127.0.0.1", Port: portOf(t, address)}}, address, coreMount(deferred))
+	h, catalog, err := buildHost(config.Config{Daemon: config.Listen{Host: "127.0.0.1", Port: portOf(t, address)}}, address, coreMount(deferred))
 	require.NoError(t, err)
 	require.NoError(t, h.Select(components...))
 	require.NoError(t, h.Start(t.Context()))

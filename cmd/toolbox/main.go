@@ -58,17 +58,13 @@ func newRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		RunE:          runServe,
 	}
-	// Persistent, because every subcommand resolves the same four things: which
-	// subsystems, which policy, which core, and which workspace. A local flag on the
-	// root is invisible to a subcommand, so `toolbox mcp --all` would read a flag it
-	// never had.
+	// Persistent, because every subcommand resolves the same deployment: which subsystems,
+	// which policy, which core, which workspace. A local flag on the root is invisible to a
+	// subcommand, so `toolbox mcp --all` would read a flag it never had.
+	addConfigFlags(root)
 	flags := root.PersistentFlags()
 	flags.StringSlice("component", nil, "Subsystem names to launch; repeatable or comma-separated")
 	flags.Bool("all", false, "Launch all built-in subsystems")
-	flags.String("policy", "", "Path to a policy document deciding which operations may be exposed; the default grants every read and nothing that changes state")
-	flags.String("core", "", "Address of the core this process belongs to, as host:port; a flag beats the environment, which beats the configuration file")
-	flags.Int("port", 0, "Port of the core on its own, leaving the host from the rest of the chain")
-	flags.String("scope", "", "Workspace this client works in; a single core serves many projects, each with its own configuration, policy, and knowledge")
 
 	mcpCommand := &cobra.Command{
 		Use:   "mcp",

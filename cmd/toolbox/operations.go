@@ -3,14 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 
 	"github.com/Manu343726/toolbox/pkg/cli"
 	"github.com/Manu343726/toolbox/pkg/config"
 	"github.com/Manu343726/toolbox/pkg/core"
-	registrydir "github.com/Manu343726/toolbox/subsystems/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -172,30 +169,18 @@ func resolveOperationTarget(cmd *cobra.Command, resolver *lateResolver) (func(),
 	// process, or by one after the other declined.
 	reportConfig(cmd, resolved)
 
-	cleanup := func() {}
-
-	var directory *registrydir.Directory
-	if coreIsConfigured(cmd, resolved) {
-		// A core that cannot be reached does not stop the command: the caller may have a
-		// core configured and not be running it, and a deployment with no core has to work
-		// from the command line. But it is said out loud, because the alternative is a call
-		// answered by a local subsystem the caller did not ask for — which for a write
-		// reports success and leaves nothing behind for the next process to read, and that
-		// is not a failure anybody can diagnose from the output.
-		var err error
-		directory, err = openCoreDirectory(resolved.Core.Addr())
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(),
-				"toolbox: the core at %s did not answer (%v); serving this call from this process instead\n",
-				resolved.Core.Addr(), err)
-		}
+	// Whether a core answers, and what happens when one does not, is decided by how the
+	// deployment manages the daemon's lifecycle. That is a statement about who owns the
+	// state, so the three modes differ exactly here: "auto" starts one, "explicit" refuses
+	// rather than hide a stopped service, and "disabled" never needs one.
+	directory, err := reachCore(cmd.Context(), resolved, cmd.ErrOrStderr())
+	if err != nil {
+		return nil, err
 	}
-
 	if directory != nil {
-		// A core the caller named is the target, and nothing is started. Starting a local
-		// copy as well would answer the call from a store the core does not hold, so a
-		// write would appear to succeed and then be gone — which is the failure a caller
-		// cannot diagnose from the output, because the write reported success.
+		// A core is the target and nothing is started. Serving the call partly from a core
+		// and partly from this process would read to a caller as a write that happened, when
+		// it went to a store the core does not hold.
 		resolver.set(directory)
 		return directory.Close, nil
 	}
@@ -229,7 +214,6 @@ func resolveOperationTarget(cmd *cobra.Command, resolver *lateResolver) (func(),
 		ctx = context.Background()
 	}
 	if err := h.Start(ctx); err != nil {
-		cleanup()
 		return nil, fmt.Errorf("start the subsystems this operation needs: %w", err)
 	}
 	stopHost := func() { _ = h.Shutdown(context.Background()) }
@@ -238,53 +222,5 @@ func resolveOperationTarget(cmd *cobra.Command, resolver *lateResolver) (func(),
 	// knows every service it runs and a leg that could not answer would only add a way to
 	// be wrong.
 	resolver.set(core.NewChain(core.Leg{Name: "this process", Resolver: hostResolver{host: h}}))
-	return func() {
-		stopHost()
-		cleanup()
-	}, nil
-}
-
-// openCoreDirectory connects to the configured core's registry and follows its changes.
-//
-// A directory that cannot sync is returned as an error rather than as an empty directory,
-// because a directory that has never synced knows nothing and would report every service as
-// missing — which reads as "this deployment has no operations" rather than as "the core is
-// down".
-func openCoreDirectory(endpoint string) (*registrydir.Directory, error) {
-	address := strings.TrimSpace(endpoint)
-	if address == "" {
-		return nil, fmt.Errorf("no core address is configured")
-	}
-	if !strings.Contains(address, "://") {
-		address = "http://" + address
-	}
-	directory, err := registrydir.NewDirectory(registrydir.DirectoryOptions{Endpoint: address})
-	if err != nil {
-		return nil, err
-	}
-	if err := directory.Start(context.Background()); err != nil {
-		return nil, err
-	}
-	return directory, nil
-}
-
-// coreIsConfigured reports whether a core address came from somewhere at all.
-//
-// Every client has a default address, so asking whether one is configured is not the same as
-// asking whether it has one. Dialling a default that nothing is listening on would add a
-// refused connection to every command, and the refusal would be indistinguishable from a
-// real problem in the output.
-func coreIsConfigured(cmd *cobra.Command, resolved config.Config) bool {
-	if flag := cmd.Flags().Lookup("core"); flag != nil && flag.Changed {
-		return true
-	}
-	if port := cmd.Flags().Lookup("port"); port != nil && port.Changed {
-		return true
-	}
-	if os.Getenv(config.EnvCore) != "" || os.Getenv(config.EnvPort) != "" {
-		return true
-	}
-	// A path means a configuration file was read, and a file that was read may have said
-	// nothing about a core — but it did ask, so the answer is worth consulting.
-	return resolved.Path != ""
+	return stopHost, nil
 }

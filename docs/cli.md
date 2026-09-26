@@ -63,55 +63,47 @@ Nesting is bounded, and a message that contains itself — `ApiSchema` holds rep
 
 ## Where a call goes
 
-An operation command resolves its service before calling:
+An operation command resolves its service before calling, and **how it behaves when the core
+does not answer is a deployment setting** — see
+[`configuration.md`](configuration.md#daemonlaunch) for the three modes and what each one
+does. In short:
 
-1. **A core that answers is the target**, and nothing is started. A core holds the state a
-   deployment accumulates, so a call answered anywhere else would write to a store nobody
-   else can see — and report success.
-2. **Otherwise this process serves it**, starting the subsystems `--component` selected.
-
-A core that is configured but not running falls back to this process *and says so* on
-stderr. Refusing would make a configured-but-absent core indistinguishable from a broken
-deployment; falling back silently would make a write look durable when it is not.
-
-```
-$ toolbox knowledge get-source --core 127.0.0.1:9180 --id notes
-toolbox: core at 127.0.0.1:9180
-toolbox: the core at 127.0.0.1:9180 did not answer (…); serving this call from this process instead
-```
+1. **A core that answers is the target**, and nothing is started. A call answered anywhere
+   else would write to a store nobody else can see, and report success.
+2. **`auto`** (the default) starts one if none is answering, for an address on this machine.
+3. **`explicit`** does not start one and does not fall back — the lifecycle belongs to an
+   init system, and a client that quietly served a private copy would hide a stopped service
+   behind a working command.
+4. **`disabled`** never needs one, and refuses the `daemon` subcommand.
 
 So a round trip across processes needs a core:
 
 ```sh
-toolbox daemon --all &                        # one address, state that outlives a command
-toolbox knowledge put-source --core 127.0.0.1:9180 --source.id notes --source.location mem://notes
-toolbox knowledge get-source --core 127.0.0.1:9180 --id notes     # a different process
+toolbox knowledge put-source --source.id notes --source.location mem://notes
+toolbox knowledge get-source --id notes     # a different process, same store
 ```
 
-A standalone subsystem command takes the same flag, and reaches the same state:
+With `auto` that needs no setup at all: the first command starts a detached core, exactly as
+a `tmux` server starts on the first `tmux` invocation.
+
+Point at one explicitly with `--core`, which is the short way to name the daemon's address:
 
 ```sh
-knowledge --core 127.0.0.1:9180 put-source --source.id notes --source.location mem://notes
-toolbox knowledge get-source --core 127.0.0.1:9180 --id notes
+toolbox knowledge get-source --core core.internal:9180 --id notes
 ```
 
-A core's address is its **registry's**, not the address of every service it hosts — so a
-command pointed at a core asks the core where the peer is, and a core that hosts nothing
-says so. A command given a core and a way to reach it never starts a subsystem of its own.
+A standalone subsystem command takes the same flags and reaches the same state:
 
-Two commands only make sense with a subsystem in this process: `serve` and `mcp`. Pointed at
-a core they refuse, and say why:
-
-```
-$ knowledge --core 127.0.0.1:9180 serve
-serving the subsystem needs a subsystem in this process, and this command is pointed at
-the core at http://127.0.0.1:9180: the core is already serving. Run it without --core to
-serve knowledge here
+```sh
+knowledge --core core.internal:9180 put-source --source.id notes --source.location mem://notes
+toolbox knowledge get-source --core core.internal:9180 --id notes
 ```
 
-They are not hidden. A hidden command is one whose absence a caller has to guess at, and
-"can this serve anything?" is a question worth answering — it is answered with the reason
-rather than with silence.
+A call that cannot reach the core says so, and names it:
+
+```
+the core at 127.0.0.1:1 did not answer: …
+```
 
 ## The policy does not apply here
 

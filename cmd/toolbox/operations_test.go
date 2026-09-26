@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Manu343726/toolbox/pkg/cli"
 	"github.com/Manu343726/toolbox/pkg/config"
@@ -115,20 +117,15 @@ func TestAStreamingMethodIsOfferedAndRefused(t *testing.T) {
 // A call is answered, and the answer says which core it was resolved against. A caller whose
 // write succeeded needs to know whether the next process will see it, and that is not
 // something the output of a successful call can be left to imply.
+//
+// The mode is pinned because the default is to start a core, and a test about reporting
+// should not also be a test about spawning one.
 func TestACallReportsTheCoreItResolvedAgainst(t *testing.T) {
-	_, stderr, err := runRoot(t, "health", "check")
+	_, stderr, err := runRoot(t, "health", "check",
+		"--launch", "disabled", "--daemon-host", "127.0.0.1", "--daemon-port", "1")
 	require.NoError(t, err)
-	assert.Contains(t, stderr, "core at", "the resolved core is reported, like every other command")
-}
-
-// A call against a core that is not running falls back to this process and says why.
-// Refusing would make a configured-but-absent core indistinguishable from a broken
-// deployment; falling back silently would make a write look durable when it is not.
-func TestACallAgainstACoreThatIsNotRunningSaysWhyItFellBack(t *testing.T) {
-	_, stderr, err := runRoot(t, "health", "check", "--core", "127.0.0.1:1")
-	require.NoError(t, err, "a deployment with no core still works from the command line")
-	assert.Contains(t, stderr, "did not answer", "and says the core it could not reach")
-	assert.Contains(t, stderr, "127.0.0.1:1", "naming the address, so the fix is obvious")
+	assert.Contains(t, stderr, "daemon at", "the resolved address is reported, like every other command")
+	assert.Contains(t, stderr, "launch is disabled", "and so is the mode that decided what to do about it")
 }
 
 // A command that does not exist is refused by name. A caller who mistyped an operation needs
@@ -146,12 +143,13 @@ func TestAnUnknownCommandIsRefusedByName(t *testing.T) {
 // test should not have to infer which behaviour was intended.
 func TestTheCommandLineIsNotGatedByThePolicy(t *testing.T) {
 	_, stderr, err := runRoot(t, "knowledge", "put-source",
+		"--launch", "disabled", "--daemon-host", "127.0.0.1", "--daemon-port", "1",
 		"--source.id", "policy-check",
 		"--source.name", "Policy check",
 		"--source.type", "note",
 		"--source.location", "mem://policy-check")
 	require.NoError(t, err, "an operator may write with a read-only policy in force")
-	assert.NotContains(t, stderr, "policy",
+	assert.NotContains(t, stderr, "policy document",
 		"and nothing consulted one, so nothing reported one")
 }
 
@@ -290,12 +288,37 @@ func commandNames(command *cobra.Command) []string {
 // the generated call is the part with the defects.
 func runRoot(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
+	return runRootIn(t, args...)
+}
+
+// runRootIn is runRoot with a context the test chooses, for a command that blocks.
+func runRootIn(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	return runRootInContext(t, t.Context(), args...)
+}
+
+// runRootInContext executes the real command under a context the caller cancels, which is
+// how a test runs something that serves until interrupted.
+func runRootInContext(t *testing.T, ctx context.Context, args ...string) (string, string, error) {
+	t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	root := newRootCommand()
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)
-	err := root.ExecuteContext(t.Context())
+	err := root.ExecuteContext(ctx)
 	return stdout.String(), stderr.String(), err
+}
+
+// nothingListening reports whether anything is bound to an address, which is how a test sees
+// that a command refused before it bound anything.
+func nothingListening(t *testing.T, address string) bool {
+	t.Helper()
+	connection, err := net.DialTimeout("tcp", address, 250*time.Millisecond)
+	if err != nil {
+		return true
+	}
+	_ = connection.Close()
+	return false
 }
