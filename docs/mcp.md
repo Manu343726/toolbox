@@ -313,11 +313,69 @@ footprints are a planned enhancement.
 - Keep generated MCP bound to loopback or protect the HTTP endpoint with the
   deployment's authentication and origin controls.
 
+## Transports and the capabilities each carries
+
+The gateway is the same in every launch mode. What differs is what the protocol
+revision allows over a given transport, so a deployment picks the mode for the
+capability it needs rather than a capability per mode.
+
+The gateway serves protocol revision `2026-07-28` (`mcp.ProtocolRevision`).
+
+| Mode | Revision | Sessions | Elicitation | Skills extension |
+| --- | --- | --- | --- | --- |
+| stdio (`toolbox mcp`) | `2026-07-28` | yes | **yes** | yes |
+| Streamable HTTP | `2026-07-28` | no — stateless | no | yes |
+| SSE (deprecated) | negotiates to `2025-11-25` | yes | yes | no |
+
+The HTTP endpoint is **stateless**, and that is what makes the top row reachable
+over HTTP: the SDK's streamable HTTP transport serves `2026-07-28` only when
+`Stateless` is set, because the revision is sessionless by design. A stateful
+handler cannot serve it at all — clients negotiate down to `2025-11-25`, which is
+below the revision the Skills extension requires.
+
+Nothing is given up by it. The gateway holds no per-session state: exposure is
+process-wide, because exposure belongs to a deployment rather than to a
+connection, and each request is answered on its own.
+
+What a stateless endpoint cannot do is make a server-to-client request, which is
+what **elicitation** is — a server asking its client to collect input from the
+user. Elicitation is therefore a stdio capability: a deployment that needs the
+server to ask its user something runs the gateway over stdio, which serves the
+same revision with sessions. A rule that must reach a user — such as "a change to
+a project's configuration file is the user's to confirm" — either runs where
+elicitation is available, or is implemented as a value the agent has to relay and
+the user has to answer, which works on any transport.
+
+SSE is deprecated by the specification and never advertises `2026-07-28`; it is
+kept for the clients that still require it and is not extended.
+
+### What a sessionless request has to carry itself
+
+Because this revision has no `initialize` handshake, there is no place to remember
+a client's declaration. Every request carries its own:
+
+- `Mcp-Protocol-Version` header, and
+  `io.modelcontextprotocol/protocolVersion` in the request's `params._meta`;
+- `io.modelcontextprotocol/clientInfo` and
+  `io.modelcontextprotocol/clientCapabilities` in the same metadata;
+- `Mcp-Method`, and `Mcp-Name` for the three methods that name something
+  (`tools/call`, `prompts/get`, `resources/read`), so an intermediary can route
+  without parsing the body.
+
+Two consequences for this gateway. A refusal names what is missing, so a client
+can follow it — the SDK reports the missing declaration rather than treating the
+request as a method it does not know. And **client identity arrives with the
+request rather than with a connection**, which is what lets a served artefact
+depend on the client it is served to: a skill's content can be shaped per client
+with nothing in hand but the request. See `docs/skills.md`.
+
 ## Current limitations
 
 - Generated tools support unary methods only; streaming invocation is rejected
   explicitly.
-- HTTP exposure state is process-wide until per-session MCP servers are added.
+- HTTP exposure state is process-wide. A stateless endpoint has no session to hold
+  a per-connection footprint in, so a deployment that needs one uses independent
+  `Server` instances or stdio.
 - Exposure is not persisted across restarts.
 - The default policy is the zero policy, which permits nothing. A host reads one
   from `cmd/toolbox/policy/toolbox.policy` unless `--policy` supplies another, and

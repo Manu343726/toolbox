@@ -58,6 +58,19 @@ const (
 	maxToolNameLength = 100
 )
 
+// ProtocolRevision is the MCP protocol revision this gateway serves.
+//
+// It is stated here rather than read from the SDK, which keeps its own constant
+// unexported, because two things depend on it and both should depend on one
+// declaration: an extension that specifies a minimum revision — the Skills extension
+// requires 2026-07-28 or later — and the transport configuration that makes this
+// revision reachable at all, since the SDK's streamable HTTP transport serves it only
+// when stateless.
+//
+// If the SDK's newest revision moves, this moves with it, and an extension that pinned
+// a minimum is checked against this rather than against a literal of its own.
+const ProtocolRevision = "2026-07-28"
+
 // InitialExposure selects the initial generated-tool footprint.
 type InitialExposure uint8
 
@@ -611,6 +624,22 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 // HTTPHandler returns a Streamable HTTP handler for the generated server. The
 // current exposure state is process-wide; independent deployments should use
 // independent Server instances when session-isolated footprints are required.
+//
+// The handler is stateless, and that is what lets it serve protocol revision
+// 2026-07-28: the SDK's streamable HTTP transport supports that revision only when
+// Stateless is set, because the revision is sessionless by design — a stateless
+// server issues no Mcp-Session-Id, reads none, and answers each request from a
+// temporary session.
+//
+// Nothing is lost by it here. This server holds no per-session state: the exposure
+// footprint is process-wide, which is the framework's design — exposure belongs to a
+// deployment, not to a connection. It also makes no server-to-client request, so the
+// one thing a stateless transport cannot do has nothing to refuse.
+//
+// What a stateless HTTP endpoint cannot do is elicit, and that is a division of
+// labour rather than a shortfall. A deployment that needs the server to ask its user
+// something runs the same gateway over stdio, which supports the same revision with
+// sessions. AGENTS.md records which transport a capability needs.
 func (s *Server) HTTPHandler() http.Handler {
 	if s == nil || s.sdk == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -619,7 +648,7 @@ func (s *Server) HTTPHandler() http.Handler {
 	}
 	return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
 		return s.sdk
-	}, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	}, &sdkmcp.StreamableHTTPOptions{JSONResponse: true, Stateless: true})
 }
 
 func featureID(serviceName, methodName string) string {

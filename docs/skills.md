@@ -962,6 +962,75 @@ workaround for the SDK's absence of one.
 The upgrade is on its own, separately, because it is a change to a dependency every
 module shares and not a change to this feature.
 
+### The revision is reachable over HTTP only as a stateless server
+
+The SDK's streamable HTTP transport serves `2026-07-28` **only** when configured
+stateless. This is in the transport, not a preference:
+
+```go
+// The streamable HTTP transport supports every legacy SDK protocol version,
+// but the SEP-2575 >= 2026-07-28 protocol is only supported when the
+// transport is configured as stateless.
+func (t *StreamableServerTransport) SupportsProtocolVersion(version string) bool {
+	if version >= protocolVersion20260728 {
+		return t.Stateless && slices.Contains(supportedProtocolVersions, version)
+	}
+	return slices.Contains(supportedProtocolVersions, version)
+}
+```
+
+A stateful HTTP handler therefore cannot serve the extension at all: clients
+negotiate down to `2025-11-25`, which is below the revision the extension
+specifies. `HTTPHandler` is stateless, which is what makes the extension servable
+over HTTP. See `docs/mcp.md` for the full table.
+
+### What statelessness costs, and what it does not
+
+A stateless endpoint cannot make a server-to-client request, and the SDK rejects
+one immediately. **Elicitation is a server-to-client request**, so it is
+unavailable over a stateless HTTP endpoint.
+
+This costs the framework a capability it wants, and the wanting is worth stating
+plainly: elicitation is the standard mechanism for a server to ask its client to
+collect input from the user, and the framework has a rule that needs exactly
+that — a change to a project's configuration file is the user's to confirm, and
+adding a skill to a project writes `skills:`.
+
+Three facts make this a division of labour rather than a shortfall:
+
+- **The gateway is the same in every mode.** A deployment that needs the server to
+  ask its user something runs the same gateway over **stdio**, which serves
+  `2026-07-28` with sessions and can elicit. The transport is a launch-mode
+  choice, not a property of the framework.
+- **The framework holds no per-session state to lose.** The exposure footprint is
+  process-wide by design — exposure belongs to a deployment, not a connection — so
+  nothing is given up by answering each request on its own.
+- **The rule does not require a prompt to hold.** A rule that must reach a user
+  either runs where elicitation is available, or is implemented as a value the
+  agent has to relay and the user has to answer. The second works on any
+  transport, and is what this feature does: adding a skill to a project returns the
+  change and requires the user to confirm it, which is a two-step interaction
+  rather than a prompt.
+
+So: **elicitation is a stdio capability**, and the skills extension is served over
+both stdio and stateless HTTP. Neither is given up, and nothing needs to be
+revisited when elicitation is implemented.
+
+### One thing the sessionless revision changes about distillation
+
+The design says client identity comes from the connection, not from configuration.
+Under `2026-07-28` there is no connection to read it from — there is no
+`initialize` handshake at all — so the client states itself **on every request**:
+
+- `io.modelcontextprotocol/clientInfo` in the request's `params._meta`;
+- `io.modelcontextprotocol/clientCapabilities` beside it.
+
+The conclusion is the same and the mechanism is simpler: identity is what the
+client asserts on the request being served, never what a deployment configured
+about it. Distillation reads `clientInfo` from the request and has nothing in hand
+but that request. An unknown client is still the common denominator, and an
+assertion is still only an assertion — it selects a projection, it grants nothing.
+
 ## Security
 
 Skill content is instructional text delivered to a model, which makes it a
@@ -989,7 +1058,8 @@ Decided:
   restriction, and a statement of need are three different claims about authority, and
   the union keeps them apart.
 
-Open:
+Also decided, and recorded here so a later change to one can be argued from the
+reason rather than rediscovered:
 
 - **A load asks the user nothing. The project's list is the permission.** A skill the
   project names is a skill the project exposes, and a person who put a name in their own
@@ -1020,6 +1090,13 @@ Open:
   and names the file and the change. It is AGENTS.md rule 17, and it applies to any
   feature whose job involves a project saying something new about itself — so the tools
   that add, enable and disable a skill go through it, and so does anything added later.
+
+  "Asks first" is implemented as a value the agent has to relay and the user has to
+  answer, not as an MCP prompt. That is not a lesser mechanism chosen for convenience:
+  elicitation is unavailable on the stateless HTTP endpoint this feature must also be
+  served over, and a rule that only held on one transport would not be a framework
+  rule. The two-step interaction works everywhere. See *The revision is reachable over
+  HTTP only as a stateless server*.
 - **A skill is a skill.** The framework does not classify skills by origin, and a
   catalog prefix is not a trust tier. What a project does have is a place to record
   that it depends on somebody else's content: the `skills:` list names every non-local
@@ -1049,6 +1126,8 @@ rediscovered.
 | `SkillService` is read-only plus validate | The catalogs own storage. A write RPC on the aggregator that did not write a catalog would misreport where a skill lives. `validate` earns its place by failing a deployment at start rather than at first use. |
 | `directoryRead: false` | The manifest is already complete, and the specification says a directory read adds nothing for a host holding an entry. It is for dynamically generated skills, which a catalog of files is not. |
 | `allowed-tools` is ignored, and documented as ignored | A server populating that field is requesting elevated access on the host, not describing its own environment. Ignoring it now is a decision, not an omission: a skill naming `allowed-tools` is served, the field is not acted on, and the reason is recorded so it can be revisited deliberately. |
+| The HTTP MCP endpoint is stateless | The SDK's streamable HTTP transport serves `2026-07-28` only when stateless, and the Skills extension is specified against that revision. A stateful handler negotiates down to `2025-11-25` and cannot serve the extension at all. Nothing is lost: the gateway holds no per-session state, and exposure is process-wide by design. |
+| Elicitation is a stdio capability | A stateless endpoint cannot make a server-to-client request, and elicitation is one. The same gateway over stdio serves the same revision with sessions and can elicit, so the transport is a launch-mode choice and no capability is given up by choosing either. |
 
 ## Tests
 

@@ -155,6 +155,26 @@ Read these before making architectural changes:
     any feature whose job involves a project saying something new about itself goes
     through it.
 
+18. **A capability belongs to the transport that carries it, and the transport is a
+    launch-mode choice.** The gateway is the same in every mode; what differs is what
+    the protocol revision allows over it. Protocol revision `2026-07-28` is sessionless,
+    so the SDK's streamable HTTP transport serves it only when stateless — and a
+    stateless endpoint cannot make a server-to-client request, which is what
+    **elicitation** is. A stateful HTTP endpoint negotiates *down* to `2025-11-25` and
+    can elicit; stdio supports `2026-07-28` with sessions and can elicit; the SSE
+    transport is deprecated and never advertises `2026-07-28` at all.
+
+    So a deployment chooses, and nothing is given up by choosing wrongly. The HTTP
+    endpoint is stateless because that is the only way it reaches the revision the MCP
+    Skills extension is specified against, and this framework holds no per-session
+    state to lose by it — the exposure footprint is process-wide, because exposure
+    belongs to a deployment rather than to a connection. Elicitation, when it arrives,
+    is a stdio capability: a deployment that needs the server to ask its user
+    something runs the gateway over stdio and gets the same revision with sessions.
+    A rule that needs to reach a user — such as rule 17 — must either run where
+    elicitation is available or be implemented as a value the agent has to relay and
+    the user has to answer, which works on any transport.
+
 ## OpenCode MCP sessions
 
 The project `opencode.json` registers two local MCP servers for OpenCode
