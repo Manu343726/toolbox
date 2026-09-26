@@ -138,6 +138,19 @@ func (h *Host) contribute(ctx context.Context, servers []*subsystem.Server) ([]*
 			if err != nil {
 				return nil, fmt.Errorf("construct contributed subsystem %q: %w", name, err)
 			}
+			// A subsystem registered under a name other than the one it was composed
+			// under would defeat the refusal above: the deployment would hold two
+			// subsystems under one name with nothing to say so, and the collision would
+			// happen in the registry rather than in the composition. So the name is
+			// required to agree, and it is checked here rather than left to whichever of
+			// the two names happened to be used where.
+			if own := server.Descriptor().SubsystemName; own != name {
+				return nil, fmt.Errorf(
+					"the subsystem contributed as %q reports itself as %q, and a subsystem "+
+						"registered under a name other than the one it was composed under would "+
+						"put two subsystems in one name; the composition decides the name, so "+
+						"give this one the name %q", name, own, name)
+			}
 			built = append(built, server)
 			pending = append(pending, server)
 		}

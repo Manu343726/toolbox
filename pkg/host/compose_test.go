@@ -353,3 +353,35 @@ func TestAContributedSubsystemIsAnOrdinarySubsystem(t *testing.T) {
 // a service with no implementation behind it, which is right, and these tests are about
 // composition rather than about serving anything.
 func nothing() http.Handler { return http.NotFoundHandler() }
+
+// A subsystem that reports itself under a name other than the one it was composed under would
+// put two subsystems in one name in the registry, which is the collision `Compose` refuses and
+// which would otherwise happen one layer down. The composition decides the name.
+func TestAContributedSubsystemMustReportTheNameItWasComposedUnder(t *testing.T) {
+	h := host.New()
+	require.NoError(t, h.Register("configures", func() (*subsystem.Server, error) {
+		return subsystem.NewServer(subsystem.Config{
+			Name: "configures", Version: "0.1.0",
+			Configure: func(_ context.Context, into subsystem.Compositor) error {
+				return into.Compose("as-composed", func() (*subsystem.Server, error) {
+					return subsystem.NewServer(subsystem.Config{
+						// A different name from the one it was composed under.
+						Name: "as-declared", Version: "0.1.0",
+						Services: []subsystem.Service{{
+							Name: "x.v1.X", Path: "/", Handler: nothing(),
+						}},
+					})
+				})
+			},
+		})
+	}))
+
+	err := h.Start(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "as-composed")
+	assert.Contains(t, err.Error(), "as-declared",
+		"the error names both, because a contributor fixing this needs to know which of the "+
+			"two names it has to change")
+	assert.Contains(t, err.Error(), "the composition decides the name")
+	assert.Empty(t, h.Servers(), "and nothing is left half-registered")
+}

@@ -20,6 +20,7 @@ require (
 	github.com/Manu343726/toolbox/subsystems/prompt v0.0.0
 	github.com/Manu343726/toolbox/subsystems/registry v0.0.0
 	github.com/Manu343726/toolbox/subsystems/skill v0.0.0
+	github.com/Manu343726/toolbox/subsystems/skilldirectory v0.0.0
 	github.com/Manu343726/toolbox/subsystems/skillgit v0.0.0
 	github.com/Manu343726/toolbox/subsystems/tool v0.0.0
 	github.com/Manu343726/toolbox/subsystems/workflow v0.0.0
@@ -87,6 +88,8 @@ replace github.com/Manu343726/toolbox/subsystems/registry => ../../subsystems/re
 replace github.com/Manu343726/toolbox/subsystems/skill => ../../subsystems/skill
 
 replace github.com/Manu343726/toolbox/subsystems/skillgit => ../../subsystems/skillgit
+
+replace github.com/Manu343726/toolbox/subsystems/skilldirectory => ../../subsystems/skilldirectory
 
 replace github.com/Manu343726/toolbox/subsystems/tool => ../../subsystems/tool
 

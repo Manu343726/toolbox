@@ -54,7 +54,7 @@ func (s *Service) RegisterCatalog(
 	// The name is validated before anything touches the filesystem, because a name that
 	// could escape this provider's own directory must never become a path — and because a
 	// refusal that arrived after a minute-long clone would be a poor trade.
-	if err := validateCatalogID(id); err != nil {
+	if err := ValidCatalogID(id); err != nil {
 		return nil, connectFailure(err)
 	}
 	remote := RemoteURL(named)
@@ -112,7 +112,7 @@ func (s *Service) CreateCatalog(
 	ctx context.Context, request *connect.Request[skillgitv1.CreateCatalogRequest],
 ) (*connect.Response[skillgitv1.CreateCatalogResponse], error) {
 	id := strings.TrimSpace(request.Msg.GetId())
-	if err := validateCatalogID(id); err != nil {
+	if err := ValidCatalogID(id); err != nil {
 		return nil, connectFailure(err)
 	}
 	if _, taken := s.registry.Get(id); taken {

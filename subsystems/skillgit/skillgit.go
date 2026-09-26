@@ -60,6 +60,14 @@ const (
 
 // Options configures the provider.
 type Options struct {
+	// Name is the name the deployment registers this provider under. Empty is `skillgit`.
+	//
+	// It is settable because a provider host serves any number of catalogs and a deployment
+	// may run more than one of it — this is the reference provider under its own name, and
+	// a contributed one under the contributor's. A subsystem registered under the wrong name
+	// is a deployment that cannot say which provider answered, so the name is stated rather
+	// than inferred from the package.
+	Name string
 	// DataDir is where this provider keeps its checkouts and its registration record. It is
 	// the provider's own storage, outside any project: a deployment's catalogs outlive the
 	// project that first named one of them.
@@ -69,6 +77,21 @@ type Options struct {
 	Git *Git
 	// GitBinary names the git executable, for a deployment that has it somewhere else.
 	GitBinary string
+	// Registrations are catalogs the deployment has already decided, adopted at
+	// construction rather than registered afterwards.
+	//
+	// This exists because a contributing subsystem cannot register anything over a
+	// provider's service: contributions are applied before anything is started, so a
+	// provider that could only be told its catalogs at runtime would hold none when the
+	// first request arrived. A contributor fetches — with whatever credential it holds — and
+	// hands over the checkout it fetched, so this provider is only ever handed a path.
+	//
+	// That is deliberate rather than a limitation. It means the one field a contribution
+	// fills is a path, and a path cannot carry a credential, so there is no way for a
+	// contributed registration to put one into this provider's records. A deployment that
+	// would rather this provider fetched for it registers a remote over the service, which
+	// is the existing path and which needs a person to have done it.
+	Registrations []Registration
 	// Identity is whose name goes on a commit.
 	Identity Identity
 	// Now supplies the time a registration is stamped with, so a test does not depend on the
@@ -114,7 +137,22 @@ func NewService(options Options) (*Service, error) {
 		}
 		git = built
 	}
-	registry, err := NewRegistry(dataDir)
+	// A supplied registration is adopted only once its checkout is there, and saying so at
+	// construction is how a contributor finds out it forgot to fetch. The alternative — a
+	// registration pointing at nothing — is a catalog that never appears, and a project
+	// naming it is a project's list that resolves to nothing.
+	for _, registration := range options.Registrations {
+		path := RegistryPath(dataDir, registration)
+		if _, err := os.Stat(path); err != nil {
+			return nil, api.Errorf(api.KindFailedPrecondition,
+				"the %s catalog was supplied with no checkout at %s, and this provider is only "+
+					"handed a checkout it does not fetch: whoever supplied it fetches, so that "+
+					"a credential never has to reach this provider's records. Register a remote "+
+					"over the service instead if this provider should fetch it itself",
+				registration.ID, path)
+		}
+	}
+	registry, err := NewRegistry(dataDir, options.Registrations...)
 	if err != nil {
 		return nil, err
 	}
@@ -148,8 +186,12 @@ func New(options Options) (*subsystem.Server, error) {
 	}
 	catalogPath, catalogHandler := catalogconnect.NewSkillCatalogServiceHandler(service)
 	managementPath, managementHandler := managementconnect.NewSkillGitServiceHandler(service)
+	registered := strings.TrimSpace(options.Name)
+	if registered == "" {
+		registered = Name
+	}
 	return subsystem.NewServer(subsystem.Config{
-		Name:          Name,
+		Name:          registered,
 		Version:       service.version,
 		Description:   Description,
 		ListenAddress: options.ListenAddress,
@@ -209,7 +251,7 @@ func (s *Service) directory(registration Registration) (*skills.Directory, error
 	}
 	built, err := skills.NewDirectory(skills.DirectoryOptions{
 		ID:             registration.ID,
-		Root:           filepath.Join(s.registry.DataDir(), registration.Directory),
+		Root:           s.registry.Path(registration),
 		Subdirectories: skills.ConventionalSkillDirectories(),
 	})
 	if err != nil {
@@ -304,7 +346,7 @@ func (s *Service) entry(registration Registration, name string) (*skillv1.SkillE
 // because a catalog's content is whatever its checkout holds and a status that described the
 // registration alone would be describing the intention rather than the thing.
 func (s *Service) status(ctx context.Context, registration Registration) (*skillgitv1.CheckoutStatus, error) {
-	path := filepath.Join(s.registry.DataDir(), registration.Directory)
+	path := s.registry.Path(registration)
 	status := &skillgitv1.CheckoutStatus{
 		Id:        registration.ID,
 		Name:      registration.ID,
@@ -363,7 +405,7 @@ func writeSeed(root string, seed *skillgitv1.SkillSeed) error {
 		return nil
 	}
 	name := strings.TrimSpace(seed.GetName())
-	if err := validateCatalogID(name); err != nil {
+	if err := ValidCatalogID(name); err != nil {
 		return err
 	}
 	directory := filepath.Join(root, filepath.FromSlash(skills.ConventionalSkillDirectories()[0]), name)

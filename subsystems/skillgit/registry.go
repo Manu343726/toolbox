@@ -49,9 +49,16 @@ type Registration struct {
 	// authentication went away is visible rather than failing later at a `git pull` in
 	// git's own words.
 	Auth Auth `yaml:"auth,omitempty"`
-	// Directory is the checkout, relative to the provider's data directory. It is recorded
-	// rather than derived so that moving a deployment's data directory moves every catalog
-	// with it, and so that a person can see where the content they are being served is.
+	// Directory is where the checkout is. A relative path resolves against the provider's
+	// data directory; an absolute path is used as it is.
+	//
+	// Both forms exist because a contributing subsystem may fetch somewhere other than the
+	// provider's storage — it fetches, and hands over the checkout it fetched — and a
+	// contributor that had to fetch into the provider's own directory in order to be able to
+	// express the path would be a contributor that could not choose where content lands.
+	//
+	// It is recorded rather than derived so that a person can see where the content they are
+	// being served actually is, which is the whole of what this field is for.
 	Directory string `yaml:"directory"`
 	// CreatedAt is when it was registered, for a report rather than for a decision.
 	CreatedAt string `yaml:"createdAt,omitempty"`
@@ -71,14 +78,32 @@ type Registry struct {
 	registrations map[string]Registration
 }
 
-// NewRegistry opens the registry in a data directory, reading what is already there.
-func NewRegistry(dataDir string) (*Registry, error) {
+// NewRegistry opens the registry in a data directory, reading what is already there, and
+// adopts any registrations the deployment supplied.
+//
+// A deployment may start a provider with catalogs already decided, which is what a
+// contributing subsystem needs: contributions are applied before anything is started, so a
+// provider that could only be told its catalogs over its own service would have none when the
+// first project asked for one. A supplied registration whose checkout is already present is
+// adopted; one whose checkout is missing is cloned by the caller, which is the same work a
+// person registering a catalog causes.
+func NewRegistry(dataDir string, supplied ...Registration) (*Registry, error) {
 	registry := &Registry{
 		path:          filepath.Join(dataDir, RegistrationsFile),
 		registrations: map[string]Registration{},
 	}
 	if err := registry.Load(); err != nil {
 		return nil, err
+	}
+	for _, registration := range supplied {
+		if err := registry.Add(registration); err != nil {
+			return nil, err
+		}
+	}
+	if len(supplied) > 0 {
+		if err := registry.Save(); err != nil {
+			return nil, err
+		}
 	}
 	return registry, nil
 }
@@ -187,7 +212,7 @@ func (r *Registry) Add(registration Registration) error {
 	if id == "" {
 		return api.Errorf(api.KindInvalid, "a catalog needs a name to be registered under")
 	}
-	if err := validateCatalogID(id); err != nil {
+	if err := ValidCatalogID(id); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -227,15 +252,44 @@ func (r *Registry) DirectoryFor(id string) string {
 	return filepath.Join(r.DataDir(), strings.TrimSpace(id))
 }
 
-// validateCatalogID refuses an identifier that could not be one segment of a URI and one
-// directory's name.
+// Path resolves a registration's recorded directory to a path on this machine.
 //
+// A relative one is the common case and resolves against the provider's own data directory, so
+// moving that directory moves the catalog with it. An absolute one is used as it is, because a
+// contributing subsystem may keep its checkouts somewhere else and a contributor that had to
+// place content in the provider's storage in order to be able to express the path would be a
+// contributor that could not choose where content lands.
+func (r *Registry) Path(registration Registration) string {
+	return RegistryPath(r.DataDir(), registration)
+}
+
+// RegistryPath resolves a registration's directory against a data directory, and is the one
+// place that resolution happens — so a construction-time check and every later read cannot
+// disagree about where a checkout is.
+func RegistryPath(dataDir string, registration Registration) string {
+	directory := strings.TrimSpace(registration.Directory)
+	if directory == "" {
+		return ""
+	}
+	if filepath.IsAbs(directory) {
+		return filepath.Clean(directory)
+	}
+	return filepath.Join(dataDir, directory)
+}
+
 // It is deliberately looser than a skill's name: a catalog is a deployment's own label, and a
 // deployment may call its catalogs what it likes. What it may not do is carry a separator, a
 // dot-dot, or whitespace, because it is one segment of a URI *and* a directory this provider
 // creates — and a name that can escape its own directory is a name that can be made to write
 // somewhere else.
-func validateCatalogID(id string) error {
+// ValidCatalogID refuses an identifier that could not be one segment of a URI and one
+// directory's name.
+//
+// It is exported because a contributing subsystem derives a catalog name before it composes a
+// provider, and it needs the same rule the provider will apply — a second, looser copy would
+// let a name through that the provider then refuses, which is a contributor's error reported
+// as a provider's.
+func ValidCatalogID(id string) error {
 	if strings.TrimSpace(id) != id {
 		return api.Errorf(api.KindInvalid,
 			"a catalog's name %q has whitespace around it; write it without the padding", id)

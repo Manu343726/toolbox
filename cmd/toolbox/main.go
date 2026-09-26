@@ -39,6 +39,7 @@ import (
 	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 	registryv1connect "github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
 	skill "github.com/Manu343726/toolbox/subsystems/skill"
+	"github.com/Manu343726/toolbox/subsystems/skilldirectory"
 	"github.com/Manu343726/toolbox/subsystems/skillgit"
 	tool "github.com/Manu343726/toolbox/subsystems/tool"
 	workflow "github.com/Manu343726/toolbox/subsystems/workflow"
@@ -506,6 +507,15 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 		// deployment's own.
 		"skillgit": func() (*subsystem.Server, error) {
 			return skillgit.New(skillgit.Options{DataDir: skillgit.DefaultDataDir()})
+		},
+		// A contributor rather than a service: it decides what a catalog provider should be
+		// serving and exposes nothing. With nothing configured it contributes nothing and is
+		// never started, so registering it here costs a deployment with no configured
+		// repositories one build step and no listener.
+		"skilldirectory": func() (*subsystem.Server, error) {
+			return skilldirectory.New(skilldirectory.Options{
+				DataDir: skillgit.DefaultDataDir(),
+			})
 		},
 		"skill": func() (*subsystem.Server, error) {
 			// The aggregator resolves a qualified reference through the deployment's

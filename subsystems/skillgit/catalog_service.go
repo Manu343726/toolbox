@@ -240,7 +240,7 @@ func (s *Service) PutSkill(
 	if name == "" {
 		return nil, connectFailure(api.Errorf(api.KindInvalid, "a skill to store needs a name"))
 	}
-	if err := validateCatalogID(name); err != nil {
+	if err := ValidCatalogID(name); err != nil {
 		return nil, connectFailure(err)
 	}
 	catalog, err := s.directory(registration)
@@ -331,7 +331,7 @@ func (s *Service) resolve(id string) (Registration, *skills.Directory, error) {
 }
 
 func (s *Service) checkout(registration Registration) string {
-	return filepath.Join(s.registry.DataDir(), registration.Directory)
+	return s.registry.Path(registration)
 }
 
 // requireWritable refuses a write to a catalog this deployment does not own, with a reason.
