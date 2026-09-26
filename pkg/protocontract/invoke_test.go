@@ -201,3 +201,20 @@ func TestRequestPayloadUnwrapsBody(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, api.KindInvalid, api.KindOf(err))
 }
+
+// A catalog decides whether an operation needs an invoker provider deployed
+// beside it by asking whether the framework speaks its transport. The answer has
+// to be the transports this package declares, not a second list that can drift
+// from the first.
+func TestHandlesTransportAgreesWithTheDeclaredTransports(t *testing.T) {
+	declared := TransportDescriptors()
+	require.NotEmpty(t, declared)
+	for _, descriptor := range declared {
+		assert.True(t, HandlesTransport(api.Transport(descriptor.ID)),
+			"a declared transport is one the invoker can call")
+	}
+	for _, absent := range []api.Transport{"", "http", "mcp", "connectrpc "} {
+		assert.False(t, HandlesTransport(absent),
+			"%q is not a transport this framework speaks", absent)
+	}
+}

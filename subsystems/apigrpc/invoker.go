@@ -50,29 +50,18 @@ func (i *Invoker) Invoke(ctx context.Context, call api.Call) (api.Result, error)
 }
 
 // InvokeApi implements the framework's ApiInvokerService.
+//
+// The request is read and the response written by the framework's own
+// translation, which is the same one a deployment that performs a call in process
+// uses. Two paths that agreed by accident would stop agreeing the first time one
+// of them changed.
 func (i *Invoker) InvokeApi(ctx context.Context, request *connect.Request[apiv1.InvokeApiRequest]) (*connect.Response[apiv1.InvokeApiResponse], error) {
 	if request == nil || request.Msg == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("request is required"))
 	}
-	operation, err := api.OperationFromProto(request.Msg.GetOperation())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	server, err := api.ServerFromProto(request.Msg.GetServer())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	result, err := i.Invoke(ctx, api.Call{
-		Server:    server,
-		Operation: operation,
-		Arguments: request.Msg.GetArgumentsJson(),
-	})
+	response, err := api.ServeInvoke(ctx, i, request)
 	if err != nil {
 		return nil, providerError(err)
 	}
-	return connect.NewResponse(&apiv1.InvokeApiResponse{
-		Status:      int32(result.Status),
-		ContentType: result.ContentType,
-		BodyJson:    result.Body,
-	}), nil
+	return response, nil
 }

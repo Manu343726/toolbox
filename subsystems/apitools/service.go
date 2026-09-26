@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
+	"github.com/Manu343726/toolbox/pkg/protocontract"
 	apitoolsv1 "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1"
 )
 
@@ -21,14 +24,45 @@ import (
 type Service struct {
 	store     *Memory
 	directory ProviderDirectory
+	// invoker performs a call for a transport the framework itself speaks, when
+	// the deployment registered no provider for it. It is decided when the service
+	// is built and never changed afterwards, because a call already in flight must
+	// not find a different invoker than the one that started it.
+	invoker api.Invoker
+}
+
+// InvokerOptions configures the invoker a catalog uses for a transport the
+// framework implements itself.
+type InvokerOptions struct {
+	// HTTPClient performs the calls. The zero value uses a bounded client.
+	HTTPClient *http.Client
+	// RequestTimeout bounds one invocation. Zero uses the invoker's own default.
+	RequestTimeout time.Duration
 }
 
 // NewService creates the ConnectRPC handler for a catalog.
 func NewService(store *Memory, directory ProviderDirectory) *Service {
+	return NewServiceWith(store, directory, InvokerOptions{})
+}
+
+// NewServiceWith creates the handler with a stated invoker configuration.
+//
+// It builds the same service [NewService] builds, with the bounds a deployment
+// wants on its own calls made explicit. A catalog with a provider for every
+// transport it serves never reaches this invoker; one without a provider for the
+// framework's own transport would otherwise describe operations it cannot call.
+func NewServiceWith(store *Memory, directory ProviderDirectory, options InvokerOptions) *Service {
 	if store == nil {
 		store = NewMemory(StoreOptions{})
 	}
-	return &Service{store: store, directory: directory}
+	return &Service{
+		store:     store,
+		directory: directory,
+		invoker: protocontract.NewInvoker(protocontract.InvokerOptions{
+			HTTPClient:     options.HTTPClient,
+			RequestTimeout: options.RequestTimeout,
+		}),
+	}
 }
 
 // Store returns the underlying catalog for embedding and tests.
@@ -567,6 +601,10 @@ func (s *Service) OperationExposure(ctx context.Context, req *connect.Request[ap
 			hidden++
 		}
 	}
+	// An invoker is available if a provider is registered for the operation's
+	// transport, or if the framework speaks that transport itself. Reporting only
+	// the first would tell a caller that a seeded operation is uncallable on a
+	// deployment that calls it perfectly well.
 	invokersAvailable := false
 	if s.directory != nil {
 		invokers, err := s.providersForRole(ctx, api.ProviderInvoker)
@@ -574,6 +612,9 @@ func (s *Service) OperationExposure(ctx context.Context, req *connect.Request[ap
 			return nil, err
 		}
 		invokersAvailable = len(invokers) > 0
+	}
+	if !invokersAvailable {
+		invokersAvailable = s.frameworkHandlesFootprint(req.Msg.GetApiId())
 	}
 	return connect.NewResponse(&apitoolsv1.OperationExposureResponse{
 		Allowed:           int32(allowed),
@@ -584,7 +625,36 @@ func (s *Service) OperationExposure(ctx context.Context, req *connect.Request[ap
 	}), nil
 }
 
-// CallOperation routes one exposed operation to an adapter provider.
+// frameworkHandlesFootprint reports whether every API in a footprint is reached
+// over a transport the framework speaks, and so can be called without an invoker
+// provider deployed alongside.
+//
+// One API the framework cannot reach makes the answer false for the whole
+// footprint, because the field is one boolean and a caller reading it is asking
+// "can I call these" rather than "can I call some of these".
+func (s *Service) frameworkHandlesFootprint(apiID string) bool {
+	filter := ExposureFilter{APIID: strings.TrimSpace(apiID)}
+	footprint := s.store.Exposure(filter)
+	if len(footprint) == 0 {
+		return false
+	}
+	for _, entry := range footprint {
+		stored, err := s.store.GetAPI(entry.Operation.APIID)
+		if err != nil || len(stored.ServerIDs) == 0 {
+			return false
+		}
+		server, err := s.store.GetServer(stored.ServerIDs[0])
+		if err != nil {
+			return false
+		}
+		if !protocontract.HandlesTransport(server.Transport) {
+			return false
+		}
+	}
+	return true
+}
+
+// CallOperation routes one exposed operation to the invoker that will perform it.
 func (s *Service) CallOperation(ctx context.Context, req *connect.Request[apitoolsv1.CallOperationRequest]) (*connect.Response[apitoolsv1.CallOperationResponse], error) {
 	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetApiId()) == "" || strings.TrimSpace(req.Msg.GetOperationId()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("api_id and operation_id are required"))
@@ -616,20 +686,13 @@ func (s *Service) CallOperation(ctx context.Context, req *connect.Request[apitoo
 			fmt.Errorf("api %q is not bound to a server", stored.ID),
 		)
 	}
-	if s.directory == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no provider directory is configured"))
-	}
 	server, err := s.store.GetServer(stored.ServerIDs[0])
 	if err != nil {
 		return nil, catalogError(err)
 	}
-	provider, err := s.selectProvider(ctx, req.Msg.GetInvokerId(), api.ProviderInvoker, "adapter_id", server.Transport)
+	providerID, err := s.resolveInvokerProvider(ctx, req.Msg.GetInvokerId(), server.Transport)
 	if err != nil {
 		return nil, err
-	}
-	client, err := s.directory.Invoker(ctx, provider.ID)
-	if err != nil {
-		return nil, catalogError(err)
 	}
 	request := &apiv1.InvokeApiRequest{
 		ServerId:      server.ID,
@@ -652,6 +715,24 @@ func (s *Service) CallOperation(ctx context.Context, req *connect.Request[apitoo
 			}
 		}
 	}
+	// An empty provider identifier means the framework performs the call itself,
+	// and the request it receives is the same one a provider would have been sent.
+	if providerID == "" {
+		response, err := api.ServeInvoke(ctx, s.invoker, header)
+		if err != nil {
+			return nil, providerError(err)
+		}
+		return connect.NewResponse(&apitoolsv1.CallOperationResponse{
+			Status:      response.Msg.GetStatus(),
+			ContentType: response.Msg.GetContentType(),
+			Headers:     response.Msg.GetHeaders(),
+			BodyJson:    response.Msg.GetBodyJson(),
+		}), nil
+	}
+	client, err := s.directory.Invoker(ctx, providerID)
+	if err != nil {
+		return nil, catalogError(err)
+	}
 	response, err := client.InvokeApi(ctx, header)
 	if err != nil {
 		return nil, providerError(err)
@@ -661,9 +742,52 @@ func (s *Service) CallOperation(ctx context.Context, req *connect.Request[apitoo
 		ContentType: response.Msg.GetContentType(),
 		Headers:     response.Msg.GetHeaders(),
 		BodyJson:    response.Msg.GetBodyJson(),
-		AdapterId:   provider.ID,
+		AdapterId:   providerID,
 	}
 	return connect.NewResponse(result), nil
+}
+
+// resolveInvokerProvider decides who performs a call over one transport, and
+// returns an empty identifier when the answer is the framework itself.
+//
+// A provider registered for the transport is contacted over ConnectRPC, as every
+// provider is: it is a separately deployable subsystem, and this catalog is not
+// where its implementation belongs. When none is registered, a transport the
+// framework speaks is called by the framework, because a host that seeds the
+// operations of the subsystems it serves has registered operations it must be
+// able to call — and a catalog that could only describe them would report tools
+// that do not work.
+//
+// Only "nobody claims this transport" is a reason to answer for the deployment.
+// An identifier the caller named, several providers claiming the same transport,
+// and a directory that is not configured are all a deployment's own decisions, and
+// each is reported rather than quietly resolved: a call that silently took a
+// different path than the one that was asked for is harder to diagnose than one
+// that was refused.
+func (s *Service) resolveInvokerProvider(
+	ctx context.Context,
+	selectedID string,
+	transport api.Transport,
+) (string, error) {
+	selectedID = strings.TrimSpace(selectedID)
+	if s.directory != nil || selectedID != "" {
+		provider, err := s.selectProvider(ctx, selectedID, api.ProviderInvoker, "adapter_id", transport)
+		if err == nil {
+			return provider.ID, nil
+		}
+		if selectedID != "" || !errors.Is(err, ErrNoProvider) {
+			return "", err
+		}
+	}
+	if protocontract.HandlesTransport(transport) {
+		return "", nil
+	}
+	return "", connect.NewError(
+		connect.CodeFailedPrecondition,
+		fmt.Errorf(
+			"%w: no %s handles %q, and this framework speaks neither it nor %q",
+			ErrNoProvider, api.ProviderInvoker, transport, api.Transport(protocontract.Format)),
+	)
 }
 
 func (s *Service) parse(

@@ -647,6 +647,11 @@ message CallOperationResponse {
   map<string, string> headers = 3;
   // Response value as JSON.
   bytes body_json = 4;
-  // Identifier of the adapter provider that executed the call.
+  // Identifier of the invoker provider that executed the call. Empty when the
+  // catalog performed the call itself, which it does for a transport the
+  // framework speaks when no provider is registered for it. An empty value is
+  // therefore a statement about who made the call, not a missing one: the two
+  // paths return the same response and the caller cannot tell them apart by
+  // anything but this field.
   string adapter_id = 5;
 }

@@ -113,6 +113,23 @@ func (i *Invoker) Invoke(ctx context.Context, call api.Call) (api.Result, error)
 	}, nil
 }
 
+// HandlesTransport reports whether this package can perform a call over one
+// transport itself.
+//
+// The answer is read from [TransportDescriptors] rather than restated, because the
+// list of transports a deployment may describe and the list this package can call
+// over are the same fact written down twice. A catalog uses it to decide whether
+// an operation needs an invoker provider deployed alongside it: it does not for a
+// transport the framework speaks, and it does for one the framework does not.
+func HandlesTransport(transport api.Transport) bool {
+	for _, descriptor := range TransportDescriptors() {
+		if api.Transport(descriptor.ID) == transport {
+			return true
+		}
+	}
+	return false
+}
+
 // unreachable reports whether a failure is a transport failure — the endpoint
 // could not be reached at all — rather than a description the endpoint refused to
 // give.

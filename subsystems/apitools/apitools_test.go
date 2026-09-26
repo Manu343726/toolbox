@@ -17,6 +17,8 @@ import (
 	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
 	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
 	"github.com/Manu343726/toolbox/pkg/core"
+	"github.com/Manu343726/toolbox/pkg/protocontract"
+	"github.com/Manu343726/toolbox/pkg/subsystem"
 	apitoolsv1 "github.com/Manu343726/toolbox/subsystems/apitools/apitoolsv1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1079,4 +1081,239 @@ func TestServiceRefusesADescribeWithNoSource(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 	assert.Contains(t, err.Error(), "document or a base url")
+}
+
+// The fixtures below are real servers. A test that proved invocation worked
+// against a fake would pass whether or not a call could actually travel, and the
+// failure this guards against is precisely a call that cannot.
+
+// mountedSubsystem runs a real subsystem serving one contract over the framework's
+// own transport, reflection included, and returns the endpoint it listens on. It
+// is the shape of every endpoint a host seeds into a catalog.
+func mountedSubsystem(t *testing.T) (*parserStub, string) {
+	t.Helper()
+	stub := &parserStub{}
+	path, handler := apiv1connect.NewApiParserServiceHandler(stub)
+	server, err := subsystem.NewServer(subsystem.Config{
+		Name: "fixture",
+		Services: []subsystem.Service{{
+			Name:    apiv1connect.ApiParserServiceName,
+			Path:    path,
+			Handler: handler,
+		}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, server.Start(t.Context()))
+	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
+	return stub, server.Endpoint()
+}
+
+// parserStub answers the one method the fixture contract declares, and records
+// what reached it so a test can prove the call travelled rather than assuming it.
+type parserStub struct {
+	apiv1connect.UnimplementedApiParserServiceHandler
+	received []*apiv1.ParseApiRequest
+}
+
+func (s *parserStub) ParseApi(
+	_ context.Context,
+	request *connect.Request[apiv1.ParseApiRequest],
+) (*connect.Response[apiv1.ParseApiResponse], error) {
+	s.received = append(s.received, request.Msg)
+	return connect.NewResponse(&apiv1.ParseApiResponse{
+		Api: &apiv1.Api{
+			Id:     "answered",
+			Name:   "answered",
+			Format: "grpc",
+			Source: &apiv1.ApiSource{Kind: "reflection", Location: request.Msg.GetBaseUrl()},
+		},
+	}), nil
+}
+
+// seedMounted registers a mounted endpoint in a catalog the way a host does: the
+// subsystem's own contract described from its own reflection, the server bound to
+// that description, and the transport the framework serves.
+func seedMounted(t *testing.T, store *Memory, endpoint string) (string, string) {
+	t.Helper()
+	described, warnings, err := protocontract.NewDescriptor(protocontract.Descriptor{}).FromEndpoint(t.Context(), endpoint)
+	require.NoError(t, err)
+	require.Empty(t, warnings)
+	require.NotEmpty(t, described.Services)
+
+	described.ID = "mounted-api"
+	described.Transport = api.Transport(protocontract.TransportDescriptors()[0].ID)
+	server, _, err := store.RegisterServer(api.Server{
+		ID:        "mounted",
+		Name:      "Mounted subsystem",
+		BaseURL:   endpoint,
+		Format:    "grpc",
+		Transport: described.Transport,
+	}, false)
+	require.NoError(t, err)
+	_, _, err = store.RegisterAPI(described, server.ID, false)
+	require.NoError(t, err)
+
+	// Registration namespaces every operation identifier with its API, so the
+	// identifier a caller uses is the stored one rather than the one reflection
+	// produced.
+	stored, err := store.GetAPI(described.ID)
+	require.NoError(t, err)
+	var operationID string
+	for _, service := range stored.Services {
+		if service.Name == apiv1connect.ApiParserServiceName && len(service.Operations) > 0 {
+			operationID = service.Operations[0].ID
+			break
+		}
+	}
+	require.NotEmpty(t, operationID)
+	_, err = store.SetExposed(described.ID, operationID, true)
+	require.NoError(t, err)
+	return described.ID, operationID
+}
+
+// A host seeds the operations of every subsystem it serves, and it seeds them
+// whether or not an invoker provider happens to be deployed. Requiring a provider
+// to call the framework's own transport made the catalog describe tools that did
+// not work on any deployment that left the provider out.
+func TestCallOperationReachesAMountedServiceWithNoInvokerProvider(t *testing.T) {
+	stub, endpoint := mountedSubsystem(t)
+	store := newTestStore(t)
+	apiID, operationID := seedMounted(t, store, endpoint)
+
+	// No provider directory at all: nothing is deployed beside this catalog.
+	service := NewService(store, nil)
+
+	response, err := service.CallOperation(context.Background(), connect.NewRequest(&apitoolsv1.CallOperationRequest{
+		ApiId:         apiID,
+		OperationId:   operationID,
+		ArgumentsJson: json.RawMessage(`{"format":"grpc"}`),
+	}))
+	require.NoError(t, err, "a seeded operation must be callable on the deployment that seeded it")
+	assert.Equal(t, int32(200), response.Msg.GetStatus())
+	assert.Equal(t, "application/json", response.Msg.GetContentType())
+	assert.Empty(t, response.Msg.GetAdapterId(),
+		"no provider executed the call, so there is no provider to name")
+
+	// The call reached the server rather than being satisfied by the catalog, and
+	// what came back is the response the server actually sent.
+	require.Len(t, stub.received, 1)
+	assert.Equal(t, "grpc", stub.received[0].GetFormat())
+	var payload struct {
+		API struct {
+			ID string `json:"id"`
+		} `json:"api"`
+	}
+	require.NoError(t, json.Unmarshal(response.Msg.GetBodyJson(), &payload))
+	assert.Equal(t, "answered", payload.API.ID)
+}
+
+// The framework answering is a fallback, not a replacement. A provider registered
+// for the transport is still the one that runs, because it is a separately
+// deployable subsystem and a deployment that chose it chose it deliberately.
+func TestCallOperationPrefersARegisteredInvokerOverTheFrameworksOwn(t *testing.T) {
+	stub, endpoint := mountedSubsystem(t)
+	directory := staticDirectory(t, endpoint, api.ProviderInvoker)
+	store := newTestStore(t)
+	apiID, operationID := seedMounted(t, store, endpoint)
+
+	// The registered provider claims "http", which is not what the mounted
+	// endpoint speaks, so the framework answers — and a provider is not consulted
+	// for a transport it did not claim.
+	service := NewService(store, directory)
+	response, err := service.CallOperation(context.Background(), connect.NewRequest(&apitoolsv1.CallOperationRequest{
+		ApiId:         apiID,
+		OperationId:   operationID,
+		ArgumentsJson: json.RawMessage(`{"format":"grpc"}`),
+	}))
+	require.NoError(t, err)
+	assert.Empty(t, response.Msg.GetAdapterId())
+	assert.Len(t, stub.received, 1)
+}
+
+// A caller that names an invoker gets that invoker or an error naming why. The
+// framework's fallback is never a way to ignore what was asked for.
+func TestCallOperationRefusesAnInvokerTheCallerNamedAndDoesNotExist(t *testing.T) {
+	_, endpoint := mountedSubsystem(t)
+	store := newTestStore(t)
+	apiID, operationID := seedMounted(t, store, endpoint)
+	service := NewService(store, nil)
+
+	response, err := service.CallOperation(context.Background(), connect.NewRequest(&apitoolsv1.CallOperationRequest{
+		ApiId:         apiID,
+		OperationId:   operationID,
+		ArgumentsJson: json.RawMessage(`{"format":"grpc"}`),
+		InvokerId:     "not-deployed",
+	}))
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err),
+		"with no directory at all the named invoker cannot exist, and that is what is said")
+	assert.Nil(t, response,
+		"the framework does not quietly answer a call that named an invoker")
+
+	// With a directory, a name that is not in it is a not-found, which is the
+	// answer a caller can act on.
+	_, otherEndpoint := mountedSubsystem(t)
+	_, _, err = store.RegisterServer(api.Server{
+		ID: "other", Name: "Other", BaseURL: otherEndpoint, Format: "grpc",
+		Transport: api.Transport(protocontract.TransportDescriptors()[0].ID),
+	}, false)
+	require.NoError(t, err)
+	withDirectory := NewService(store, staticDirectory(t, otherEndpoint, api.ProviderInvoker))
+	_, err = withDirectory.CallOperation(context.Background(), connect.NewRequest(&apitoolsv1.CallOperationRequest{
+		ApiId:         apiID,
+		OperationId:   operationID,
+		ArgumentsJson: json.RawMessage(`{"format":"grpc"}`),
+		InvokerId:     "not-deployed",
+	}))
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err),
+		"a named invoker the directory does not hold is reported, not replaced")
+}
+
+// A transport the framework does not speak still needs a provider, and the error
+// says so — naming both what is missing and what the framework could have done.
+func TestCallOperationRefusesATransportNeitherTheFrameworkNorAProviderHandles(t *testing.T) {
+	store := newTestStore(t)
+	server := testServer("shop") // transport "http"
+	_, _, err := store.RegisterServer(server, false)
+	require.NoError(t, err)
+	_, _, err = store.RegisterAPI(testAPI("shop-api"), "shop", false)
+	require.NoError(t, err)
+	_, err = store.SetExposed("shop-api", "shop-api/pets/getPetById", true)
+	require.NoError(t, err)
+
+	service := NewService(store, nil)
+	_, err = service.CallOperation(context.Background(), connect.NewRequest(&apitoolsv1.CallOperationRequest{
+		ApiId:       "shop-api",
+		OperationId: "shop-api/pets/getPetById",
+	}))
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	assert.ErrorIs(t, err, ErrNoProvider)
+	assert.Contains(t, err.Error(), `"http"`, "the error names the transport nothing handles")
+}
+
+// The exposure report must not claim an operation is uncallable on a deployment
+// that calls it perfectly well, which is what counting only providers did.
+func TestOperationExposureReportsAnInvokerForATransportTheFrameworkSpeaks(t *testing.T) {
+	_, endpoint := mountedSubsystem(t)
+	store := newTestStore(t)
+	apiID, _ := seedMounted(t, store, endpoint)
+	service := NewService(store, nil)
+
+	response, err := service.OperationExposure(context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: apiID}))
+	require.NoError(t, err)
+	assert.True(t, response.Msg.GetInvokersAvailable())
+
+	// A transport the framework cannot speak is still reported as unavailable
+	// when nothing is deployed to serve it.
+	shopStore := newTestStore(t)
+	_, _, err = shopStore.RegisterServer(testServer("shop"), false)
+	require.NoError(t, err)
+	_, _, err = shopStore.RegisterAPI(testAPI("shop-api"), "shop", false)
+	require.NoError(t, err)
+	report, err := NewService(shopStore, nil).OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "shop-api"}))
+	require.NoError(t, err)
+	assert.False(t, report.Msg.GetInvokersAvailable())
 }
