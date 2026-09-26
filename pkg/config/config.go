@@ -78,6 +78,14 @@ const (
 	// which of them. It is stated as a section rather than as individual keys because its
 	// shape belongs to pkg/log and the logger subsystem, not here.
 	KeyLogging = "logging"
+	// KeySkills is the project's list of qualified skill references. It is a project section
+	// rather than a deployment one, because skills are content a project chooses rather than
+	// something an installation provides — but it lives in the same file, and a person's
+	// review of their project's configuration is of one file.
+	//
+	// A skill in the `local` catalog is included implicitly and never named here; see
+	// docs/skills.md.
+	KeySkills = "skills"
 )
 
 // Launch is how the daemon's lifecycle is managed. It is a Go enum rather than a protobuf
@@ -205,6 +213,18 @@ type Config struct {
 	// inside its configuration directory. Resolving against the file's own directory is what
 	// would otherwise happen, and it is never what anyone means.
 	LoggingBaseDir string
+	// Skills is the project's own list of qualified skill references, as the configuration
+	// file states them, and empty when the file has no skills section.
+	//
+	// It is read from the file alone, for the reason every project section is: a project's
+	// choice of content is the project's, and an environment variable that silently added a
+	// skill to every project on the machine would be a different deployment than the one
+	// anybody configured.
+	//
+	// The entries are not interpreted here. `pkg/skills` reads a reference and knows what
+	// makes one, so a section validated twice would be validated by whichever reader
+	// happened to be stricter.
+	Skills []string
 	// sources records where each value came from, keyed by configuration key.
 	sources map[string]Source
 }
@@ -246,18 +266,24 @@ var knownKeys = map[string]bool{
 	KeyMCPPort:      true,
 	KeyPolicy:       true,
 	KeyLogging:      true,
+	KeySkills:       true,
 }
 
 // opaqueKeys are sections a configuration file may state whose contents this package does not
 // validate.
 //
-// The logging fanout is one. A second reader of the same keys would be a second thing to keep
-// in step with the first, and a fanout validated twice is a fanout validated by whichever
-// reader happened to be stricter. Listing the section as known and stopping here means a
-// misspelled key inside it is still caught — by the reader that owns it, with its own message
-// naming the settings it accepts.
+// The logging fanout is one, and the project's skills list is the second. A second reader of
+// the same keys would be a second thing to keep in step with the first, and a section
+// validated twice is validated by whichever reader happened to be stricter. Listing a section
+// as known and stopping here means a misspelled key inside it is still caught — by the reader
+// that owns it, with its own message naming the settings it accepts.
+//
+// The difference from `logging` is only in shape: that one is a block and this one is a list.
+// What each entry *means* — that it is a qualified reference, and that a skill in the local
+// catalog is never named — belongs to the reader that owns skills, not here.
 var opaqueKeys = map[string]bool{
 	KeyLogging: true,
+	KeySkills:  true,
 }
 
 // Loader reads the configuration layers in order and reports what each value resolved to.
@@ -608,6 +634,9 @@ func (l *Loader) Resolve(explicit string) (Config, error) {
 		if l.viper.InConfig(KeyLogging) {
 			resolved.Logging = l.viper.GetStringMap(KeyLogging)
 		}
+		if l.viper.InConfig(KeySkills) {
+			resolved.Skills = l.skills()
+		}
 	}
 
 	launch, err := ParseLaunch(l.viper.GetString(KeyDaemonLaunch))
@@ -634,6 +663,33 @@ func (l *Loader) Resolve(explicit string) (Config, error) {
 		return Config{}, err
 	}
 	return resolved, nil
+}
+
+// skills reads the project's skill list out of the file.
+//
+// A file that states the section as anything other than a list is refused here rather than
+// read as an empty one: a `skills:` key holding a block is a person who meant to write
+// something else, and a deployment that served them no skills would report a working system.
+func (l *Loader) skills() []string {
+	if l.viper.IsSet(KeySkills) && !l.viper.InConfig(KeySkills) {
+		return nil
+	}
+	raw := l.viper.Get(KeySkills)
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []any:
+		entries := make([]string, 0, len(typed))
+		for _, item := range typed {
+			// A non-text entry is a number or a boolean where a reference belongs, and it is
+			// kept as its own rendering so the reader that owns skills can name it: this
+			// package knows the section is a list of references, not what a reference is.
+			entries = append(entries, fmt.Sprint(item))
+		}
+		return entries
+	default:
+		return nil
+	}
 }
 
 // scope is the workspace selector, which a file must not carry.
@@ -732,7 +788,10 @@ func validPort(port int, what string) error {
 // that could have supplied the value.
 func (l *Loader) provenance() map[string]Source {
 	sources := make(map[string]Source, 6)
-	for _, key := range []string{KeyDaemonHost, KeyDaemonPort, KeyDaemonLaunch, KeyMCPHost, KeyMCPPort, KeyPolicy, KeyLogging} {
+	for _, key := range []string{
+		KeyDaemonHost, KeyDaemonPort, KeyDaemonLaunch, KeyMCPHost, KeyMCPPort, KeyPolicy,
+		KeyLogging, KeySkills,
+	} {
 		switch {
 		case l.flagChanged(key):
 			sources[key] = SourceFlag
