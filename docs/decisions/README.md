@@ -13,6 +13,9 @@ implicitly while implementing features.
 - [ADR-0008: Authorization by name and side effect](0008-authorization-by-name-and-side-effect.md)
 - [ADR-0009: Cross-subsystem calls](0009-cross-subsystem-calls.md)
 - [ADR-0010: The core, and running it as a daemon](0010-core-and-daemon.md)
+- [ADR-0011: Deployment configuration](0011-deployment-configuration.md)
+- [ADR-0012: Logging](0012-logging.md)
+- [ADR-0013: A composition is extensible by the subsystems in it](0013-composition-contributions.md)
 
 An ADR is *proposed* while its outstanding decisions are open, and *accepted* once
 they are answered; acceptance is a claim about the decision, and implementation

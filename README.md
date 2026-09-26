@@ -156,6 +156,40 @@ directories are a registry over exactly that, reached as `owner/repo`. A catalog
 this deployment found is read-only; one it created is not. See
 [`docs/skills.md`](docs/skills.md).
 
+### Adding a subsystem of your own
+
+A subsystem usually exposes something. A subsystem can instead **contribute** — decide
+what the deployment should be running — and hold the material that decision needs
+without it appearing in any file the deployment writes.
+
+```go
+server, err := subsystem.NewServer(subsystem.Config{
+    Name: "company", Version: "0.1.0",
+    // Runs before anything starts, and may add to the composition.
+    Configure: func(ctx context.Context, into subsystem.Compositor) error {
+        checkout, err := fetchWithOurToken(ctx, ourPrivateRepository) // never recorded
+        if err != nil {
+            return err
+        }
+        return into.Compose("company-provider", func() (*subsystem.Server, error) {
+            return provider.New(provider.Options{Checkout: checkout})
+        })
+    },
+})
+```
+
+A contributor that serves nothing is never started: no port, no registry entry, no
+mention in what the deployment runs. And a value it holds is never serialised — the
+project still says which catalog it depends on, the deployment still says where the
+content came from, and neither says how it was reached.
+
+Where that guarantee stops is as much a part of it as where it does not: `git` records
+the remote it was cloned from, so a token in a URL is on the machine's disk in git's
+own record. Fetch with a credential helper or an agent, and hand over the path.
+
+See [ADR-0013](docs/decisions/0013-composition-contributions.md) and
+[`subsystems/skilldirectory`](subsystems/skilldirectory) for a working example.
+
 ## A day in the environment
 
 > Someone asks for the weekly report. An assistant loads the report workflow,

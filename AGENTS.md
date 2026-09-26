@@ -29,6 +29,15 @@ Read these before making architectural changes:
    └── cmd/<name>/main.go
    ```
 
+   A subsystem that only **contributes** to its composition (rule 18) has no
+   `proto/` and no `docs_embed.go`, by the same reasoning rule 14 gives a
+   provider with no operations to address: it serves no contract, so there is
+   nothing to generate and nothing to document. It has a `Makefile` with no
+   `proto` target, a `go.mod`, a `cmd/` and tests, and the rest of the layout
+   is unchanged. `cmd/` is still required, because a contributor is still an
+   independently buildable project and a subsystem that could only be built
+   through a host would not be one.
+
 2. **Every subsystem owns its own protobuf file and generated Go package.** Do
    not create a framework-wide aggregate `.proto` file. Do not move another
    subsystem's contract into a shared feature package.
@@ -155,7 +164,20 @@ Read these before making architectural changes:
     any feature whose job involves a project saying something new about itself goes
     through it.
 
-18. **A capability belongs to the transport that carries it, and the transport is a
+18. **A composition is extensible by the subsystems in it.** A subsystem may *contribute* —
+    decide what the deployment should be running — rather than only serve features, and hold
+    the material that decision needs without that material appearing anywhere the deployment
+    describes itself. Contributions are applied in a configure phase that completes before
+    any subsystem is started, so nothing is ever resolvable in a half-configured deployment.
+    A contribution **adds** a subsystem and never replaces one: rewriting a registered
+    subsystem's configuration would mean two sources of one setting with a precedence
+    rule, and "which wins, the file or the code" has no good answer. A contributor that
+    serves nothing is not started, so it has no listener and no registry entry. A value a
+    contributor holds is never serialised — and where the guarantee stops is as much a part
+    of it as where it does not, because `git` records the remote it was cloned from. See
+    `docs/decisions/0013-composition-contributions.md`.
+
+19. **A capability belongs to the transport that carries it, and the transport is a
     launch-mode choice.** The gateway is the same in every mode; what differs is what
     the protocol revision allows over it. Protocol revision `2026-07-28` is sessionless,
     so the SDK's streamable HTTP transport serves it only when stateless — and a

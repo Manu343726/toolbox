@@ -1277,6 +1277,11 @@ reason rather than rediscovered:
   deployment registers as many catalogs as it likes, one per remote, each under its own
   identifier. It serves the catalog contract for every registered catalog and a second
   service for the registrations themselves.
+- **`subsystems/skilldirectory`** — a **contributor**: it configures the catalog provider
+  with the repositories the public directory indexes, and exposes nothing itself. It is
+  the worked example of the composition-contribution mechanism, and the shape a user's own
+  contributor takes when the repository is private and the credential is not written down.
+  See [ADR-0013](decisions/0013-composition-contributions.md).
 - **`RemoteURL`** — `owner/repo` resolved to a GitHub remote, which is what makes a
   public-directory skill a registration rather than a subsystem.
 

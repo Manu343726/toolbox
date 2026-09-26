@@ -457,6 +457,40 @@ whose whole value is that a person can read which skills a project depends on.
 
 ## 11. Extension model
 
+### A subsystem may contribute to its composition
+
+Most subsystems expose features: they serve a contract, and something calls it. Some do not.
+A subsystem may instead **contribute** — decide what the deployment should be running, rather
+than be reached — and hold the material that decision needs without that material appearing
+anywhere the deployment describes itself.
+
+```go
+type Compositor interface {
+    Compose(name string, factory Factory) error
+}
+```
+
+Contributions are applied in a `configure` phase that completes **before** any subsystem is
+started, so there is no window in which a subsystem is up and what it contributes is not yet in
+the provider directory. A contributor that fails aborts the start, because a deployment that
+could not be fully configured serving an incomplete set is a state a project's list cannot
+survive. A contributor that serves nothing is **not started** — no listener, no port, no
+registry entry.
+
+A contribution adds a subsystem and never replaces one. Rewriting a registered subsystem's
+configuration would mean two sources of the same settings with a precedence rule, and "which
+wins, the file or the code" has no good answer: a person editing a file that silently loses to
+code they cannot see is worse than either winning. A contributor that wants different settings
+composes its own subsystem under its own name, and the deployment reaches both.
+
+The point of it is a value that is never serialised. A contributor holding a credential for a
+private repository fetches once and hands the provider a checkout path, so the configuration a
+person reviews says which catalog the project depends on, the deployment's records say where
+the content came from, and neither says how it was reached. `cmd/toolbox`'s composition test
+asserts that against every artefact the deployment writes and publishes.
+
+See [ADR-0013](decisions/0013-composition-contributions.md).
+
 A third-party subsystem is compatible when it:
 
 1. serves a ConnectRPC contract from its own module;
