@@ -15,21 +15,19 @@ and nothing is implemented.**
 
 ## The plan
 
-Seven phases. The two that are already settled are phases 1 and 7; the five between
-them are the specification, and each one closes before the next opens.
+Eight phases. Phases 1 and 8 are settled; the specification is phases 2 through 7, and
+each closes before the next opens.
 
 | # | Phase | State | Produces |
 |---|---|---|---|
 | 1 | **Upgrade the MCP Go SDK to v1.8.0** | **decided** | A dependency that negotiates `2026-07-28` and implements `server/discover` |
-| 2 | **Storage: where a skill lives** | open | The answer to "what is the source of truth" |
-| 3 | **The contract: what `SkillService` becomes** | open | The `.proto`, decided against the storage answer |
-| 4 | **The reader: the format in a root package** | open | `pkg/skills`, mounted by the subsystem |
-| 5 | **The MCP binding: `pkg/mcp` serves the extension** | open | `skills/list`, `skills/get`, `resources/read` |
-| 6 | **Security posture** | open | What a load requires, and what `allowed-tools` does |
-| 7 | **Implement the skills extension** | **decided** | The feature, end to end, tested against the conformance requirements |
-
-Phases 2 through 6 are the specification. Phase 7 is not optional and not deferred: it
-is the work, and it does not start until the five decisions above it are made.
+| 2 | **The catalog model** | **decided** | A catalog role, aggregation, and fully-qualified references |
+| 3 | **The catalog RPC contract** | open | The provider contract a catalog subsystem implements |
+| 4 | **The aggregate contract** | **decided** | `SkillService`: list, get, read file, validate |
+| 5 | **The reader: the format in a root package** | **decided** | `pkg/skills`, mounted by whichever subsystem serves a catalog |
+| 6 | **The project configuration** | open | What the `skills:` list names, and how it resolves |
+| 7 | **Security posture** | partly decided | `allowed-tools` ignored; the rest open |
+| 8 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
 
 ### Phase 1 — upgrade the SDK
 
@@ -48,12 +46,13 @@ It is its own commit because it is a change to a dependency every module shares 
 a change to this feature. Verified by the full suite, `make vet`, the independent-module
 sweep with `GOWORK=off`, and the CI workflow.
 
-### Phase 7 — implement the extension
+### Phase 8 — implement
 
 **Decided**, and in scope for this work. The deliverable is a deployment whose
 aggregated MCP server serves `io.modelcontextprotocol/skills`, so that a skill written
-in the standard format under `.toolbox/skills/` is discoverable with `skills/list`,
-retrievable with `skills/get`, and readable file by file with `resources/read`.
+in the standard format and included by a project is discoverable with `skills/list`,
+retrievable with `skills/get`, and readable file by file with `resources/read` — from
+any catalog the deployment has integrated.
 
 It is built on the three SDK extension points in *How the framework implements it*
 below, not on the unmerged `#1238`. What it must satisfy is the specification's own
@@ -119,13 +118,31 @@ The format also allows `license`, `compatibility`, `metadata` and `allowed-tools
 fields. **Not yet decided:** which of these the framework carries through, and
 `allowed-tools` in particular has a security question attached to it — see *Security*.
 
-## Where skills come from
+## Where skills come from: catalogs
 
-A skill lives with the project it belongs to, under the project's configuration
-directory:
+Skills do not live in one place. They live in **catalogs**, and a project says which
+ones it wants.
+
+A **catalog** is a source of skills. It is a role a subsystem can play, in the same
+way `parser`, `adapter` and `invoker` are roles in the API layer: a role has a
+contract, a deployment registers implementations of it, and the framework resolves to
+one at the point of use. A catalog is identified by name, and that name is part of how
+a project refers to a skill.
+
+A catalog is **read-only or read-write**. A read-only catalog is browsed and read; a
+read-write one can also be written to, which is what makes "add this skill to my
+project" an operation rather than a copy-paste. The distinction is a property the
+catalog declares, so a write against a read-only catalog is refused with a reason
+rather than silently ignored.
+
+### The `local` catalog
+
+Every project has one implicitly. It is the `skills/` directory under the project's
+configuration directory, and it follows the standard skills directory structure:
 
 ```text
 .toolbox/
+├── config.yaml
 └── skills/
     ├── code-review/
     │   ├── SKILL.md
@@ -134,14 +151,67 @@ directory:
         └── SKILL.md
 ```
 
-A deployment with no skills has no `skills/` directory, and that is not an error: an
-empty catalogue is a deployment that offers nothing, not a deployment that failed to
-start.
+It needs no configuration entry to exist. A project with no `skills/` directory has an
+empty `local` catalog, and an empty catalog is a project that offers nothing, not a
+project that failed to start.
 
-**Not yet decided:** whether skills are also stored in the subsystem's own catalogue,
-as the versioned in-memory store does today, or whether the directory becomes the
-only source. The two answer different questions and the specification step covering
-storage will settle it.
+**Not yet decided:** whether `local` is read-only or read-write. A person's answer is
+that they edit the files; the framework's answer would be that installing a catalog's
+skill into a project writes into this directory. Those are different claims about the
+same directory and only one of them can be true.
+
+### Fully-qualified references
+
+A skill is named `<catalog>.<name>`. `local.code-review` is the `code-review` skill in
+the `local` catalog; `skills.sh.some-owner-some-skill` is a skill from the remote
+catalog.
+
+The catalog prefix is not decoration. Two catalogs may both hold a skill called
+`code-review`, and the specification is explicit that skill names are *not* unique and
+that a host must resolve them per origin — so the thing that identifies a skill in this
+framework is the pair, and dropping the catalog from a reference would reintroduce
+exactly the collision the qualification exists to prevent.
+
+**Not yet decided:** how the qualified reference maps onto the MCP URI. The
+specification requires the *final* path segment to equal the skill name, and allows
+leading segments as a server-chosen organisational prefix, so `skill://<catalog>/<name>/SKILL.md`
+satisfies it. Whether the implicit `local` catalog is spelled out or elided is open —
+and it should be one or the other, because two spellings of one skill is the ambiguity
+the qualification was introduced to remove.
+
+### The aggregate
+
+A deployment integrates catalogs. The **skills subsystem** is the aggregator: it holds
+the registered catalogs, resolves a qualified reference to the catalog that owns it, and
+presents every catalog's skills as one surface, so a project can reach a skill from any
+integrated catalog without knowing which subsystem provides it.
+
+This is the same shape as the API layer's provider resolution, and for the same reason:
+several implementations of one contract, selected at the point of use, with a
+deployment deciding which are present. The consequence to carry through the design is
+the one that applies to every provider in this framework — resolution is by *identifier*,
+not by contract name, because several providers serve the same contract on purpose.
+
+### The `skills.sh` catalog
+
+One catalog implementation is for [skills.sh](https://www.skills.sh/), the public
+directory of agent skills. It is a **read-only** catalog: it indexes skills published by
+third parties and is browsed, not written to.
+
+It is a separate subsystem from the aggregator, for the reason every provider is: it is
+separately deployable, separately versioned, and a deployment may run without it.
+
+What it is not yet pinned down, because it is a provider rather than part of the model:
+how it enumerates (`skills.sh` presents a browsable directory and a
+`npx skills add <owner/repo>` install path, and no public JSON API was found at the
+obvious endpoints), how a skill's files are obtained, how a version or a pin is
+expressed, how it behaves offline, and what a skill from it is trusted to be. The last
+of these is not a detail — see *Security*.
+
+**Not yet decided:** whether the aggregator is a reshape of `subsystems/skill` or a new
+subsystem beside it. The existing `subsystems/skill` holds a versioned in-memory
+catalogue of skill metadata, which is not a catalog in this sense: it has no files, no
+digests, and nothing to aggregate.
 
 ## Serving skills over MCP
 
@@ -327,16 +397,34 @@ What this framework must therefore decide, step by step:
 - **Not yet decided:** what approval, if any, a skill load requires in this framework,
   and whether approval is bound to the entry's `resources` set.
 - **Not yet decided:** how a skill's origin is made visible to a model that receives
-  its content, given that skill names are not unique across origins and a served skill
-  must not silently shadow a same-named local one.
+  its content. A catalog prefix is not the same thing as an origin: a skill from
+  `skills.sh` is third-party content, and a project that includes one should be able to
+  see that before the skill's text reaches a model.
 
 ## What exists today
 
 The existing `subsystems/skill` holds a versioned in-memory catalogue of skill
 *metadata* — an identifier, a version, a name, a description, instructions as a single
-string, and declared capability and policy references. It has no notion of a skill
-directory, of files, of digests, or of MCP. What happens to it is one of the open
-questions in phase 2.
+string, and declared capability and policy references. It has no notion of a catalog, of
+a skill directory, of files, of digests, or of MCP.
+
+## Decisions taken, and their reasons
+
+Recorded here so a later change to one can be argued from the reason rather than
+rediscovered.
+
+| Decision | Why |
+|---|---|
+| The SDK moves to v1.8.0 | It negotiates `2026-07-28` and implements `server/discover`, which is where the extension is declared. v1.6.1 does neither. |
+| Skills live in catalogs, not one store | Several sources exist — a project's own directory, a public registry. A model that assumed one source would have no way to express the second. |
+| A catalog is a provider role | A contract others can implement, resolved by identifier at the point of use — the same pattern as `parser`/`adapter`/`invoker`, for the same reason. |
+| A catalog declares read-only or read-write | So a write against a catalog that cannot take one is refused with a reason rather than appearing to succeed. |
+| References are `<catalog>.<name>` | Skill names are not unique across sources, and the MCP specification requires hosts to resolve them per origin. The prefix *is* the origin. |
+| The `local` catalog is implicit | A project owns its own skills and should not have to declare that it has them. |
+| The format reader is a root package | AGENTS.md rule 4: a subsystem makes an implementation addressable, it does not hold the logic. Two catalogs need the same reader. |
+| `SkillService` is read-only plus validate | The catalogs own storage. A write RPC on the aggregator that did not write a catalog would misreport where a skill lives. `validate` earns its place by failing a deployment at start rather than at first use. |
+| `directoryRead: false` | The manifest is already complete, and the specification says a directory read adds nothing for a host holding an entry. It is for dynamically generated skills, which a catalog of files is not. |
+| `allowed-tools` is ignored, and documented as ignored | A server populating that field is requesting elevated access on the host, not describing its own environment. Ignoring it now is a decision, not an omission: a skill naming `allowed-tools` is served, the field is not acted on, and the reason is recorded so it can be revisited deliberately. |
 
 ## Tests
 
