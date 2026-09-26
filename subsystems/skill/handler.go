@@ -176,7 +176,7 @@ func (s *Service) ReadSkillFile(
 			"a file read needs a path within the skill"))
 	}
 	if reference.IsLocal() {
-		content, file, err := s.local.ReadFile(reference.Name, relative)
+		content, file, err := s.local.File(reference.Name, relative)
 		if err != nil {
 			return nil, connectFailure(err)
 		}
