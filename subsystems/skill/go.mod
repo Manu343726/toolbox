@@ -7,6 +7,7 @@ require (
 	github.com/Manu343726/toolbox v0.0.0
 	github.com/Manu343726/toolbox/subsystems/registry v0.0.0
 	github.com/stretchr/testify v1.12.1
+	go.yaml.in/yaml/v3 v3.0.5
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -30,7 +31,6 @@ require (
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
