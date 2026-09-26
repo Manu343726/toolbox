@@ -10,10 +10,7 @@ decided* are open questions, and a section that is marked as such is not yet
 implemented — this document records intent as well as fact, and the two are labelled
 separately for that reason.
 
-**Status: every phase is decided except two details noted below, and nothing is
-implemented.** The two open items are the exact Toolbox property names beyond `enabled`,
-and whether a catalog that cannot enumerate a skill is refused or served as
-`"dynamic"`.
+**Status: the specification is complete. Nothing is implemented.**
 
 ## The plan
 
@@ -26,10 +23,14 @@ Nine phases. Each closes before the next opens.
 | 3 | **The catalog RPC contract** | **decided** | Seven methods, derived from what the design requires of a catalog |
 | 4 | **The canonical skill and distillation** | **decided** | The union of every client's features, projected per client |
 | 5 | **The aggregate contract** | **decided** | `SkillService`, plus a read of which pinned skills have gone out of date |
-| 6 | **The reader: the format in a root package** | **decided** | `pkg/skills`, mounted by whichever subsystem serves a catalog |
+| 6 | **The reader: the format in a root package** | **decided** | `pkg/skills`, one typed representation, two input dialects |
 | 7 | **The project configuration** | **decided** | `skills:` names qualified references; `local` is implicit |
 | 8 | **Security posture** | **decided** | Authority never widened; the project's list is the permission; drift is reported |
 | 9 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
+
+**The specification is closed.** Nothing below is an open question; a decision taken
+later is written into the section it belongs to rather than left as a marker, because a
+settled thing that still reads as pending gets asked about again.
 
 ### Phase 1 — upgrade the SDK
 
@@ -328,22 +329,68 @@ All four target clients support skills, so no client needs a fallback for having
 A client this framework has never heard of gets the common denominator: `name`,
 `description`, and the complete file set.
 
-### What a Toolbox extension may add
+### The Toolbox feature set is typed, and complete
 
-A template may carry Toolbox properties. `enabled` is one: a local skill whose
-frontmatter says it is not enabled is part of the project and is not served. This is
-how a skill a person put in their own project gets switched off, and it is a property
-of the template rather than of the project's configuration, which is why a project does
-not need a second list to hold exclusions.
+The framework's own frontmatter block carries **the whole feature set**, typed, under
+`com.github.manu343726.toolbox/`. Not a bag of strings, and not only `enabled`: every
+feature in the union has a name and a type, so the framework can validate it, reason
+about which client has it, and tell a boolean from a string that looks like one.
 
-**Decided:** the namespaced properties are **not carried into the distilled output**. The
-served frontmatter is the standard's fields, so another reader gets a skill it
-recognises and a property about how *this* deployment treats a skill stays on the
-template where it belongs.
+```text
+com.github.manu343726.toolbox/
+  enabled: bool
+  invocation:
+    user_invocable: bool
+    model_invocation: bool          # one field; see the dialects below
+    when_to_use: string
+    argument_hint: string
+    arguments: [string]
+    default_prompt: string
+    context: inline | fork
+  execution:
+    model: string
+    effort: low | medium | high | xhigh | max
+  permissions:
+    allowed_tools: [string]         # never acted on
+    disallowed_tools: [string]
+  requirements:
+    tools: [ { type, name, description, transport, url } ]
+  presentation:
+    display_name: string
+    short_description: string
+    icon_small: string
+    icon_large: string
+    brand_color: string
+  classification:
+    license: string
+    compatibility: string
+    metadata: { string: string }
+```
 
-**Not yet decided:** the exact property names beyond `enabled`, and their types. They
-are namespaced precisely so a client that does not know them ignores them, and so a
-future Toolbox can add more without a second naming scheme.
+**One typed representation, two input dialects.** A skill written for Toolbox declares
+its features in the block above. A skill written for a client directly uses that
+client's own fields — `disable-model-invocation`, `allow_implicit_invocation`,
+`interface.*`, `dependencies.*` — and the framework reads those too. Both are parsed
+into the same typed form, and **a template that states the same feature twice with
+different values is refused**, because two sources of one fact is the disagreement this
+framework keeps refusing everywhere else.
+
+**One field, several spellings.** The typed form has a single
+`invocation.model_invocation`, and distillation spells it the way the target client
+wants: Claude Code and Copilot get `disable-model-invocation`, which is its negation;
+Codex gets `policy.allow_implicit_invocation`, which is the same fact stated positively.
+Two clients, one field, and no possibility of the framework holding two opinions about
+whether a skill may load itself.
+
+**Type safety is stricter than YAML's.** Claude Code accepts `yes`, `no`, `on`, `off`,
+`1` and `0` in any case as well as `true` and `false`, so a reader that took YAML's
+word for a boolean would reject a skill that client is perfectly happy with. The
+framework's reader accepts every spelling its targets accept, and reports a value that
+is none of them rather than coercing it.
+
+**A local skill is switched off through this block.** `enabled: false` on a local skill
+means it is part of the project and is not served — the property lives in the same place
+the person put the skill, rather than in a second list in the configuration file.
 
 **Answered by checking rather than assuming:** the Agent Skills standard has **no**
 `enabled` flag. Its frontmatter is exactly `name`, `description`, `license`,
@@ -695,9 +742,11 @@ expensive.
 one skill and write another, and a whole-skill put is what both of them are, as well as
 what a git-backed commit is: one change, one commit.
 
-**Not yet decided:** whether a catalog that cannot enumerate a skill is *refused* or
-served as `"dynamic"`. The specification's `"dynamic"` marker exists for content whose
-digests cannot be published, and a remote catalog that will not enumerate is that case.
+**A catalog that serves a skill can enumerate it.** A catalog that downloads a skill
+has the files and can digest them, so the manifest is always available and the
+specification's `"dynamic"` marker is never needed here. `skills.sh` is the case this was
+asked about, and the answer is that its implementation downloads the skill from the web
+and examines what arrived.
 
 ## Serving skills over MCP
 
