@@ -781,6 +781,27 @@ func TestAnUnknownSettingIsRefusedByName(t *testing.T) {
 	assert.Contains(t, err.Error(), `no setting "rotation"`)
 }
 
+func TestAConditionValueMustBeText(t *testing.T) {
+	_, err := log.ParseConfig(decodeFanout(t, `
+level: info
+handlers:
+  file:
+    provider: text
+routes:
+  - name: a project whose directory is a number
+    match:
+      workspace: 001
+    handlers: [file]
+`))
+
+	// A configuration file can write a bare number, and reading it as a number and rendering
+	// it as text is how a project called "001" ends up with a route that can never match
+	// itself: the file says 001, the reader says 1, and the entry carries "001".
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `match on "workspace" is int`)
+	assert.Contains(t, err.Error(), "quotes")
+}
+
 func TestAParseLevelRefusesAnythingElse(t *testing.T) {
 	for _, name := range []string{"debug", "info", "warn", "warning", "error", " INFO "} {
 		_, err := log.ParseLevel(name)

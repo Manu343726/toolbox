@@ -16,14 +16,14 @@ import (
 )
 
 func TestBuildHostRegistersIndependentSubsystems(t *testing.T) {
-	h, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
+	h, _, err := buildHost(hostComposition{config: config.Config{LoggingBaseDir: t.TempDir()}})
 	require.NoError(t, err)
 	assert.NoError(t, h.Select("workflow"))
 	assert.NoError(t, h.Select("agent", "knowledge"))
 }
 
 func TestAllModeRegistersEndpoints(t *testing.T) {
-	h, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
+	h, _, err := buildHost(hostComposition{config: config.Config{LoggingBaseDir: t.TempDir()}})
 	require.NoError(t, err)
 	require.NoError(t, h.Start(context.Background()))
 	defer func() { require.NoError(t, h.Shutdown(context.Background())) }()

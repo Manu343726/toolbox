@@ -170,6 +170,22 @@ func (r Route) describe(index int) string {
 	}
 }
 
+// text reads a condition or tag value, which is a string and only a string.
+//
+// A configuration file can write a bare number, and reading it as a number and rendering it
+// as text is how a project whose directory is called "001" ends up with a route that can never
+// match itself: the file says 001, YAML reads it as the integer 1, and the entry carries the
+// string "001". Refusing it by name is the difference between a configuration that will not
+// load and one that quietly routes nothing.
+func text(value any, where string) (string, error) {
+	written, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s is %T, and a condition or a tag is text: write it in "+
+			"quotes, or the route will never match the entry it was written for", where, value)
+	}
+	return written, nil
+}
+
 // refuseUnknown reports a key the reader does not understand, naming it and listing what it
 // does accept.
 //
@@ -346,10 +362,14 @@ func parseRoute(index int, value any) (Route, error) {
 				route.When.Level = &parsed
 				continue
 			}
+			value, err := text(wanted, fmt.Sprintf("route %d's match on %q", index, key))
+			if err != nil {
+				return Route{}, err
+			}
 			if route.When.Attributes == nil {
 				route.When.Attributes = make(map[string]string, len(raw))
 			}
-			route.When.Attributes[key] = fmt.Sprint(wanted)
+			route.When.Attributes[key] = value
 		}
 	}
 	handlers, present := table["handlers"]
@@ -370,7 +390,11 @@ func parseRoute(index int, value any) (Route, error) {
 		}
 		route.Add = make(map[string]string, len(attributes))
 		for key, value := range attributes {
-			route.Add[key] = fmt.Sprint(value)
+			text, err := text(value, fmt.Sprintf("route %d's add of %q", index, key))
+			if err != nil {
+				return Route{}, err
+			}
+			route.Add[key] = text
 		}
 	}
 	return route, nil

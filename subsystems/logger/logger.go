@@ -73,9 +73,12 @@ type Options struct {
 	// parsed configuration because a project's sinks have to be built the same way the
 	// deployment's were: the same providers, the same base directory, the same refusals.
 	Registry *log.Registry
-	// WorkDir is where a project's configuration file is looked for. It defaults to the
-	// process's working directory, which is what makes a project in a subdirectory find its
-	// own file by walking up.
+	// WorkDir is where this deployment's own project is. A caller naming a project by
+	// directory overrides it; a caller naming no project, or a project that is not a
+	// directory, is answered by this deployment's own fanout.
+	//
+	// It defaults to the process's working directory, so a daemon running inside a project
+	// serves that project without being told which one it is.
 	WorkDir string
 	// Clock supplies the time an entry claims to have been written at. It is a field so a
 	// test can state the time instead of asserting one is roughly now.
@@ -189,20 +192,20 @@ func Providers(endpoint string) []api.Provider {
 
 // GetConfig returns the deployment's fanout, or a project's.
 func (h *Handler) GetConfig(ctx context.Context, req *connect.Request[loggerv1.GetConfigRequest]) (*connect.Response[loggerv1.GetConfigResponse], error) {
-	workspace := strings.TrimSpace(req.Msg.GetWorkspace())
+	requested := strings.TrimSpace(req.Msg.GetWorkspace())
 	// The same resolution Log uses, so a caller is told the fanout its entries actually go
 	// through. Reporting one configuration and routing by another would leave a caller
 	// unable to answer "where did my entry go" from anything this service said.
-	destination, err := h.routerFor(workspace)
+	project, err := h.resolveProject(requested)
 	if err != nil {
 		return nil, err
 	}
-	fanout := destination.Config()
+	fanout := project.router.Config()
 	return connect.NewResponse(&loggerv1.GetConfigResponse{
 		Level:     levelToProto(fanout.Level),
 		Handlers:  handlersToProto(fanout.Handlers),
 		Routes:    routesToProto(fanout.Routes),
-		Workspace: workspace,
+		Workspace: project.name,
 		Providers: h.providers,
 		Failures:  int64(h.router.Failures()),
 		Unrouted:  int64(h.router.Unrouted()),
@@ -247,21 +250,21 @@ func (h *Handler) Log(ctx context.Context, req *connect.Request[loggerv1.LogRequ
 	if workspace == "" {
 		workspace = h.currentScope()
 	}
-	if workspace != "" {
-		ctx = log.WithWorkspace(ctx, workspace)
-	}
 
 	// A project with a configuration file of its own is logged into by its own fanout, which
 	// is what "this project configures its routing differently" means for a caller that is
 	// not in this process. Without this the project's file would be readable but inert.
-	destination, err := h.routerFor(workspace)
+	project, err := h.resolveProject(workspace)
 	if err != nil {
 		return nil, err
+	}
+	if project.name != "" {
+		ctx = log.WithWorkspace(ctx, project.name)
 	}
 
 	// Deliver reports which sinks the entry reached, which Handle cannot. A caller in another
 	// process is owed an answer, and "no error" does not say whether anything recorded it.
-	reached := destination.Deliver(ctx, record)
+	reached := project.router.Deliver(ctx, record)
 	return connect.NewResponse(&loggerv1.LogResponse{
 		Routed:   len(reached) > 0,
 		Handlers: reached,
@@ -274,63 +277,94 @@ func (h *Handler) currentScope() string {
 	return h.scope
 }
 
-// routerFor returns the fanout an entry for a project goes through: the project's own if it
-// configured one, and the deployment's otherwise.
-func (h *Handler) routerFor(workspace string) (*log.Router, error) {
+// project is a resolved fanout and the name entries for it are tagged with.
+type project struct {
+	router *log.Router
+	// name is the project an entry belongs to, as a route matches it and as the line reads.
+	//
+	// It is the project's directory name rather than its path, because a log line saying
+	// `workspace: acme` is a fact about the entry and one saying `workspace:
+	// /home/someone/src/acme` is a fact about the machine.
+	name string
+}
+
+// resolveProject decides which fanout an entry for a project belongs to.
+//
+// A workspace that names a directory is a location: the project there, its own configuration
+// file, and its own fanout. Its entries are tagged with the directory's name, so a route
+// written as `match: {workspace: acme}` matches whether the caller said "acme" or said where
+// acme lives.
+//
+// A workspace that is only a name is a label, not a location. It is matched against the
+// deployment's own routes, which is what makes "everything the acme agent said also goes to
+// the pager" expressible, and no configuration file is looked up for it: a name says which
+// project a caller is serving, not where that project lives on this machine, and guessing a
+// directory from a name would put one project's log in another's.
+//
+// The deployment's own fanout answers when nothing else applies, which is what a caller that
+// named no project gets.
+func (h *Handler) resolveProject(workspace string) (project, error) {
 	if workspace == "" {
-		return h.router, nil
+		return project{router: h.router}, nil
 	}
+	dir, isLocation := h.projectDir(workspace)
+	if !isLocation {
+		// A label: the deployment's own fanout, and the entry carries the name.
+		return project{router: h.router, name: workspace}, nil
+	}
+	name := filepath.Base(dir)
+
 	h.mu.RLock()
-	cached, built := h.projects[workspace]
-	failure, failed := h.broken[workspace]
+	cached, found := h.projects[dir]
+	failure, failed := h.broken[dir]
 	h.mu.RUnlock()
 	switch {
-	case built:
-		return cached, nil
+	case found:
+		return project{router: cached, name: name}, nil
 	case failed:
 		// The same message every time, because a caller that fixed its configuration should
 		// get the new answer — but a caller that did not should not be told it works.
-		return nil, failure
+		return project{}, failure
 	}
 
-	resolved, err := config.New(config.Options{WorkDir: h.workDirFor(workspace)}).Resolve("")
+	resolved, err := config.New(config.Options{WorkDir: dir}).Resolve("")
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("the configuration for the project %q: %w", workspace, err))
+		return project{}, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("the configuration for the project %q: %w", name, err))
 	}
 	if len(resolved.Logging) == 0 {
 		// A project that never mentioned logging logs into the deployment's fanout, which is
 		// what it would get without this service and so what it should not lose by using it.
-		return h.router, nil
+		return project{router: h.router, name: name}, nil
 	}
 	fanout, err := log.ParseConfig(resolved.Logging)
 	if err != nil {
-		return nil, h.rememberFailure(workspace, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("the logging section of the project %q: %w", workspace, err)))
+		return project{}, h.rememberFailure(dir, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("the logging section of the project %q: %w", name, err)))
 	}
-	if err := h.checkProviders(workspace, fanout); err != nil {
-		return nil, h.rememberFailure(workspace, err)
+	if err := h.checkProviders(name, fanout); err != nil {
+		return project{}, h.rememberFailure(dir, err)
 	}
 
-	// The base directory is the file's own, so a relative path in a project's configuration
-	// means a path in that project rather than wherever this process started.
+	// The base directory is the project's own, so a relative path in its configuration means
+	// a path in that project rather than wherever this process started.
 	registry := *h.registry
 	registry.BaseDir = resolved.LoggingBaseDir
-	project, err := registry.Build(fanout)
+	router, err := registry.Build(fanout)
 	if err != nil {
-		return nil, h.rememberFailure(workspace, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Errorf("the fanout of the project %q: %w", workspace, err)))
+		return project{}, h.rememberFailure(dir, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("the fanout of the project %q: %w", name, err)))
 	}
 
 	h.mu.Lock()
-	h.projects[workspace] = project
+	h.projects[dir] = router
 	h.mu.Unlock()
-	return project, nil
+	return project{router: router, name: name}, nil
 }
 
-func (h *Handler) rememberFailure(workspace string, err error) error {
+func (h *Handler) rememberFailure(dir string, err error) error {
 	h.mu.Lock()
-	h.broken[workspace] = err
+	h.broken[dir] = err
 	h.mu.Unlock()
 	return err
 }
@@ -366,17 +400,14 @@ func (h *Handler) checkProviders(workspace string, fanout log.Config) error {
 	return nil
 }
 
-// workDirFor is where a project's configuration file is looked for.
-//
-// A workspace that names a directory is that directory's project. One that does not is still
-// the working directory's, because a caller saying "acme" is saying which project it is
-// serving, not claiming to know where that project lives on this machine.
-func (h *Handler) workDirFor(workspace string) string {
-	if info, err := os.Stat(workspace); err == nil && info.IsDir() {
-		if absolute, absErr := filepath.Abs(workspace); absErr == nil {
-			return absolute
-		}
-		return workspace
+// projectDir reports the directory a requested workspace names, if it names one.
+func (h *Handler) projectDir(workspace string) (string, bool) {
+	info, err := os.Stat(workspace)
+	if err != nil || !info.IsDir() {
+		return "", false
 	}
-	return h.workDir
+	if absolute, absErr := filepath.Abs(workspace); absErr == nil {
+		return absolute, true
+	}
+	return workspace, true
 }

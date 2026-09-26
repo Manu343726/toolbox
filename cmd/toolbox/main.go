@@ -164,7 +164,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, catalog, err := buildHost(resolved, "")
+	h, catalog, err := buildHost(hostComposition{config: resolved})
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		all = true
 	}
 
-	h, _, err := buildHost(resolved, "")
+	h, _, err := buildHost(hostComposition{config: resolved})
 	if err != nil {
 		return err
 	}
@@ -353,21 +353,69 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // core is, and what an agent may call. Both are read here rather than by each
 // consumer, because the catalog, the seeder, and the gateway all have to be
 // answering from one policy and one address.
-func buildHost(resolved config.Config, registryAddress string, mounts ...subsystem.Mount) (*host.Host, *sharedCatalog, error) {
+// hostComposition is what buildHost is asked to compose.
+//
+// It is a structure rather than a run of positional arguments because the two things a
+// composition varies in — whether it is a deployment or only something to describe, and which
+// address the registry takes — are not both strings, and a boolean in a positional argument
+// list is a boolean a caller will eventually get the wrong way round.
+type hostComposition struct {
+	// config is the deployment's configuration. It is the zero value for a host composed
+	// only to be described.
+	config config.Config
+	// registryAddress is the address the registry binds, empty for a host nothing outside
+	// the process needs to find.
+	registryAddress string
+	// mounts are the subsystems a registry serves on behalf of its host.
+	mounts []subsystem.Mount
+	// introspect composes the host to learn what its subsystems serve, without deploying
+	// anything. The command tree is built this way, before any command has parsed its flags.
+	introspect bool
+}
+
+// buildHost composes the host and the catalog it fills.
+//
+// The configuration is the deployment's answer to two questions at once: where the
+// core is, and what an agent may call. Both are read here rather than by each
+// consumer, because the catalog, the seeder, and the gateway all have to be
+// answering from one policy and one address.
+func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 	h := host.New()
+	resolved := plan.config
 
 	// The fanout is built before anything starts, because a deployment must be able to log
 	// about the fact that a subsystem failed to start. It is built once and shared: the
 	// in-process handlers and the logger subsystem route through the same router, so an entry
 	// an agent sends and an entry this process writes are governed by the same routes.
-	fanout, err := buildFanout(resolved)
+	//
+	built, err := func() (fanout, error) {
+		if plan.introspect {
+			return silentFanout()
+		}
+		return buildFanout(resolved)
+	}()
 	if err != nil {
 		return nil, nil, err
 	}
-	// slog.SetDefault is the whole integration. Every dependency in the process — including
-	// ones that have never heard of Toolbox — logs through the standard library's package
-	// logger, and that is the fanout above.
-	slog.SetDefault(slog.New(fanout.Router))
+	fanout := built
+	if !plan.introspect {
+		// slog.SetDefault is the whole integration. Every dependency in the process —
+		// including ones that have never heard of Toolbox — logs through the standard
+		// library's package logger, and that is the fanout above.
+		slog.SetDefault(slog.New(fanout.Router))
+		// Said after the default is installed, so the line lands in the log it describes. A
+		// fanout reporting itself into the previous deployment's log is a line about the
+		// wrong thing.
+		//
+		// The deployment's own level is not called "level": that name is the standard
+		// library's for the entry's own severity, and an attribute with the same name would
+		// render twice and read as though the deployment had overridden the entry.
+		slog.Info("logging configured",
+			"configured_level", fanout.Router.Level().String(),
+			"handlers", len(fanout.Router.Config().Handlers),
+			"routes", len(fanout.Router.Config().Routes),
+			"config", resolved.Path)
+	}
 	// The API catalog is given the host's own provider directory, so it finds the
 	// parsers, adapters, and invokers this process starts without importing a
 	// single provider subsystem.
@@ -429,11 +477,11 @@ func buildHost(resolved config.Config, registryAddress string, mounts ...subsyst
 		// port: nothing outside the process needs to find it.
 		"registry": func() (*subsystem.Server, error) {
 			options := registry.Options{}
-			if registryAddress != "" {
-				options.ListenAddress = registryAddress
+			if plan.registryAddress != "" {
+				options.ListenAddress = plan.registryAddress
 			}
-			if len(mounts) > 0 {
-				options.Mounts = mounts
+			if len(plan.mounts) > 0 {
+				options.Mounts = plan.mounts
 			}
 			return registry.New(options)
 		},

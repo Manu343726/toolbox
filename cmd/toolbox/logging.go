@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/Manu343726/toolbox/pkg/config"
@@ -15,6 +14,34 @@ import (
 type fanout struct {
 	Router   *log.Router
 	Registry *log.Registry
+}
+
+// silentFanout is the fanout of a host composed only to be described.
+//
+// It discards everything and opens nothing. Describing a deployment must not create its log
+// files: the command tree is built before any command has parsed its flags, so there is no
+// deployment to configure yet, and asking what a command can do should not leave a log
+// behind. It is a real router rather than a nil one, because describing a host composes every
+// subsystem's factory and a factory that needs a fanout should not be describing one that
+// does not exist.
+func silentFanout() (fanout, error) {
+	registry := log.NewRegistry()
+	if err := registry.Register(logfile.LogProvider()); err != nil {
+		return fanout{}, err
+	}
+	settings, err := log.ParseConfig(map[string]any{
+		"level":    "info",
+		"handlers": map[string]any{"discarded": map[string]any{"provider": log.ProviderNull}},
+		"routes":   []any{map[string]any{"handlers": []any{"discarded"}}},
+	})
+	if err != nil {
+		return fanout{}, err
+	}
+	router, err := registry.Build(settings)
+	if err != nil {
+		return fanout{}, err
+	}
+	return fanout{Router: router, Registry: registry}, nil
 }
 
 // buildFanout turns the configuration file's logging section into a router.
@@ -64,12 +91,5 @@ func buildFanout(resolved config.Config) (fanout, error) {
 	if err != nil {
 		return fanout{}, err
 	}
-	// Reported before anything else happens, so the first line in a new log is the line that
-	// says which fanout is in use and where the file was read from.
-	slog.Info("logging configured",
-		"level", settings.Level.String(),
-		"handlers", len(settings.Handlers),
-		"routes", len(settings.Routes),
-		"config", resolved.Path)
 	return fanout{Router: router, Registry: registry}, nil
 }

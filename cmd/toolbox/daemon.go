@@ -112,7 +112,11 @@ func runDaemon(cmd *cobra.Command, _ []string) error {
 			Description: "The core's Model Context Protocol endpoint.",
 		}}
 	}
-	h, catalog, err := buildHost(resolved, resolved.Daemon.Addr(), mounts...)
+	h, catalog, err := buildHost(hostComposition{
+		config:          resolved,
+		registryAddress: resolved.Daemon.Addr(),
+		mounts:          mounts,
+	})
 	if err != nil {
 		return err
 	}

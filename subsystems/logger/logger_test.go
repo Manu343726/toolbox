@@ -3,6 +3,7 @@ package logger_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -311,7 +312,9 @@ func TestGetConfigCountsWhatReachedNobody(t *testing.T) {
 
 func TestAProjectMayConfigureItsOwnFanout(t *testing.T) {
 	project := t.TempDir()
-	writeConfig(t, project, `
+	// The route matches the project's own name, which is its directory's: a caller that says
+	// where the project is is tagged with what it is called, not with where it was found.
+	writeConfig(t, project, fmt.Sprintf(`
 daemon:
   host: 127.0.0.1
   port: 9180
@@ -323,25 +326,28 @@ logging:
       options:
         path: logs/project.log
   routes:
-    - name: acme's own
+    - name: the project's own
       match:
-        workspace: acme
+        workspace: "%s"
       handlers: [project]
       add:
         project: acme
-`)
+`, filepath.Base(project)))
 	router, deploymentFiles := router(t, defaultFanout(t))
 	service := serve(t, router, func(options *logger.Options) { options.WorkDir = project })
 
 	response, err := service.GetConfig(context.Background(), connect.NewRequest(&loggerv1.GetConfigRequest{
-		Workspace: "acme",
+		Workspace: project,
 	}))
 	require.NoError(t, err)
 
 	// The project logs the way its own file says, and that file is a different file rather
 	// than a flag on the same one.
 	assert.Equal(t, loggerv1.LogLevel_LOG_LEVEL_DEBUG, response.Msg.GetLevel())
-	assert.Equal(t, "acme", response.Msg.GetWorkspace())
+	// Reported as the project's name rather than its path, because a log line saying
+	// `workspace: acme` is a fact about the entry and one saying
+	// `workspace: /home/someone/src/acme` is a fact about the machine.
+	assert.Equal(t, filepath.Base(project), response.Msg.GetWorkspace())
 	require.Len(t, response.Msg.GetHandlers(), 1)
 	assert.Equal(t, "project", response.Msg.GetHandlers()[0].GetName())
 
@@ -349,7 +355,7 @@ logging:
 	// the project, and does not touch the deployment's fanout at all. A project's
 	// configuration that was reported but inert would be the worst of both.
 	_, err = service.Log(context.Background(), connect.NewRequest(&loggerv1.LogRequest{
-		Message: "stored a source", Workspace: "acme",
+		Message: "stored a source", Workspace: project,
 	}))
 	require.NoError(t, err)
 	written, err := os.ReadFile(filepath.Join(project, "logs", "project.log"))
@@ -360,7 +366,7 @@ logging:
 
 func TestAProjectsFanoutIsBuiltOnce(t *testing.T) {
 	project := t.TempDir()
-	writeConfig(t, project, `
+	writeConfig(t, project, fmt.Sprintf(`
 daemon:
   host: 127.0.0.1
   port: 9180
@@ -372,17 +378,17 @@ logging:
       options:
         path: project.log
   routes:
-    - name: acme's own
+    - name: the project's own
       match:
-        workspace: acme
+        workspace: "%s"
       handlers: [project]
-`)
+`, filepath.Base(project)))
 	router, _ := router(t, defaultFanout(t))
 	service := serve(t, router, func(options *logger.Options) { options.WorkDir = project })
 
 	for i := 0; i < 3; i++ {
 		_, err := service.Log(context.Background(), connect.NewRequest(&loggerv1.LogRequest{
-			Message: "stored a source", Workspace: "acme",
+			Message: "stored a source", Workspace: project,
 		}))
 		require.NoError(t, err)
 	}
@@ -399,7 +405,7 @@ func TestAProjectThatNeverMentionedLoggingUsesTheDeploymentsFanout(t *testing.T)
 	service := serve(t, router, func(options *logger.Options) { options.WorkDir = project })
 
 	response, err := service.GetConfig(context.Background(), connect.NewRequest(&loggerv1.GetConfigRequest{
-		Workspace: "acme",
+		Workspace: project,
 	}))
 	require.NoError(t, err)
 
@@ -428,11 +434,9 @@ logging:
 	service := serve(t, router, func(options *logger.Options) { options.WorkDir = project })
 
 	_, err := service.GetConfig(context.Background(), connect.NewRequest(&loggerv1.GetConfigRequest{
-		Workspace: "acme",
+		Workspace: project,
 	}))
 
-	// Reported rather than defaulted: a project that named a backend nobody has would
-	// otherwise silently log nowhere.
 	// Reported rather than defaulted: a project that named a backend nobody has would
 	// otherwise log nowhere and say nothing.
 	require.Error(t, err)
@@ -454,7 +458,7 @@ logging:
 	service := serve(t, router, func(options *logger.Options) { options.WorkDir = project })
 
 	_, err := service.GetConfig(context.Background(), connect.NewRequest(&loggerv1.GetConfigRequest{
-		Workspace: "acme",
+		Workspace: project,
 	}))
 
 	// A key nobody understands is refused by name, by the reader that owns the section: a

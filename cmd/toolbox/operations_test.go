@@ -187,7 +187,7 @@ func TestAnOperationCommandNamesItsContract(t *testing.T) {
 // starting it.
 func serviceNamesFor(t *testing.T, subsystem string) ([]string, error) {
 	t.Helper()
-	composed, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
+	composed, _, err := buildHost(hostComposition{config: config.Config{LoggingBaseDir: t.TempDir()}})
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func serviceNamesFor(t *testing.T, subsystem string) ([]string, error) {
 // contract.
 func subsystemFlagsFor(t *testing.T, subsystem, method string) map[string]string {
 	t.Helper()
-	composed, _, err := buildHost(config.Config{LoggingBaseDir: t.TempDir()}, "")
+	composed, _, err := buildHost(hostComposition{config: config.Config{LoggingBaseDir: t.TempDir()}})
 	require.NoError(t, err)
 	require.NoError(t, composed.Select(subsystem))
 	require.NoError(t, composed.Start(t.Context()))

@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/Manu343726/toolbox/pkg/cli"
-	"github.com/Manu343726/toolbox/pkg/config"
 	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/spf13/cobra"
 )
@@ -65,11 +64,13 @@ func (l *lateResolver) Resolve(ctx context.Context, serviceName string) (core.En
 // addOperationCommands generates a command per operation of the built-in subsystems and
 // attaches them to a root.
 //
-// Building the tree costs no port and no listener: the subsystems are composed to learn what
-// they serve and are never started, because a subsystem's factory builds its server and a
-// server binds its port only when it starts.
+// Building the tree costs no port, no listener and no log file: the subsystems are composed
+// to learn what they serve and are never started, because a subsystem's factory builds its
+// server and a server binds its port only when it starts. The composition is introspective
+// for the same reason — this runs before any command has parsed its flags, so there is no
+// deployment to configure a fanout from.
 func addOperationCommands(root *cobra.Command) error {
-	composed, _, err := buildHost(config.Config{}, "")
+	composed, _, err := buildHost(hostComposition{introspect: true})
 	if err != nil {
 		return err
 	}
@@ -200,7 +201,7 @@ func resolveOperationTarget(cmd *cobra.Command, resolver *lateResolver) (func(),
 		all = true
 	}
 
-	h, _, err := buildHost(resolved, "")
+	h, _, err := buildHost(hostComposition{config: resolved})
 	if err != nil {
 		return nil, err
 	}
