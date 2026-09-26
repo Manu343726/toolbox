@@ -59,6 +59,21 @@ test-short: check-tests
 	@$(MAKE) -C cmd/toolbox test
 	@go test -short -count=1 ./...
 
+# The repository's own shape, which no package's tests can see from inside a
+# package. Two things live here:
+#
+#   - a Go file whose package clause does not match its directory's is listed by
+#     Go under IgnoredGoFiles and never compiled. The build passes, the tests
+#     pass, and a file written to register a subsystem's contract has never run.
+#   - a build output beside the source rather than in a bin/ directory, which is
+#     where `go build .` leaves it and where a committed binary is one `git add`
+#     away from being committed by whoever runs it next.
+#
+# `make test` runs this too, because it is part of ./... . It is a target of its
+# own so that either check can be run on its own, and so that CI can name it.
+check-repo:
+	@go test -count=1 ./internal/repocheck
+
 fmt:
 	@gofmt -w $$(find pkg -name '*.go' -not -name '*.pb.go' -not -name '*.connect.go')
 	@for subsystem in $(SUBSYSTEMS); do $(MAKE) -C subsystems/$$subsystem fmt; done

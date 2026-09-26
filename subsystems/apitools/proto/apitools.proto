@@ -611,7 +611,15 @@ message OperationExposureResponse {
   int32 hidden = 3;
   // Number of operations policy denies.
   int32 denied = 4;
-  // True when at least one invoker provider is available.
+  // True when every API in the reported footprint can be called on this
+  // deployment: either a registered invoker provider claims its transport, or the
+  // framework speaks that transport itself and makes the call without a provider.
+  // It is asked per API rather than per deployment, because a provider claiming one
+  // transport says nothing about an API reached over another.
+  //
+  // False for a report that covers no operations, and false when any API in it is
+  // unreachable: a caller reading this is asking whether the operations it was
+  // just shown can be called, not whether some of them can.
   bool invokers_available = 5;
 }
 

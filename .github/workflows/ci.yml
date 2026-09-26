@@ -230,6 +230,36 @@ jobs:
             exit 1
           fi
 
+      - name: No tracked file is a build output
+        run: |
+          # The rule above knows the names it is looking for. This knows what a file is, which
+          # is the only way to catch the rest: `go build .` writes a binary named after the
+          # module into that module's own directory, so the name to forbid changes with every
+          # subsystem. One was committed before this check existed — 30MB of ELF at the
+          # repository root.
+          #
+          # The media types are matched loosely, on "executable" and "octet-stream", because
+          # `file` distinguishes application/x-executable from application/x-pie-executable and
+          # a PIE is the default on a current Linux. Naming two exact types would have caught
+          # the committed binary on one machine and not on the next. The separator is a class
+          # of spaces because `file` aligns its columns.
+          offenders=$(git ls-files -z \
+            | xargs -0 file --mime-type 2>/dev/null \
+            | grep -E ':[[:space:]]+application/.*(executable|octet-stream)' || true)
+          if [ -n "$offenders" ]; then
+            echo "these tracked files are compiled artefacts rather than source:"
+            echo "$offenders"
+            exit 1
+          fi
+
+      - name: Every Go file is one the toolchain compiles
+        # A file whose package clause does not match its directory's is not an error: Go lists
+        # it under IgnoredGoFiles and carries on, so the build passes and the file has never
+        # run. The documentation subsystem's docs_embed.go declared `package documentation` in
+        # a package called `docs` and was skipped for its whole life, which is how a subsystem
+        # whose only job is serving documentation served nothing at all.
+        run: make check-repo
+
       - name: go.mod files are tidy
         run: |
           # A module that does not build on its own is not an independent project, and the

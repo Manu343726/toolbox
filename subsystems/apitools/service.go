@@ -601,57 +601,91 @@ func (s *Service) OperationExposure(ctx context.Context, req *connect.Request[ap
 			hidden++
 		}
 	}
-	// An invoker is available if a provider is registered for the operation's
-	// transport, or if the framework speaks that transport itself. Reporting only
-	// the first would tell a caller that a seeded operation is uncallable on a
-	// deployment that calls it perfectly well.
-	invokersAvailable := false
-	if s.directory != nil {
-		invokers, err := s.providersForRole(ctx, api.ProviderInvoker)
-		if err != nil {
-			return nil, err
-		}
-		invokersAvailable = len(invokers) > 0
-	}
-	if !invokersAvailable {
-		invokersAvailable = s.frameworkHandlesFootprint(req.Msg.GetApiId())
+	invocable, err := s.footprintIsInvocable(ctx, req.Msg.GetApiId())
+	if err != nil {
+		return nil, err
 	}
 	return connect.NewResponse(&apitoolsv1.OperationExposureResponse{
 		Allowed:           int32(allowed),
 		Exposed:           int32(exposed),
 		Hidden:            int32(hidden),
 		Denied:            int32(denied),
-		InvokersAvailable: invokersAvailable,
+		InvokersAvailable: invocable,
 	}), nil
 }
 
-// frameworkHandlesFootprint reports whether every API in a footprint is reached
-// over a transport the framework speaks, and so can be called without an invoker
-// provider deployed alongside.
+// footprintIsInvocable reports whether the operations in a footprint can
+// actually be called on this deployment.
 //
-// One API the framework cannot reach makes the answer false for the whole
-// footprint, because the field is one boolean and a caller reading it is asking
-// "can I call these" rather than "can I call some of these".
-func (s *Service) frameworkHandlesFootprint(apiID string) bool {
-	filter := ExposureFilter{APIID: strings.TrimSpace(apiID)}
-	footprint := s.store.Exposure(filter)
+// An API is callable when something here can perform a call to it: a registered
+// invoker provider that claims its transport, or the framework itself for a
+// transport it speaks. Both are asked per API, because a provider claiming "http"
+// says nothing about a catalog whose operations are reached over "connectrpc", and
+// a deployment-wide "is there any invoker provider" answer would report a
+// footprint of uncallable operations as callable.
+//
+// One API that cannot be called makes the answer false for the whole footprint,
+// because the field is one boolean and a caller reading it is asking "can I call
+// these" rather than "can I call some of these".
+//
+// A footprint that matched nothing is false. There is nothing to call, and
+// answering true would tell a caller that a report covering no operations found
+// invokers for them.
+func (s *Service) footprintIsInvocable(ctx context.Context, apiID string) (bool, error) {
+	footprint := s.store.Exposure(ExposureFilter{APIID: strings.TrimSpace(apiID)})
 	if len(footprint) == 0 {
-		return false
+		return false, nil
 	}
+	// A footprint spans APIs and an API's transport is asked once, not once per
+	// operation: a hundred operations on one API are one reachability question.
+	asked := make(map[string]bool, len(footprint))
 	for _, entry := range footprint {
-		stored, err := s.store.GetAPI(entry.Operation.APIID)
+		owner := entry.Operation.APIID
+		if asked[owner] {
+			continue
+		}
+		asked[owner] = true
+
+		stored, err := s.store.GetAPI(owner)
 		if err != nil || len(stored.ServerIDs) == 0 {
-			return false
+			// An API bound to no server is one nothing can be called against.
+			return false, nil
 		}
 		server, err := s.store.GetServer(stored.ServerIDs[0])
 		if err != nil {
-			return false
+			return false, nil
 		}
-		if !protocontract.HandlesTransport(server.Transport) {
-			return false
+		if protocontract.HandlesTransport(server.Transport) {
+			continue
+		}
+		reachable, err := s.providerClaimsTransport(ctx, server.Transport)
+		if err != nil {
+			return false, err
+		}
+		if !reachable {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
+}
+
+// providerClaimsTransport reports whether any registered invoker provider claims a
+// transport, which is what makes it reachable by a deployment that did not deploy
+// anything for the framework's own transports.
+func (s *Service) providerClaimsTransport(ctx context.Context, transport api.Transport) (bool, error) {
+	if s.directory == nil {
+		return false, nil
+	}
+	invokers, err := s.providersForRole(ctx, api.ProviderInvoker)
+	if err != nil {
+		return false, err
+	}
+	for _, provider := range invokers {
+		if provider.HandlesTransport(transport) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // CallOperation routes one exposed operation to the invoker that will perform it.

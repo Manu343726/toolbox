@@ -295,6 +295,28 @@ go test -race ./pkg/mcp
 GOWORK=off make -C subsystems/<name> test
 ```
 
+`make test` covers `make check-repo` as well, because it is part of `./...`, so
+these two need no separate command — but they are named here because they catch a
+mistake nothing else reports:
+
+- **A Go file whose package clause does not match its directory's is never
+  compiled.** Go lists it under `IgnoredGoFiles` and carries on, so the build
+  passes, the tests pass, and the file has never run. A subsystem's
+  `docs_embed.go` is exactly such a file, and one declared `package
+  documentation` in a package called `docs` for its whole life — which is how the
+  subsystem whose only job is serving documentation served nothing. The
+  directory's package is decided by the majority of its files, with a test file
+  as a witness; a file carrying a `//go:build` constraint is exempt, because that
+  is how a repository keeps a helper for a build it does not perform.
+- **A build output is not source.** `go build .` writes a binary named after the
+  module into that module's own directory, and one 30MB ELF binary was committed
+  at the repository root. A binary inside a `bin/` directory is a local build
+  somebody asked for; one anywhere else is a stray, and is reported by what it is
+  rather than by what it is called, so the rule does not go stale as subsystems
+  are added.
+
+Run `make check-repo` to run either on its own.
+
 Do not weaken tests, skip tests, or replace assertions with logs to make a
 failure disappear.
 

@@ -9,7 +9,13 @@
 *.sqlite3-shm
 *.sqlite3-wal
 
-# a stray build in a module directory is never source
+# A stray build is never source. "go build ." writes a binary named after the
+# module into the module's own directory, so the root and the host both need
+# saying. One committed build was 30MB of ELF at the repository root. The other
+# module names are not listed here: a list goes stale with every new subsystem,
+# so the CI hygiene check identifies a committed binary by what is in it rather
+# than by where it is.
+toolbox
 cmd/toolbox/toolbox
 
 # a deployment's default log, wherever a command was run without a configuration file

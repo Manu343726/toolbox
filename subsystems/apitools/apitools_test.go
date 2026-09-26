@@ -1317,3 +1317,106 @@ func TestOperationExposureReportsAnInvokerForATransportTheFrameworkSpeaks(t *tes
 	require.NoError(t, err)
 	assert.False(t, report.Msg.GetInvokersAvailable())
 }
+
+// A provider claiming one transport says nothing about an API reached over
+// another, so the report asks per API. Counting "is there any invoker provider at
+// all" told a caller that a catalog of uncallable operations was callable, which
+// is the one answer a readiness check must not give.
+func TestOperationExposureAsksPerAPINotPerDeployment(t *testing.T) {
+	store := newTestStore(t)
+	// A server on "http", which the framework does not speak.
+	_, _, err := store.RegisterServer(testServer("shop"), false)
+	require.NoError(t, err)
+	_, _, err = store.RegisterAPI(testAPI("shop-api"), "shop", false)
+	require.NoError(t, err)
+
+	// A directory holding one invoker provider, claiming "http" — which does serve
+	// this catalog, so the answer is true.
+	serving := staticDirectory(t, "http://provider.test", api.ProviderInvoker)
+	report, err := NewService(store, serving).OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "shop-api"}))
+	require.NoError(t, err)
+	assert.True(t, report.Msg.GetInvokersAvailable(),
+		"a provider claiming this API's transport does make it callable")
+
+	// A directory holding one invoker provider claiming something else entirely.
+	// The deployment has an invoker; it does not have one for this catalog.
+	other := api.Provider{ID: "grpc-only", Subsystem: "other", Role: api.ProviderInvoker}
+	other.Transports = []api.Transport{"grpc"}
+	// The provider is never called here — the report only asks which transports it
+	// claims — but a directory refuses a provider it has no client for, so it is
+	// given one pointing nowhere in particular.
+	directory, err := NewStaticDirectory(
+		[]api.Provider{other}, nil, nil,
+		map[string]InvokerClient{
+			"grpc-only": apiv1connect.NewApiInvokerServiceClient(http.DefaultClient, "http://provider.test"),
+		},
+	)
+	require.NoError(t, err)
+	report, err = NewService(store, directory).OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "shop-api"}))
+	require.NoError(t, err)
+	assert.False(t, report.Msg.GetInvokersAvailable(),
+		"a provider for another transport does not make this API callable")
+}
+
+// A footprint spanning two APIs is callable only if both are, because the field is
+// one boolean and "some of these" is not what a caller is asking.
+func TestOperationExposureIsFalseWhenOneAPIInTheFootprintIsUnreachable(t *testing.T) {
+	store := newTestStore(t)
+	// One API the framework speaks, one it does not.
+	_, _, err := store.RegisterServer(testServer("shop"), false)
+	require.NoError(t, err)
+	_, _, err = store.RegisterAPI(testAPI("shop-api"), "shop", false)
+	require.NoError(t, err)
+
+	_, endpoint := mountedSubsystem(t)
+	_, _ = seedMounted(t, store, endpoint)
+
+	service := NewService(store, nil)
+	// Each API on its own: the reachable one is callable, the other is not.
+	mounted, err := service.OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "mounted-api"}))
+	require.NoError(t, err)
+	assert.True(t, mounted.Msg.GetInvokersAvailable())
+
+	shop, err := service.OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "shop-api"}))
+	require.NoError(t, err)
+	assert.False(t, shop.Msg.GetInvokersAvailable())
+
+	// The whole catalog, which spans both, is not callable.
+	all, err := service.OperationExposure(context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{}))
+	require.NoError(t, err)
+	assert.False(t, all.Msg.GetInvokersAvailable(),
+		"one unreachable API in the report makes the report's answer false")
+}
+
+// A report covering no operations is false: there is nothing to call, and true
+// would say a report found invokers for operations it did not contain.
+func TestOperationExposureIsFalseForAReportThatCoversNothing(t *testing.T) {
+	service := NewService(newTestStore(t), nil)
+
+	empty, err := service.OperationExposure(context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{}))
+	require.NoError(t, err)
+	assert.False(t, empty.Msg.GetInvokersAvailable())
+
+	absent, err := service.OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "not-registered"}))
+	require.NoError(t, err)
+	assert.False(t, absent.Msg.GetInvokersAvailable())
+}
+
+// An API bound to no server is one nothing can be called against, so it is not
+// reported as callable however well its operations are described.
+func TestOperationExposureIsFalseForAnAPIBoundToNoServer(t *testing.T) {
+	store := newTestStore(t)
+	// An API with no server to host it: registered against an empty server list.
+	_, _, err := store.RegisterAPI(testAPI("orphan-api"), "", true)
+	require.NoError(t, err)
+
+	report, err := NewService(store, nil).OperationExposure(
+		context.Background(), connect.NewRequest(&apitoolsv1.OperationExposureRequest{ApiId: "orphan-api"}))
+	require.NoError(t, err)
+	assert.False(t, report.Msg.GetInvokersAvailable())
+}
