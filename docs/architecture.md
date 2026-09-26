@@ -159,12 +159,13 @@ SDK behavior.
 | `pkg/docs`      | Neutral documentation model parsed from descriptor sets generated with `--include_source_info` |
 | `pkg/cli`       | Cobra command generator driven by reflected methods and documentation            |
 | `pkg/cliapp`    | Shared standalone-command runner; adds the automatic `mcp` subcommand to every subsystem command |
-| `pkg/mcp`       | MCP gateway built from a reflected source: feature catalog, exposure state, policy gating, introspection tools, stdio and HTTP transports |
+| `pkg/mcp`       | MCP gateway built from a reflected source: feature catalog, exposure state, policy gating, introspection tools, the MCP Skills extension, and stdio and HTTP transports |
 | `pkg/host`      | Composes independently built subsystem factories in one process; registers what it runs in a catalog; holds the API provider directory a deployment fills |
 | `pkg/api`       | Standard, provider-neutral description of an API: `API`, `Service`, `Operation`, `Schema`, `Server`, plus indexed format and transport descriptors and the framework's own extension contract. Also the framework's Go interfaces — `Catalog`, `Registrar`, `Invoker`, `ExposureSource` — and the failure classification every provider reports |
 | `pkg/protocontract` | Reads a protobuf service contract, from a FileDescriptorSet or a live endpoint's reflection, and calls the operations it declares. A plain Go package: no transport, no service registration |
 | `pkg/openapi`   | Reads, renders, serves, and calls APIs described by OpenAPI 3.x documents, with no transport of its own |
 | `pkg/log`       | The deployment's log fanout, as a `slog.Handler`: routes deciding which handlers an entry reaches and what it is tagged with, the `log.Provider` interface a backend implements, and the configuration reader. `slog` and its ecosystem do everything else — `MultiHandler`, `HandlerOptions`, `WithAttrs`, `WithGroup`, lumberjack |
+| `pkg/skills`    | Reads an agent skill in the standard format and projects it for the client reading it: one typed form with two input dialects, a manifest computed from the bytes it describes, and the MCP Skills extension's entry shape. Also the catalog contract a catalog provider implements, which lives here rather than in a subsystem because a provider must be able to depend on it without depending on the thing it serves |
 
 A subsystem implements its own service and may import any of these packages. It
 may also depend on another feature subsystem and call it: resolve the callee

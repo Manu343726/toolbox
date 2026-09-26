@@ -135,13 +135,19 @@ not separately deployable. See [`docs/architecture.md`](docs/architecture.md) an
 | -------------- | ---------------------------------------------------------- | ----------------------------------------------------------------- |
 | Workflows      | Versioned plans: steps, order, branching, approvals       | The process, written down and reviewable                           |
 | Agents         | Roles referencing the skills, knowledge, tools they may use | Who does what, defined once and reused                            |
-| Skills         | Reusable units of know-how bound to what they require      | Know-how that improves once for everyone                           |
+| Skills         | A directory of files, in the standard agent-skills format, served over the MCP Skills extension | Know-how that improves once for everyone, and reads the same in every client |
 | Prompts        | Parameterised templates                                    | Consistent instructions without hand-editing each time             |
 | Knowledge      | The sources assistants may search                          | One current body of reference material                            |
 | Models         | The models available to the team                           | Work stays portable across providers and budgets                  |
 | Tools          | Declared actions, each with its own requirements            | What an assistant can actually do                                 |
 | Policies       | The document deciding what an agent may call, and what needs approval | Limits enforced by the system, not requested in a prompt          |
 | Health         | Whether each part is ready                                 | Assistants and people do not rely on something unavailable        |
+
+A project's own skills live in `.toolbox/skills/` and are part of the project
+without being named anywhere. A skill it depends on from elsewhere is named in
+`skills:` as a qualified reference, pinned in a lockfile beside the configuration,
+and served in the form the client reading it can act on. See
+[`docs/skills.md`](docs/skills.md).
 
 ## A day in the environment
 
