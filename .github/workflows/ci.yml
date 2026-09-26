@@ -110,6 +110,7 @@ jobs:
           - subsystems/prompt
           - subsystems/registry
           - subsystems/skill
+          - subsystems/skillgit
           - subsystems/testecho
           - subsystems/tool
           - subsystems/workflow

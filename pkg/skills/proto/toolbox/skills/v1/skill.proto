@@ -262,12 +262,37 @@ message PutSkillRequest {
   // Catalog identifier this request is addressed to.
   string catalog = 1;
   // The skill to store, with its complete manifest.
+  //
+  // The manifest says what the skill is; `files` carries what it contains. They are separate
+  // because the same manifest is what a read returns, and a read does not carry the bytes — a
+  // client fetches a file when it wants it. A write is the other way round: a skill written
+  // file by file could be read back halfway through, and a manifest naming a file nobody had
+  // written is a pin nothing describes.
   SkillEntry entry = 2;
+  // The skill's content, every file including the SKILL.md.
+  //
+  // A file that is not here and not in the manifest is removed, so a skill replaced wholesale
+  // is exactly what was sent. A stale supporting file is content the author removed and this
+  // framework would otherwise go on serving — while the manifest would not mention it, so no
+  // client would be offered it and nobody would know it was there.
+  repeated SkillFileContent files = 3;
   // Reject the write when true and the skill already exists.
   //
   // A catalog that cannot take this is read-only, and says so rather than replacing
   // something.
-  bool fail_if_exists = 3;
+  bool fail_if_exists = 4;
+}
+
+// SkillFileContent is one file of a skill being written.
+message SkillFileContent {
+  // Path within the skill, slash-separated, relative to the skill directory.
+  //
+  // A path that leaves the skill's own directory is refused rather than written, because a
+  // manifest is input like any other and a caller is not thereby trusted with a path outside
+  // what it asked to replace.
+  string path = 1;
+  // The raw bytes.
+  bytes content = 2;
 }
 
 // PutSkillResponse returns the stored skill.

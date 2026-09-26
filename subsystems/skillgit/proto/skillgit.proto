@@ -1,0 +1,244 @@
+syntax = "proto3";
+
+package toolbox.skillgit.v1;
+
+option go_package = "github.com/Manu343726/toolbox/subsystems/skillgit/skillgitv1;skillgitv1";
+
+// SkillGitService manages the git-backed catalogs a deployment serves.
+//
+// It is a separate service from the catalog contract for a reason that is worth stating: the
+// catalog contract is about *skills*, and these operations are about the sources they come
+// from. A catalog provider serves skills; this one also decides which sources exist, and a
+// contract that mixed the two would make every catalog provider responsible for deciding where
+// catalogs come from — which is not a catalog's business, and the reason two providers serve
+// the same contract on purpose.
+//
+// Every method here states what it does with `@toolbox.side-effects`, so a policy can govern
+// them separately from the read-only ones. Registering a catalog reaches the network and writes
+// a directory; unregistering writes the deployment's own registry and nothing else; deleting
+// removes a checkout, which is the only operation here that destroys anything.
+service SkillGitService {
+  // @toolbox.side-effects read_only
+  // ListCatalogs returns the catalogs this deployment has registered.
+  rpc ListCatalogs(ListCatalogsRequest) returns (ListCatalogsResponse);
+
+  // @toolbox.side-effects create update
+  // RegisterCatalog clones a remote and serves it as a catalog under a name.
+  //
+  // The name is supplied here and refused if taken, so two checkouts of one repository can
+  // both be registered under different names — which is occasionally what somebody wants —
+  // while one name never silently means two catalogs. The remote may be a URL, an scp-style
+  // remote, a local path, or the `owner/repo` shorthand, which resolves to GitHub.
+  //
+  // A registration outlives this process: a deployment that forgot its catalogs on reboot
+  // would serve a different set of skills each time it came up, and a project's `skills:`
+  // list would then name references that resolve to nothing.
+  rpc RegisterCatalog(RegisterCatalogRequest) returns (RegisterCatalogResponse);
+
+  // @toolbox.side-effects create update
+  // CreateCatalog makes a new repository and serves it, pushing only if a remote was given.
+  //
+  // Creating a catalog is local on purpose: a new repository is made where the deployment
+  // runs and served from there, and it is pushed only when a remote is named. No forge is
+  // contacted and no token is needed to start a catalog — which means a deployment can offer
+  // git-backed catalogs on a machine with no account anywhere, and publishing one is a
+  // separate, deliberate act.
+  rpc CreateCatalog(CreateCatalogRequest) returns (CreateCatalogResponse);
+
+  // @toolbox.side-effects read_only
+  // SyncCatalog updates a catalog from its remote.
+  //
+  // A sync that cannot be completed is reported with the repository's path and nothing is
+  // resolved: a catalog that resolved its own conflicts would be choosing a side in somebody
+  // else's repository, and the person who can decide what a conflict meant is the person who
+  // owns it.
+  rpc SyncCatalog(SyncCatalogRequest) returns (SyncCatalogResponse);
+
+  // @toolbox.side-effects create update
+  // PushCatalog sends a catalog's commits to its remote.
+  //
+  // It is `create update` because pushing writes to a repository this deployment does not
+  // own. It refuses a checkout with uncommitted changes: a modification is one commit, so
+  // there is nothing coherent to push until it is one.
+  rpc PushCatalog(PushCatalogRequest) returns (PushCatalogResponse);
+
+  // @toolbox.side-effects delete
+  // UnregisterCatalog stops serving a catalog and leaves its checkout on disk.
+  //
+  // It is `delete` because a deployment stops serving something, and it is *not* the same
+  // operation as removing the checkout: the skills stay readable on disk and nothing is
+  // destroyed. That separation is the point — nothing is removed without being asked for
+  // twice.
+  rpc UnregisterCatalog(UnregisterCatalogRequest) returns (UnregisterCatalogResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteCatalog unregisters a catalog and removes its checkout.
+  //
+  // It is a separate method from UnregisterCatalog rather than an argument to it, because
+  // removing a directory of somebody's files is a different consequence from forgetting a
+  // remote, and a method whose name said only "unregister" would be the wrong name for the
+  // destructive one.
+  rpc DeleteCatalog(DeleteCatalogRequest) returns (DeleteCatalogResponse);
+}
+
+// CatalogStatus is one registered catalog, as a person deciding whether to depend on it would
+// want to see it.
+message CatalogStatus {
+  // The catalog identifier: the first segment of every reference and URI for a skill in it.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // Where it came from, with any credential removed.
+  //
+  // A remote may carry a token in its URL, and this is shown to a person deciding whether to
+  // trust the content, so the userinfo is replaced rather than printed.
+  string remote = 3;
+  // Where its checkout is on this machine.
+  string location = 4;
+  // The commit currently being served, so a person can tell what they are getting.
+  string head = 5;
+  // True when the checkout has changes that are not committed.
+  bool dirty = 6;
+  // How many skills the checkout currently holds.
+  int32 skills = 7;
+  // When it was registered.
+  string created_at = 8;
+  // True when this deployment will not write to the checkout.
+  bool read_only = 9;
+  // True when the checkout has a remote to sync from. A catalog created locally does not, and
+  // is served from this machine's copy.
+  bool syncable = 10;
+  // What is unusual about this catalog, or empty when nothing is.
+  //
+  // A repository that published its skills where this framework does not look is not a
+  // failure — the clone succeeded and the catalog is registered — but a person who registered
+  // it and now sees no skills needs to be told why, and "nothing unusual" would leave them
+  // guessing.
+  string note = 11;
+}
+
+// ListCatalogsRequest asks which catalogs are registered.
+message ListCatalogsRequest {}
+
+// ListCatalogsResponse is the catalogs this deployment serves.
+message ListCatalogsResponse {
+  // The catalogs, ordered by identifier.
+  repeated CatalogStatus catalogs = 1;
+}
+
+// RegisterCatalogRequest clones a remote and serves it.
+message RegisterCatalogRequest {
+  // The name to serve it under. Refused if taken.
+  string id = 1;
+  // The remote: a URL, an scp-style remote, a local path, or `owner/repo` for GitHub.
+  string remote = 2;
+  // Fetch after cloning. The clone is shallow, so this is a re-fetch rather than a history.
+  bool sync = 3;
+}
+
+// RegisterCatalogResponse is the catalog that was registered.
+message RegisterCatalogResponse {
+  // What was registered.
+  CatalogStatus catalog = 1;
+  // How many skills the checkout holds, which is zero for a repository that publishes its
+  // skills under none of the conventions this provider looks in.
+  int32 skills = 2;
+}
+
+// CreateCatalogRequest makes a new repository and serves it.
+message CreateCatalogRequest {
+  // The name to serve it under. Refused if taken.
+  string id = 1;
+  // A remote to push to, or empty to keep the catalog local.
+  //
+  // Empty is a first-class choice rather than a missing value: it means a deployment can
+  // offer a git-backed catalog on a machine with no account anywhere, and publishing it
+  // later is a separate act.
+  string remote = 2;
+  // A skill to create in the new repository, so it is a catalog and not an empty directory.
+  SkillSeed seed = 3;
+}
+
+// SkillSeed is a skill to lay down in a new catalog.
+message SkillSeed {
+  // The skill's name, which is also its directory's.
+  string name = 1;
+  // What the skill is for: the field a model selects it on.
+  string description = 2;
+  // The instructions, after the frontmatter. Empty writes a heading and nothing else.
+  string body = 3;
+}
+
+// CreateCatalogResponse is the catalog that was created.
+message CreateCatalogResponse {
+  // What was created.
+  CatalogStatus catalog = 1;
+}
+
+// SyncCatalogRequest updates a catalog from its remote.
+message SyncCatalogRequest {
+  // The catalog to sync.
+  string id = 1;
+}
+
+// SyncCatalogResponse is what the sync did.
+message SyncCatalogResponse {
+  // The catalog after the sync.
+  CatalogStatus catalog = 1;
+  // The commit before and after, so a person can see that a sync actually moved anything.
+  string previous_head = 2;
+  string head = 3;
+  // True when the sync brought in something new.
+  bool changed = 4;
+}
+
+// PushCatalogRequest sends a catalog's commits to its remote.
+message PushCatalogRequest {
+  // The catalog to push.
+  string id = 1;
+  // A message for the commit of anything uncommitted first, or empty to push what is
+  // committed and refuse anything that is not.
+  string message = 2;
+}
+
+// PushCatalogResponse is what the push did.
+message PushCatalogResponse {
+  // The catalog after the push.
+  CatalogStatus catalog = 1;
+  // The commit that was pushed, or empty when there was nothing to push.
+  string head = 2;
+  // True when something was pushed.
+  bool pushed = 3;
+}
+
+// UnregisterCatalogRequest stops serving a catalog.
+message UnregisterCatalogRequest {
+  // The catalog to stop serving.
+  string id = 1;
+}
+
+// UnregisterCatalogResponse is what was unregistered.
+message UnregisterCatalogResponse {
+  // The catalog that is no longer served.
+  string id = 1;
+  // Where its checkout is, so a person can read the skills it held.
+  string location = 2;
+}
+
+// DeleteCatalogRequest removes a catalog and its checkout.
+message DeleteCatalogRequest {
+  // The catalog to remove.
+  string id = 1;
+}
+
+// DeleteCatalogResponse is what was removed.
+message DeleteCatalogResponse {
+  // The catalog that is gone.
+  string id = 1;
+  // The path that was removed.
+  string location = 2;
+  // True when a directory was actually removed. False when there was none, which is not an
+  // error: a catalog whose checkout was already gone is the outcome that was asked for.
+  bool removed = 3;
+}
+
