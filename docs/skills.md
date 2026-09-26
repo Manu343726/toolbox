@@ -1,14 +1,63 @@
 # Skills
 
 A skill is a body of instructions for carrying out a task, written once and served to
-an agent that needs it. This document is the design record: what the format is, where
-skills come from, how they reach an agent, and which parts of the protocol the
-framework implements.
+an agent that needs it. This document is the design record and the implementation
+plan: what the format is, where skills come from, how they reach an agent, which parts
+of the protocol the framework implements, and in what order the work gets done.
 
 It is written as the specification is agreed, step by step. Sections marked *not yet
 decided* are open questions, and a section that is marked as such is not yet
 implemented — this document records intent as well as fact, and the two are labelled
 separately for that reason.
+
+**Status: the specification is being agreed. Phases 2 to 6 of the plan below are open,
+and nothing is implemented.**
+
+## The plan
+
+Seven phases. The two that are already settled are phases 1 and 7; the five between
+them are the specification, and each one closes before the next opens.
+
+| # | Phase | State | Produces |
+|---|---|---|---|
+| 1 | **Upgrade the MCP Go SDK to v1.8.0** | **decided** | A dependency that negotiates `2026-07-28` and implements `server/discover` |
+| 2 | **Storage: where a skill lives** | open | The answer to "what is the source of truth" |
+| 3 | **The contract: what `SkillService` becomes** | open | The `.proto`, decided against the storage answer |
+| 4 | **The reader: the format in a root package** | open | `pkg/skills`, mounted by the subsystem |
+| 5 | **The MCP binding: `pkg/mcp` serves the extension** | open | `skills/list`, `skills/get`, `resources/read` |
+| 6 | **Security posture** | open | What a load requires, and what `allowed-tools` does |
+| 7 | **Implement the skills extension** | **decided** | The feature, end to end, tested against the conformance requirements |
+
+Phases 2 through 6 are the specification. Phase 7 is not optional and not deferred: it
+is the work, and it does not start until the five decisions above it are made.
+
+### Phase 1 — upgrade the SDK
+
+**Decided.** The framework pins `modelcontextprotocol/go-sdk` v1.6.1 across 19
+modules. It moves to v1.8.0.
+
+Not optional, and not a convenience: the extension is specified against protocol
+revision `2026-07-28` and declares its capabilities in the `extensions` field of the
+`server/discover` response. v1.6.1's newest revision is `2025-11-25` and it has no
+`server/discover` at all, so on v1.6.1 the declaration would go somewhere the
+specification does not describe, and a client reading capabilities the spec-correct way
+would not see it. v1.8.0 is a released version — not a pre-release — whose newest
+revision is exactly `2026-07-28` and which implements `server/discover`.
+
+It is its own commit because it is a change to a dependency every module shares and not
+a change to this feature. Verified by the full suite, `make vet`, the independent-module
+sweep with `GOWORK=off`, and the CI workflow.
+
+### Phase 7 — implement the extension
+
+**Decided**, and in scope for this work. The deliverable is a deployment whose
+aggregated MCP server serves `io.modelcontextprotocol/skills`, so that a skill written
+in the standard format under `.toolbox/skills/` is discoverable with `skills/list`,
+retrievable with `skills/get`, and readable file by file with `resources/read`.
+
+It is built on the three SDK extension points in *How the framework implements it*
+below, not on the unmerged `#1238`. What it must satisfy is the specification's own
+requirements, which is what the tests in *Tests* are written against.
 
 ## Where this sits in the framework
 
@@ -281,26 +330,28 @@ What this framework must therefore decide, step by step:
   its content, given that skill names are not unique across origins and a served skill
   must not silently shadow a same-named local one.
 
-## What is implemented
-
-*Not yet.* This document currently records the format, the protocol binding, and the
-open questions. No part of the skills feature is implemented in this repository.
+## What exists today
 
 The existing `subsystems/skill` holds a versioned in-memory catalogue of skill
 *metadata* — an identifier, a version, a name, a description, instructions as a single
 string, and declared capability and policy references. It has no notion of a skill
 directory, of files, of digests, or of MCP. What happens to it is one of the open
-questions above.
+questions in phase 2.
 
 ## Tests
 
-*Not yet decided.* For reference, the checks that will apply:
+The checks phase 7 is written against. These are the specification's requirements,
+not this framework's preferences:
 
-- Store and reader: a skill that validates, one that is refused with a reason, the
-  manifest's digests and sizes, the two limits, and ordering.
-- Handler: valid reads, malformed requests, not-found behaviour, and ConnectRPC
-  error-code assertions — including `-32602` for a URI naming no skill.
-- Protocol: `skills/list` and `skills/get` over a real transport, `resources/read` for
-  a skill file, and the declared extension and its `directoryRead` setting.
-- Boundary: the package-clause and directory-name rules, and refusal of any path that
-  resolves outside a skill's own directory.
+- **Reader.** A skill that validates, and one refused with a reason naming what is
+  wrong. The manifest's digests and sizes, recomputed and compared. Both limits, at
+  and over the boundary. Deterministic ordering.
+- **Handler.** Valid reads, malformed requests, not-found behaviour, and ConnectRPC
+  error-code assertions — including `-32602` for a URI that identifies no skill.
+- **Protocol.** `skills/list` and `skills/get` over a real transport, not a fake one.
+  `resources/read` for a skill file. The declared extension and its `directoryRead`
+  setting. `skills/list` empty for a deployment with no skills, rather than an error.
+- **Boundary.** The directory-name rule. Refusal of any path that resolves outside a
+  skill's own directory. Refusal of a symlink that leaves it.
+- **Independence.** The subsystem passes with `GOWORK=off`, and the root package it
+  mounts has no dependency on any subsystem.
