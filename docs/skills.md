@@ -192,27 +192,74 @@ method.
 
 ## How the framework implements it
 
-The MCP Go SDK the framework uses (v1.6.1) has **no** support for this extension: no
-`skills` primitive, and a protocol revision list whose latest entry predates the
-extension. The extension is therefore implemented in `pkg/mcp` on the three extension
-points the SDK does offer:
+### No released Go SDK implements this extension
 
-- `AddReceivingMiddleware` intercepts `skills/list` and `skills/get`. The SDK's
+Checked against the module proxy and the SDK's own sources, as of 2026-09-26:
+
+| Version | Protocol revision | `skills` support |
+|---|---|---|
+| v1.6.1 (what this repository pins) | `2025-11-25` | none |
+| **v1.8.0** (latest release) | **`2026-07-28`** | **none** |
+
+The string `skill` does not appear anywhere in the v1.8.0 module — not in `mcp/`, not
+in tests, not in the docs. Nor does any other SDK: the extension's own
+implementations list records the Go, TypeScript, Python and C# SDKs all as *in
+progress*. This extension is ahead of every SDK, not behind the Go one.
+
+Support is being written, in the Go SDK, and is not available:
+
+- **`modelcontextprotocol/go-sdk#1238`** — *skills: add SEP-2640 protocol support*.
+  Open, not a draft, 15 commits, 27 files, last touched 2026-09-23. Adds a top-level
+  `skills` package: `types.go`, `client.go`, `server.go`, `validation.go`,
+  `verify.go`, `pagination.go`, and a conformance server. Its `AddHandlers` installs
+  `ListSkillsHandler`, `GetSkillHandler` and `ReadDirectoryHandler` on an
+  `*mcp.Server`, and its `Skill` type is the entry shape the specification defines.
+  It is **protocol only** — no filesystem layer — so the part this framework would
+  otherwise have to write is not in it either way.
+- **`#1240`** — *skills: add filesystem provider helper*, still a **draft**, and
+  stacked on #1238. This is the layer that would do the directory walking, manifest
+  building and digesting. A draft carries no compatibility promise at all.
+
+**Not adopted, and the reasoning is recorded so it is not relitigated:** pinning a
+`pseudo-version` to #1238's head commit would make this framework's build depend on an
+unmerged pull request in another repository. That commit can be rebased or force-
+pushed, the pseudo-version then resolves to different code or stops resolving at all,
+and the breakage would appear in *our* CI as a dependency failure in someone else's
+change. #1238 is also recorded as `behind` main, so a rebase is expected before it
+lands. We depend on released versions.
+
+### The implementation therefore uses the SDK's extension points
+
+Three, all of which are stable API rather than internals, and all present in v1.8.0:
+
+- **`AddReceivingMiddleware`** intercepts `skills/list` and `skills/get`. The SDK's
   default receiving handler answers `jsonrpc2.ErrNotHandled` for a method it does not
   know, so a middleware that handles these never falls through to the SDK's dispatch.
-- `AddResourceTemplate` with a `skill://` template routes `resources/read` for a
-  skill's files, since the SDK's `lookupResourceHandler` matches templates as well as
-  exact URIs.
-- The server's `ServerCapabilities.Extensions` carries
-  `io.modelcontextprotocol/skills` with its `directoryRead` setting, and the
-  `resources` capability is declared alongside it as the extension requires.
+  This behaviour is identical in v1.6.1 and v1.8.0.
+- **`AddResourceTemplate`** with a `skill://` template routes `resources/read` for a
+  skill's files, since the SDK's `lookupResourceHandler` matches URI templates as well
+  as exact URIs.
+- **`ServerCapabilities.AddExtension`** declares
+  `io.modelcontextprotocol/skills` with its `directoryRead` setting, alongside the
+  `resources` capability the extension requires.
 
-The one thing the SDK does decide for us is the negotiated protocol version: a client
-asking for a revision the SDK does not know is answered with the SDK's latest
-(`2025-11-25`), and the extension is specified against `2026-07-28` or later. **Not yet
-decided:** whether to declare the newer revision ourselves in `initialize`, and what a
-client that then sees is required to do. The extension's methods work regardless,
-because they are dispatched by name.
+### Why the SDK is upgraded to v1.8.0 for this
+
+The extension is specified against protocol revision `2026-07-28` or later, and it
+declares its capabilities in the `extensions` field of the `server/discover` response.
+v1.6.1's newest revision is `2025-11-25` and it has no `server/discover` at all, so on
+v1.6.1 the declaration would go somewhere the specification does not describe, and a
+client that reads capabilities the spec-correct way would not see it.
+
+v1.8.0 is a released version — not a pre-release, and not a pull request — whose
+newest revision is exactly `2026-07-28`, and which implements `server/discover` with
+`ServerCapabilities` as its result. On v1.8.0 the extension is declared where the
+specification says to declare it, at the revision the specification says to declare it
+at. That is the difference between implementing the extension and implementing a
+workaround for the SDK's absence of one.
+
+The upgrade is on its own, separately, because it is a change to a dependency every
+module shares and not a change to this feature.
 
 ## Security
 
