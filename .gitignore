@@ -15,8 +15,15 @@
 # module names are not listed here: a list goes stale with every new subsystem,
 # so the CI hygiene check identifies a committed binary by what is in it rather
 # than by where it is.
-toolbox
-cmd/toolbox/toolbox
+#
+# Both patterns are anchored with a leading slash, and that is load-bearing rather
+# than decoration. A bare `toolbox` matches any path *component* of that name, so it
+# silently ignored `cmd/toolbox/` — which meant a new source file in the host command
+# was invisible to git, with nothing to say so — and `pkg/*/proto/toolbox/`, which is
+# where the framework's own contracts live. An ignore rule that hides source is worse
+# than no rule at all, because nothing reports it.
+/toolbox
+/cmd/toolbox/toolbox
 
 # a deployment's default log, wherever a command was run without a configuration file
 toolbox.log

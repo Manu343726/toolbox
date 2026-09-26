@@ -1,0 +1,293 @@
+syntax = "proto3";
+
+package toolbox.skills.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/Manu343726/toolbox/pkg/skills/skillv1;skillv1";
+
+// SkillCatalogService is the contract a source of skills implements.
+//
+// A catalog is a provider role, in the same way `ApiParserService` and `ApiInvokerService` are
+// provider roles: a subsystem implements this contract, a deployment registers the
+// implementation, and the skills subsystem resolves to one by identifier. A deployment with
+// no catalogs beyond the implicit local one is a working deployment, and nothing else is
+// required.
+//
+// Every method here exists because the design requires something of a catalog. The aggregator
+// presents every catalog's skills as one surface, so it must be able to ask a catalog what it
+// holds; it searches rather than fetching, so a large catalog must be able to answer its own
+// query; a client's manifest is the pin that drift is detected against, so a catalog must be
+// able to return a complete one; a client verifies what it fetched, so reading a file has to
+// come with its digest and size; and copying and moving are two independent operations, so a
+// catalog has to be able to take and remove a whole skill.
+//
+// It lives in a root package rather than in the skills subsystem because a provider implements
+// it. A provider that depended on the aggregator's module to get the contract would be unable
+// to be deployed without the thing it serves, which is the coupling the provider pattern
+// exists to avoid.
+service SkillCatalogService {
+  // @toolbox.side-effects read_only
+  // DescribeCatalog says what this catalog is and whether it can be written to.
+  rpc DescribeCatalog(DescribeCatalogRequest) returns (DescribeCatalogResponse);
+
+  // @toolbox.side-effects read_only
+  // ListSkills returns every skill this catalog holds, as references.
+  //
+  // It returns a reference and the two fields a client selects on rather than whole entries,
+  // because three of the four target clients budget the initial listing: a deployment with
+  // many skills would otherwise ship every manifest to decide which one to load, and the
+  // aggregator cannot be the thing that makes it expensive.
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // @toolbox.side-effects read_only
+  // FindSkills answers a query about this catalog's own skills.
+  //
+  // The query is pushed down rather than answered by the aggregator, so a large catalog is not
+  // shipped to be filtered somewhere else. A catalog that cannot search says so rather than
+  // returning everything and letting the caller sort it out.
+  rpc FindSkills(FindSkillsRequest) returns (FindSkillsResponse);
+
+  // @toolbox.side-effects read_only
+  // GetSkill returns one skill with its complete manifest.
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+
+  // @toolbox.side-effects read_only
+  // ReadSkillFile returns one file of a skill, with the digest and size the manifest gave for
+  // it, so a client can verify what it fetched.
+  rpc ReadSkillFile(ReadSkillFileRequest) returns (ReadSkillFileResponse);
+
+  // @toolbox.side-effects create update
+  // PutSkill stores a whole skill, creating it or replacing it.
+  //
+  // It carries the whole skill rather than a file at a time, because a copy and a move read
+  // one skill and write another, and because a whole-skill write is what a git-backed commit
+  // is: one change, one commit. A read-only catalog refuses this with a reason, which is what
+  // makes "copy and move" answerable rather than appearing to succeed.
+  rpc PutSkill(PutSkillRequest) returns (PutSkillResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteSkill removes a whole skill.
+  //
+  // It is its own method rather than an argument to PutSkill, because removing content is a
+  // different consequence from changing it and a deployment may reasonably allow one without
+  // the other.
+  rpc DeleteSkill(DeleteSkillRequest) returns (DeleteSkillResponse);
+}
+
+// CatalogInfo is what a catalog says about itself.
+message CatalogInfo {
+  // Catalog identifier: the first segment of every skill reference and URI for a skill in it.
+  //
+  // It is the deployment's own label, and a deployment may choose it. It may not contain
+  // whitespace or a slash, because it is one segment of a URI.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // What this catalog is for.
+  string description = 3;
+  // True when this catalog accepts PutSkill and DeleteSkill.
+  //
+  // The property is declared rather than discovered by trying a write, so that "copy and
+  // move" can be refused before anything is fetched and with a reason that names the catalog.
+  bool writable = 4;
+  // Where the catalog keeps its skills, when that is somewhere a person can look.
+  //
+  // A git-backed catalog names its checkout; a remote one names its origin. It is reported
+  // rather than acted on, and a deployment that serves a remote catalog should expect a client
+  // to show it to a person deciding whether to depend on the content.
+  string location = 5;
+}
+
+// SkillRef identifies one skill within a catalog.
+message SkillRef {
+  // Catalog identifier. Empty means the local catalog, which every deployment has.
+  string catalog = 1;
+  // Skill name, which is also its directory's name.
+  string name = 2;
+  // Description, which is the field every client selects the skill on.
+  //
+  // It is carried in the listing rather than fetched with the entry, because a client decides
+  // what to load from descriptions and should not have to fetch a manifest to read one.
+  string description = 3;
+}
+
+// SkillFile is one file in a skill's manifest.
+message SkillFile {
+  // Path within the skill, slash-separated, relative to the skill directory.
+  string path = 1;
+  // Byte length of the content.
+  int64 size = 2;
+  // SHA-256 of the raw bytes, as "sha256:" followed by 64 lowercase hex characters.
+  //
+  // A digest is not a trust anchor: it comes from the same server as the content, so it
+  // confirms that the entry and the file agree and cannot establish that the skill is safe.
+  string digest = 3;
+  // Media type to serve the file as.
+  string mime_type = 4;
+}
+
+// SkillEntry is a skill as a catalog holds it: the manifest, and the frontmatter rendered
+// verbatim.
+//
+// This is the pin. A project records the manifest of every skill it names, and a manifest that
+// no longer matches the pin is drift, which is reported rather than refused.
+message SkillEntry {
+  // Reference, resolving to skill://<catalog>/<name>/SKILL.md.
+  SkillRef ref = 1;
+  // Resource URI of the SKILL.md.
+  string uri = 2;
+  // The SKILL.md frontmatter, verbatim, including fields this framework has no opinion about.
+  //
+  // A host builds its registry from this alone, without fetching each SKILL.md, so a field
+  // dropped here is a field no client could ever see.
+  google.protobuf.Struct frontmatter = 3;
+  // The body of the SKILL.md, as the author wrote it.
+  //
+  // It is served unadapted; what a particular client receives is a distillation of this, and
+  // the client's own manifest describes that. This is the template, which is the portable
+  // artefact and the thing a pin is taken against.
+  string body = 4;
+  // Every file of the skill, each exactly once, SKILL.md included.
+  //
+  // Complete by construction: a catalog that cannot enumerate a skill does not serve it,
+  // because a manifest that is not complete cannot be a pin.
+  repeated SkillFile resources = 5;
+  // The limits that applied when this entry was produced, so a client knows a skill was
+  // within them without knowing this framework's numbers.
+  int32 max_files = 6;
+  int64 max_bytes = 7;
+}
+
+// DescribeCatalogRequest asks a catalog what it is.
+message DescribeCatalogRequest {
+  // Catalog identifier this request is addressed to, for a host serving several.
+  //
+  // A deployment may run one catalog per subsystem or several in one; the identifier says
+  // which, and a provider that serves one ignores it.
+  string catalog = 1;
+}
+
+// DescribeCatalogResponse is what a catalog said about itself.
+message DescribeCatalogResponse {
+  // What the catalog is.
+  CatalogInfo info = 1;
+}
+
+// ListSkillsRequest asks a catalog for its skills.
+message ListSkillsRequest {
+  // Catalog identifier this request is addressed to.
+  string catalog = 1;
+  // Optional name prefix, so a caller can narrow a listing without fetching all of it.
+  string name_prefix = 2;
+  // Optional page size. Zero means the catalog's own default.
+  int32 page_size = 3;
+  // Optional page token from a previous response, to continue where it stopped.
+  string page_token = 4;
+}
+
+// ListSkillsResponse is a page of a catalog's skills.
+message ListSkillsResponse {
+  // The skills, ordered by name so a listing is reproducible.
+  repeated SkillRef skills = 1;
+  // Token for the next page, or empty when there is no more.
+  string next_page_token = 2;
+}
+
+// FindSkillsRequest asks a catalog to answer a query about its own skills.
+message FindSkillsRequest {
+  // Catalog identifier this request is addressed to.
+  string catalog = 1;
+  // What to look for, matched against a skill's name and description.
+  string query = 2;
+  // Optional page size. Zero means the catalog's own default.
+  int32 page_size = 3;
+  // Optional page token from a previous response.
+  string page_token = 4;
+}
+
+// FindSkillsResponse is what a catalog found.
+message FindSkillsResponse {
+  // The matching skills, ordered by name.
+  repeated SkillRef skills = 1;
+  // Token for the next page, or empty when there is no more.
+  string next_page_token = 2;
+  // False when this catalog cannot search.
+  //
+  // Reported rather than answered with everything: a caller that wanted a search and got the
+  // whole catalog would not know it had to filter the results itself.
+  bool searchable = 3;
+}
+
+// GetSkillRequest asks a catalog for one skill.
+message GetSkillRequest {
+  // Catalog identifier this request is addressed to.
+  string catalog = 1;
+  // The skill's name within the catalog.
+  string name = 2;
+}
+
+// GetSkillResponse is one skill with its manifest.
+message GetSkillResponse {
+  // The skill.
+  SkillEntry entry = 1;
+}
+
+// ReadSkillFileRequest asks a catalog for one file of a skill.
+message ReadSkillFileRequest {
+  // Catalog identifier this request is addressed to.
+  string catalog = 1;
+  // The skill's name within the catalog.
+  string name = 2;
+  // Path within the skill, slash-separated, relative to the skill directory.
+  string path = 3;
+}
+
+// ReadSkillFileResponse is one file of a skill.
+message ReadSkillFileResponse {
+  // The file's path, as it was asked for.
+  string path = 1;
+  // The raw bytes.
+  bytes content = 2;
+  // SHA-256 of the bytes, in the manifest's form.
+  string digest = 3;
+  // Byte length of the bytes.
+  int64 size = 4;
+  // Media type to serve the file as.
+  string mime_type = 5;
+}
+
+// PutSkillRequest stores a whole skill.
+message PutSkillRequest {
+  // Catalog identifier this request is addressed to.
+  string catalog = 1;
+  // The skill to store, with its complete manifest.
+  SkillEntry entry = 2;
+  // Reject the write when true and the skill already exists.
+  //
+  // A catalog that cannot take this is read-only, and says so rather than replacing
+  // something.
+  bool fail_if_exists = 3;
+}
+
+// PutSkillResponse returns the stored skill.
+message PutSkillResponse {
+  // The skill as it is now stored, with the manifest the catalog computed from what it wrote.
+  SkillEntry entry = 1;
+}
+
+// DeleteSkillRequest removes a whole skill.
+message DeleteSkillRequest {
+  // Catalog identifier this request is addressed to.
+  string catalog = 1;
+  // The skill's name within the catalog.
+  string name = 2;
+}
+
+// DeleteSkillResponse reports what was removed.
+message DeleteSkillResponse {
+  // True when a skill was removed. False when the catalog held no such skill.
+  bool removed = 1;
+  // The reference that was removed.
+  SkillRef ref = 2;
+}
