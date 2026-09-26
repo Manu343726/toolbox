@@ -442,6 +442,19 @@ feature's database directly. Cross-subsystem state is exchanged through:
 The current reference stores are in-memory. Persistence interfaces and SQLite
 adapters are planned work.
 
+The two exceptions are on-disk records that outlive a process, and each states
+why a missing one is worse than an empty one:
+
+| Record | Held by | Why a missing record is worse than an empty one |
+|---|---|---|
+| `catalogs.yaml` | `subsystems/skillgit` | A deployment that forgot its catalogs on reboot would serve a different set of skills each time it came up, and a project's `skills:` list would then name references that resolve to nothing |
+| `skills.lock.yaml` | `subsystems/skill` | A pin file records the manifest of every skill a project names. No file means nothing has been agreed to yet and the first use writes one; an unreadable file means the deployment cannot tell what was agreed to and would serve changed content as though it had not changed |
+| the project's own `skills:` list | a person, in `pkg/config` | It is the one file in a project a person writes and reviews. A change to it is proposed and not made, because an agent that changes it changes what that person's next review will contain in a way they did not type |
+
+`skills.lock.yaml` sits **beside** the configuration rather than inside it for
+the same reason: a machine-maintained manifest inline would rewrite the file
+whose whole value is that a person can read which skills a project depends on.
+
 ## 11. Extension model
 
 A third-party subsystem is compatible when it:

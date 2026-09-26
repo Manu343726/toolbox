@@ -11,12 +11,12 @@ into the section it belongs to rather than left as a marker, and where the plan 
 **wrong** the correction says so and says why, because a corrected plan nobody can see
 is a plan that will be followed again.
 
-**Status: the specification is complete, and the core of it is implemented.** A
-project's own skills are read, projected per client, pinned, and served over the
-Model Context Protocol skills extension. The catalog *providers* — git-backed and
-remote — are the remaining work, and the aggregate contract has the methods their
-implementation will need. What is built and what is not is stated per phase
-below rather than here, so this line does not have to be rewritten every time.
+**Status: the specification is complete, and every phase of it is built.** A project's
+own skills are read, projected per client, pinned and served over the Model Context
+Protocol skills extension; a git-backed catalog provider serves many catalogs, one per
+registered remote; and the public directory is a registration form of that provider rather
+than a subsystem of its own. What is built and what is not is stated per phase below
+rather than here, so this line does not have to be rewritten every time.
 
 ## The plan
 
@@ -31,14 +31,15 @@ Nine phases. Each closes before the next opens.
 | 5 | **The aggregate contract** | **done** | `SkillService`, plus a read of which pinned skills have gone out of date |
 | 6 | **The reader: the format in a root package** | **done** | `pkg/skills`, one typed representation, two input dialects |
 | 7 | **The project configuration** | **done** | `skills:` names qualified references; `local` is implicit |
-| 7a | **Git-backed catalogs** | **decided, not built** | The concept, hosted many times over; register, create, sync, unregister, delete |
-| 7b | **A remote catalog** | **decided, not built** | `skills.sh`, browsed and read, never written |
+| 7a | **Git-backed catalogs** | **done** | `subsystems/skillgit`: a provider host, one catalog per registered remote; register, create, sync, push, unregister, delete |
+| 7b | **A remote catalog** | **done, as 7a** | `skills.sh` is a registry over git, not a second mechanism: `owner/repo` is a shorthand for a GitHub remote |
 | 8 | **Security posture** | **done** | Authority never widened; the project's list is the permission; drift is reported |
 | 9 | **Implement** | **partly done** | The extension is served; the catalogs it aggregates are not yet providers |
 
-Two phases are decided and not built, and both are *providers* rather than
-framework: the contract they implement exists, and a deployment serving only its
-own project's skills is a working deployment without either.
+Every phase is now built. The one that changed shape is 7b: the research
+described above found the public directory to be a registry over git rather
+than a source of its own, so it is a registration form of the git provider
+rather than a second subsystem.
 
 **The specification is closed.** Nothing below is an open question; a decision taken
 later is written into the section it belongs to rather than left as a marker, because a
@@ -578,18 +579,43 @@ skill is asked before the file changes.
 
 ### The `skills.sh` catalog
 
-One catalog implementation is for [skills.sh](https://www.skills.sh/), the public
-directory of agent skills. It is a **read-only** catalog: it indexes skills published by
-third parties and is browsed, not written to.
+One catalog is for [skills.sh](https://www.skills.sh/), the public directory of agent
+skills. It is **read-only**: it indexes skills published by third parties and is browsed,
+not written to.
 
-It is a separate subsystem from the aggregator, for the reason every provider is: it is
-separately deployable, separately versioned, and a deployment may run without it.
+This section listed four things as undecided — how it enumerates, how a skill's files are
+obtained, how a version or a pin is expressed, and how it behaves with no network. They
+were investigated rather than assumed, and the answers are that **it is not a second
+mechanism**:
 
-What it is not yet pinned down, because it is a provider rather than part of the model:
-how it enumerates (`skills.sh` presents a browsable directory and a
-`npx skills add <owner/repo>` install path, and no public JSON API was found at the
-obvious endpoints), how a skill's files are obtained, how a version or a pin is
-expressed, and how it behaves with no network.
+- **It is a directory over git repositories, not a host they are served from.** Its own
+  installer, `npx skills add <owner/repo>`, shallow-clones `github.com/owner/repo` and
+  reads skill directories out of the checkout. Verified by reading the shipped bundle and
+  then by doing it: `vercel-labs/skills` cloned at depth 1 yields a standard-format
+  `find-skills/SKILL.md` that this framework's reader reads and projects for all five
+  client identities.
+- **There is no JSON API to enumerate against.** The site is server-rendered, and the
+  obvious endpoints return 404. So "every skill on skills.sh" is not a question this
+  framework can put to it.
+- **Discovery is a directory holding a `SKILL.md`**, under whichever convention the
+  repository's own clients read — `.claude/skills`, `.agents/skills`, `.opencode/skills`
+  and twenty-eight more, which the ecosystem's installer searches. That list is read from
+  the installer rather than invented, and is in `pkg/skills` as
+  `ConventionalSkillDirectories`.
+- **There is no upstream version.** A shallow clone is whatever `HEAD` was, so the pin
+  question answers itself: the manifest *is* the pin, which this document already decided
+  for the framework's own reasons.
+
+So a `skills.sh` catalog is a **git-backed catalog registered from a shorthand**, and the
+shorthand resolves to **GitHub** — not to skills.sh, because skills.sh is an index and
+`npx skills add owner/repo` is a name for a repository. `RemoteURL("vercel-labs/skills")`
+returns `https://github.com/vercel-labs/skills.git`, and the two are the same thing
+reached two ways.
+
+What that costs the enumeration the section above wanted: a deployment cannot claim to
+search all of skills.sh, because nothing supports it. It can search the repositories it
+has registered, which is what the git provider's `FindSkills` already answers. Stating
+that is better than a search that silently covers less than it appears to.
 
 ### Git-backed catalogs
 
@@ -627,6 +653,46 @@ and the project is where the work is, and the person whose repository it is shou
 the last word on whose name is on the commit. One identity governs the subsystem's
 commits across every catalog it holds, because it is the same person on the same
 machine making them.
+
+**A catalog this deployment found is read-only; one it created is not.** That is the
+whole difference between them, and it is what makes pushing to somebody else's
+repository a separate deliberate act rather than a side effect of storing a skill. A
+write against a read-only one is refused *before* anything is written, and refused **with
+the reason** — which is what makes `copy` and `move` answerable rather than appearing to
+succeed.
+
+**git is the binary, not a library.** Every operation shells out, because `git` already
+knows the machine's ssh keys, its credential helpers, its proxy configuration and its
+`insteadOf` rules — and "credentials are deployment configuration" means exactly that a
+deployment should not have to hand a private repository's secret to a framework. A Go
+library would need its own answer to all four, and a worse one. A deployment that cannot
+find git is told at start rather than when a tool refuses to register a catalog.
+
+**A skill is read by the same code whichever catalog it came from.** A clone is a
+directory, so a skill in one is read by `pkg/skills.Directory` — the same reader a
+project's own `.toolbox/skills/` uses. That is what stops a manifest meaning one thing for
+a project's own skill and another for the same skill in a checkout, and a pin from being
+two kinds of thing depending on where the skill came from.
+
+#### Two services, because two different questions
+
+The subsystem serves two contracts, and the split is not a convenience:
+
+- **`SkillCatalogService`**, once per registered catalog, for *skills*. Which catalog a
+  call is for is in the request's own `catalog` field, so a deployment with a dozen
+  catalogs still runs one provider.
+- **`SkillGitService`**, for deciding *what sources exist at all*. A catalog contract is
+  about skills; register, create, sync, push, unregister and delete are about where skills
+  come from. A contract that mixed them would make every catalog provider responsible for
+  deciding what catalogs there are, which is not a catalog's business.
+
+The management service's listing is `ListCheckouts` and its status is `CheckoutStatus`,
+which was **not** what this document said — it said `ListCatalogs`, and that collided with
+the catalog contract's new method. The rename is not cosmetic. Which catalogs are *served*
+is the catalog contract's question and every provider answers it; which commit a checkout
+is on, whether it is clean, and whether it can sync is a fact about a directory this
+provider owns. Two methods with one name answering one question in two shapes would be one
+fact stated twice with nothing to catch a disagreement.
 
 ### Registering and creating catalogs
 
@@ -697,6 +763,7 @@ beyond `local` and nothing else is affected.
 | Read a file, with its digest and size | a client verifies what it fetched; the pin is only as good as the digests in it |
 | Take a whole skill, and remove one | the git catalog is read-write, and `copy` and `move` are two independent operations |
 | Report its own limits | a client has to know a skill is too large before it tries |
+| Say which catalogs it holds | the git provider is a *provider host* holding one per registered remote, and a provider's own identifier is not a catalog's name |
 
 ### The service
 
@@ -704,6 +771,9 @@ beyond `local` and nothing else is affected.
 service SkillCatalogService {
   // @toolbox.side-effects read_only
   rpc DescribeCatalog(DescribeCatalogRequest) returns (DescribeCatalogResponse);
+
+  // @toolbox.side-effects read_only
+  rpc ListCatalogs(ListCatalogsRequest) returns (ListCatalogsResponse);
 
   // @toolbox.side-effects read_only
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
@@ -724,6 +794,19 @@ service SkillCatalogService {
   rpc DeleteSkill(DeleteSkillRequest) returns (DeleteSkillResponse);
 }
 ```
+
+`ListCatalogs` was **not** in the contract this document originally specified, and its
+absence was a real gap rather than a simplification: the contract was written assuming
+one provider serves one catalog, and the *provider host* this same document specifies
+serves many. Without it, a directory that read each provider's own identifier as a
+catalog's name resolved exactly one of a host's catalogs and left the rest unreachable —
+which a project's `skills:` list would then name with no way to be served. A provider
+holding one catalog answers with that one; a provider holding many answers with all of
+them, and the aggregator learns which is which from that rather than from guessing.
+
+So the eighth method exists because a provider is not a catalog, and the earlier seven
+were not wrong — they were incomplete about a fact the design had already stated twice
+(provider host, resolved by identifier) and the contract had not carried.
 
 The side effects are the framework's own vocabulary, and they are the reason a policy
 can govern this contract. Everything that reads is `read_only`; a write is `create
@@ -1190,13 +1273,18 @@ reason rather than rediscovered:
   template, and the capability declaration. A deployment serving no skills declares
   nothing.
 
+- **`subsystems/skillgit`** — the git-backed catalog provider. A provider *host*: a
+  deployment registers as many catalogs as it likes, one per remote, each under its own
+  identifier. It serves the catalog contract for every registered catalog and a second
+  service for the registrations themselves.
+- **`RemoteURL`** — `owner/repo` resolved to a GitHub remote, which is what makes a
+  public-directory skill a registration rather than a subsystem.
+
 **Not built, and a deployment is complete without them:**
 
-- A **git-backed catalog** provider. The contract it implements exists; the subsystem
-  does not.
-- A **remote catalog** provider. Same.
-- **`copy` and `move`** between catalogs. The contract can express them and the read-only
-  refusal is implemented in the configuration path; the two operations are not.
+- **`copy` and `move`** between catalogs. The contract can express them, the read-only
+  refusal is implemented, and `PutSkill` takes a whole skill with its content — the two
+  operations themselves are not.
 
 **What was there before, and is gone:** a versioned in-memory catalogue of skill
 *metadata* — an identifier, a version, a name, a description, instructions as a single
@@ -1229,6 +1317,18 @@ rediscovered.
 | `ReadSkillFile` serves the skill's own document as the projection | The entry a client fetched it under describes the projection. Serving the template would give a client a file whose frontmatter disagrees with the entry in its hand, and the two digests would then describe different things. |
 | A manifest is recomputed, never taken from a catalog | A digest in a manifest a server published is worth exactly as much as the server published it, so a check that reads the manifest and compares it to itself agrees with whatever it was handed. A manifest that cannot be complete is refused rather than completed. |
 | `api.ConnectKind` reads a kind back off the wire | A gateway answering a protocol of its own has to decide which code *that* protocol wants: "no such skill" is `NotFound` inside ConnectRPC and `InvalidParams` inside the skills extension, because there the URI is the parameter. It is the inverse of `ConnectCode` and lives beside it, so the mapping is stated once in each direction. |
+
+## Decisions this phase added
+
+| Decision | Why |
+|---|---|
+| A provider is not a catalog, so the contract enumerates | The git provider holds a checkout per registered remote. A directory reading a provider's own identifier as a catalog's name resolved one catalog of a dozen and left the rest unreachable, which a project's `skills:` list would name with no way to be served. The contract gained `ListCatalogs` because the design had already stated "provider host" twice and the contract had not carried it. |
+| The provider's management service lists *checkouts*, not catalogs | Which catalogs are served is the catalog contract's question and every provider answers it. Which commit a checkout is on is a fact about a directory one provider owns. Two methods with one name answering one question in two shapes would be one fact stated twice with nothing to catch a disagreement. |
+| A catalog found is read-only; a catalog created is not | It is what makes pushing to somebody else's repository a separate deliberate act rather than a side effect of storing a skill, and it is why `copy` and `move` can be refused with a reason instead of appearing to succeed. |
+| `PutSkill` carries the content, not only the manifest | A skill written file by file could be read back halfway through, and a manifest naming a file nobody had written is a pin nothing describes. A file neither sent nor listed is removed, so a skill replaced wholesale is exactly what was sent — a stale supporting file is content the author deleted. |
+| git is the binary, not a library | `git` already knows the machine's ssh keys, credential helpers, proxy configuration and `insteadOf` rules, and "credentials are deployment configuration" means a deployment should not hand a private repository's secret to a framework. |
+| The public directory is a registry over git, not a source | Its own installer shallow-clones the repository, and there is no JSON API to enumerate against. So it is a `owner/repo` shorthand resolving to GitHub, and a deployment claims only to search the repositories it registered rather than a directory it cannot query. |
+| A `bin/` directory is build and tool output at any depth | The check that asks "is anything on disk that git will not track, and is it source" would otherwise report a `.yml` a browser tool wrote there. The directory is the signal, not the extension. |
 
 ## Tests
 

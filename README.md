@@ -146,7 +146,14 @@ not separately deployable. See [`docs/architecture.md`](docs/architecture.md) an
 A project's own skills live in `.toolbox/skills/` and are part of the project
 without being named anywhere. A skill it depends on from elsewhere is named in
 `skills:` as a qualified reference, pinned in a lockfile beside the configuration,
-and served in the form the client reading it can act on. See
+and served in the form the client reading it can act on.
+
+Skills come from *catalogs*, and a catalog is a source rather than a store. A
+project's own directory is the one every deployment has. A git-backed catalog is
+one checkout per registered remote, so a team publishes its standards to a
+repository and a project depends on them by name — and the public skill
+directories are a registry over exactly that, reached as `owner/repo`. A catalog
+this deployment found is read-only; one it created is not. See
 [`docs/skills.md`](docs/skills.md).
 
 ## A day in the environment
