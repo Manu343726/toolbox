@@ -5,12 +5,18 @@ an agent that needs it. This document is the design record and the implementatio
 plan: what the format is, where skills come from, how they reach an agent, which parts
 of the protocol the framework implements, and in what order the work gets done.
 
-It is written as the specification is agreed, step by step. Sections marked *not yet
-decided* are open questions, and a section that is marked as such is not yet
-implemented — this document records intent as well as fact, and the two are labelled
-separately for that reason.
+It is written as the specification is agreed, step by step, and it is amended as
+implementation changes what the SDK actually does — a decision taken later is written
+into the section it belongs to rather than left as a marker, and where the plan was
+**wrong** the correction says so and says why, because a corrected plan nobody can see
+is a plan that will be followed again.
 
-**Status: the specification is complete. Nothing is implemented.**
+**Status: the specification is complete, and the core of it is implemented.** A
+project's own skills are read, projected per client, pinned, and served over the
+Model Context Protocol skills extension. The catalog *providers* — git-backed and
+remote — are the remaining work, and the aggregate contract has the methods their
+implementation will need. What is built and what is not is stated per phase
+below rather than here, so this line does not have to be rewritten every time.
 
 ## The plan
 
@@ -18,16 +24,21 @@ Nine phases. Each closes before the next opens.
 
 | # | Phase | State | Produces |
 |---|---|---|---|
-| 1 | **Upgrade the MCP Go SDK to v1.8.0** | **decided** | A dependency that negotiates `2026-07-28` and implements `server/discover` |
-| 2 | **The catalog model** | **decided** | A catalog role, aggregation, and fully-qualified references |
-| 3 | **The catalog RPC contract** | **decided** | Seven methods, derived from what the design requires of a catalog |
-| 4 | **The canonical skill and distillation** | **decided** | The union of every client's features, projected per client |
-| 5 | **The aggregate contract** | **decided** | `SkillService`, plus a read of which pinned skills have gone out of date |
-| 6 | **The reader: the format in a root package** | **decided** | `pkg/skills`, one typed representation, two input dialects |
-| 7 | **The project configuration** | **decided** | `skills:` names qualified references; `local` is implicit |
-| 7a | **Git-backed catalogs** | **decided** | The concept, hosted many times over; register, create, sync, unregister, delete |
-| 8 | **Security posture** | **decided** | Authority never widened; the project's list is the permission; drift is reported |
-| 9 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
+| 1 | **Upgrade the MCP Go SDK to v1.8.0** | **done** | A dependency that negotiates `2026-07-28` and implements `server/discover` |
+| 2 | **The catalog model** | **done** | A catalog role, aggregation, and fully-qualified references |
+| 3 | **The catalog RPC contract** | **done** | Seven methods, in `pkg/skills/proto`, derived from what the design requires of a catalog |
+| 4 | **The canonical skill and distillation** | **done** | The union of every client's features, projected per client |
+| 5 | **The aggregate contract** | **done** | `SkillService`, plus a read of which pinned skills have gone out of date |
+| 6 | **The reader: the format in a root package** | **done** | `pkg/skills`, one typed representation, two input dialects |
+| 7 | **The project configuration** | **done** | `skills:` names qualified references; `local` is implicit |
+| 7a | **Git-backed catalogs** | **decided, not built** | The concept, hosted many times over; register, create, sync, unregister, delete |
+| 7b | **A remote catalog** | **decided, not built** | `skills.sh`, browsed and read, never written |
+| 8 | **Security posture** | **done** | Authority never widened; the project's list is the permission; drift is reported |
+| 9 | **Implement** | **partly done** | The extension is served; the catalogs it aggregates are not yet providers |
+
+Two phases are decided and not built, and both are *providers* rather than
+framework: the contract they implement exists, and a deployment serving only its
+own project's skills is a working deployment without either.
 
 **The specification is closed.** Nothing below is an open question; a decision taken
 later is written into the section it belongs to rather than left as a marker, because a
@@ -933,16 +944,60 @@ lands. We depend on released versions.
 
 Three, all of which are stable API rather than internals, and all present in v1.8.0:
 
-- **`AddReceivingMiddleware`** intercepts `skills/list` and `skills/get`. The SDK's
-  default receiving handler answers `jsonrpc2.ErrNotHandled` for a method it does not
-  know, so a middleware that handles these never falls through to the SDK's dispatch.
-  This behaviour is identical in v1.6.1 and v1.8.0.
+- **`AddReceivingCustomMethod`** serves `skills/list` and `skills/get`. This
+  **corrects** what this section originally said, which was `AddReceivingMiddleware`,
+  and the correction is worth its own paragraph because the plan was wrong in a way
+  only running the code would show.
 - **`AddResourceTemplate`** with a `skill://` template routes `resources/read` for a
   skill's files, since the SDK's `lookupResourceHandler` matches URI templates as well
-  as exact URIs.
+  as exact URIs. The path is a *reserved* expansion, `{+path}`, because a skill's
+  files are nested and a plain `{path}` matches one segment only.
 - **`ServerCapabilities.AddExtension`** declares
   `io.modelcontextprotocol/skills` with its `directoryRead` setting, alongside the
-  `resources` capability the extension requires.
+  `resources` capability the extension requires. Capabilities are fixed when the
+  server is created, so the declaration happens there rather than afterwards.
+
+#### Why middleware could not have done it
+
+The plan was that receiving middleware would intercept the two methods, on the
+reasoning that a method the SDK does not know falls through with
+`ErrNotHandled` and a middleware handling it would never reach the dispatch. The
+premise is right and the conclusion does not follow. The SDK checks a request
+against its method table *before* the middleware chain runs:
+
+```go
+func handleReceive[S Session](ctx context.Context, session S, jreq *jsonrpc.Request) (Result, error) {
+	info, err := checkRequest(jreq, session.receivingMethodInfos())
+	if err != nil {
+		return nil, err
+	}
+	...
+	mh := session.receivingMethodHandler()
+```
+
+`checkRequest` answers `ErrNotHandled` for a method it does not know, and the
+request never reaches a middleware. The middleware chain only ever runs for
+methods already in the table — so a middleware cannot add one, and
+`AddReceivingCustomMethod` is the SDK's supported way to do it. It is a better
+point anyway: a custom method goes through the same middleware chain a standard
+method does, so whatever the gateway already installs applies to it too.
+
+#### Two things about the SDK that shaped the implementation
+
+**Client identity is not in the session.** The design already said client identity
+comes from the connection rather than from configuration, and at `2026-07-28`
+that is true in a stronger sense than the design meant: the revision has no
+`initialize` handshake, so the SDK leaves `ServerSession.InitializeParams` **nil**
+— deliberately, because there is no single answer. Every request carries
+`clientInfo` and `clientCapabilities` in its own `_meta`, and that is where the
+identity is read from. So the design's conclusion held and its stated reason did
+not: there is no connection to ask.
+
+**Extensions are declared on the capabilities, not on the server.**
+`AddExtension` is a method on `*ServerCapabilities`, and `ServerOptions.Capabilities`
+is read when the server is constructed. Passing a non-nil `Capabilities` is also
+required to declare anything at all: nil means the SDK's historical default of
+the logging capability alone, which is not what a gateway serves.
 
 ### Why the SDK is upgraded to v1.8.0 for this
 
@@ -1066,11 +1121,28 @@ reason rather than rediscovered:
   configuration has already decided it. There is no second prompt between a project and
   a skill, and a tool that adds one is subject to the configuration-confirmation rule
   rather than to a separate approval of its own.
-- **A named skill is pinned, and the pin is the manifest.** The `skills:` entry records
-  the skill's name *and* the manifest of its files with their digests, which is what
-  makes a change detectable. A catalog is live — `skills.sh` publishes updates, a git
-  catalog can be pulled — so the content behind a name can change under a project that
-  never asked it to.
+- **A named skill is pinned, and the pin is the manifest.** A pin records the skill's
+  name *and* the manifest of its files with their digests, which is what makes a change
+  detectable. A catalog is live — `skills.sh` publishes updates, a git catalog can be
+  pulled — so the content behind a name can change under a project that never asked it
+  to.
+
+  **The pin lives in `skills.lock.yaml`, beside the configuration file, and not in it.**
+  This **corrects** what the design originally said, which was that the `skills:`
+  entry records the manifest inline, and the correction matters because of what the
+  configuration file is. It is the one file in a project a person writes and reviews,
+  and its value is that its list is readable at a glance: this project depends on
+  `skills.sh.pull-request-review` and on nothing else. A machine-maintained manifest
+  block inline would mean every content change rewrote the file whose whole purpose is
+  that a person can read it, and it would put generated bytes inside the one file the
+  configuration-confirmation rule protects.
+
+  So it is a lockfile by every convention that matters: written on first use, compared
+  rather than trusted, and read by the person who wants to know what changed rather
+  than by whoever reviews the file. A bare reference in `skills:` therefore means
+  "unpinned" — a valid entry, and one whose first use records the pin. The separation
+  also keeps rule 17 about the file a person reviews: adding a skill changes the list,
+  and the pin beside it is not a change to anything a person wrote.
 - **A changed skill is marked outdated and the user is told, not blocked.** When the
   catalog's manifest for a pinned skill no longer matches the pin, the skill is marked
   outdated and the change reported, and the project chooses whether to pull the update
@@ -1104,10 +1176,33 @@ reason rather than rediscovered:
 
 ## What exists today
 
-The existing `subsystems/skill` holds a versioned in-memory catalogue of skill
+**Built:**
+
+- **`pkg/skills`** — the format. A skill is read from a directory or from a document plus
+  a manifest, into one typed form; two input dialects reach it and one stating a fact
+  twice with two values is refused; a template is projected for a client; a manifest is
+  computed from the bytes it describes.
+- **`pkg/skills/proto`** — the catalog contract, seven methods, in a root package because
+  a *provider* implements it.
+- **`subsystems/skill`** — the aggregator. The implicit local catalog, resolution by
+  qualified reference, `skills.lock.yaml`, and `SkillService`.
+- **`pkg/mcp`** — the extension. `skills/list`, `skills/get`, a `skill://` resource
+  template, and the capability declaration. A deployment serving no skills declares
+  nothing.
+
+**Not built, and a deployment is complete without them:**
+
+- A **git-backed catalog** provider. The contract it implements exists; the subsystem
+  does not.
+- A **remote catalog** provider. Same.
+- **`copy` and `move`** between catalogs. The contract can express them and the read-only
+  refusal is implemented in the configuration path; the two operations are not.
+
+**What was there before, and is gone:** a versioned in-memory catalogue of skill
 *metadata* — an identifier, a version, a name, a description, instructions as a single
-string, and declared capability and policy references. It has no notion of a catalog, of
-a skill directory, of files, of digests, or of MCP.
+string, and declared capability and policy references. It had no notion of a catalog, of
+a skill directory, of files, of digests, or of MCP, and a subsystem that cannot do any
+of those is not a subsystem that could.
 
 ## Decisions taken, and their reasons
 
@@ -1128,6 +1223,12 @@ rediscovered.
 | `allowed-tools` is ignored, and documented as ignored | A server populating that field is requesting elevated access on the host, not describing its own environment. Ignoring it now is a decision, not an omission: a skill naming `allowed-tools` is served, the field is not acted on, and the reason is recorded so it can be revisited deliberately. |
 | The HTTP MCP endpoint is stateless | The SDK's streamable HTTP transport serves `2026-07-28` only when stateless, and the Skills extension is specified against that revision. A stateful handler negotiates down to `2025-11-25` and cannot serve the extension at all. Nothing is lost: the gateway holds no per-session state, and exposure is process-wide by design. |
 | Elicitation is a stdio capability | A stateless endpoint cannot make a server-to-client request, and elicitation is one. The same gateway over stdio serves the same revision with sessions and can elicit, so the transport is a launch-mode choice and no capability is given up by choosing either. |
+| The extension is served through `AddReceivingCustomMethod`, not middleware | The SDK checks a request against its method table before the middleware chain runs, so a middleware cannot add a method the SDK does not know. The original plan assumed otherwise; the code says otherwise. |
+| Client identity is read from the request's `_meta` | At `2026-07-28` there is no `initialize` handshake, so the SDK leaves the session's initialization parameters nil and the client states itself on every request. Identity is where the client wrote it, which is where the design already said it was — but for a stronger reason than it gave. |
+| A pin is a lockfile beside the configuration, not a block inside it | The file a person writes and reviews should hold what the person decided. A machine-maintained manifest inline would rewrite that file on every content change and put generated bytes inside the one file rule 17 protects. |
+| `ReadSkillFile` serves the skill's own document as the projection | The entry a client fetched it under describes the projection. Serving the template would give a client a file whose frontmatter disagrees with the entry in its hand, and the two digests would then describe different things. |
+| A manifest is recomputed, never taken from a catalog | A digest in a manifest a server published is worth exactly as much as the server published it, so a check that reads the manifest and compares it to itself agrees with whatever it was handed. A manifest that cannot be complete is refused rather than completed. |
+| `api.ConnectKind` reads a kind back off the wire | A gateway answering a protocol of its own has to decide which code *that* protocol wants: "no such skill" is `NotFound` inside ConnectRPC and `InvalidParams` inside the skills extension, because there the URI is the parameter. It is the inverse of `ConnectCode` and lives beside it, so the mapping is stated once in each direction. |
 
 ## Tests
 
