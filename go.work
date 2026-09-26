@@ -4,9 +4,9 @@ use (
 	.
 	./cmd/toolbox
 	./subsystems/agent
+	./subsystems/apigrpc
 	./subsystems/apimcp
 	./subsystems/apiopenapi
-	./subsystems/apigrpc
 	./subsystems/apitools
 	./subsystems/documentation
 	./subsystems/health
