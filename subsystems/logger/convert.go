@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 
 	loggerv1 "github.com/Manu343726/toolbox/subsystems/logger/loggerv1"
 
@@ -92,6 +93,71 @@ func renderOption(value any) string {
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+// fanoutFromProto reads a fanout a caller supplied for its own workspace.
+//
+// The messages are the ones the deployment reports its own fanout with, so there is one shape
+// for a fanout in both directions and a caller that read GetConfig can send back what it read.
+// The rules a deployment's configuration follows apply here unchanged: every matching route
+// contributes, a sink named by two routes receives an entry once, a route that tags entries
+// and sends them nowhere is refused, and a condition is text.
+func fanoutFromProto(level loggerv1.LogLevel, handlers []*loggerv1.LogHandler, routes []*loggerv1.LogRoute) (log.Config, error) {
+	fanout := log.Config{Level: levelFromProto(level)}
+	if level == loggerv1.LogLevel_LOG_LEVEL_UNSPECIFIED {
+		// A caller that said nothing is not choosing a minimum; the deployment's applies.
+		// Zero would be debug, which is the one value that widens rather than narrows.
+		fanout.Level = slog.LevelInfo
+	}
+	for index, handler := range handlers {
+		if handler.GetName() == "" {
+			return log.Config{}, fmt.Errorf("handler %d needs a name: a route naming it would be ambiguous", index+1)
+		}
+		if handler.GetProvider() == "" {
+			return log.Config{}, fmt.Errorf("the %q handler needs a provider: which backend writes to it", handler.GetName())
+		}
+		declared := log.HandlerConfig{
+			Name:     handler.GetName(),
+			Provider: handler.GetProvider(),
+			Options:  map[string]any{},
+		}
+		if handler.GetLevel() != loggerv1.LogLevel_LOG_LEVEL_UNSPECIFIED {
+			parsed := levelFromProto(handler.GetLevel())
+			declared.Level = &parsed
+		}
+		for key, value := range handler.GetOptions() {
+			declared.Options[key] = value
+		}
+		fanout.Handlers = append(fanout.Handlers, declared)
+	}
+	sort.Slice(fanout.Handlers, func(i, j int) bool { return fanout.Handlers[i].Name < fanout.Handlers[j].Name })
+	for index, route := range routes {
+		if len(route.GetHandlers()) == 0 {
+			return log.Config{}, fmt.Errorf("route %d must name the handlers it sends entries to", index+1)
+		}
+		converted := log.Route{Name: route.GetName(), Handlers: route.GetHandlers()}
+		if route.GetLevel() != loggerv1.LogLevel_LOG_LEVEL_UNSPECIFIED {
+			parsed := levelFromProto(route.GetLevel())
+			converted.When.Level = &parsed
+		}
+		if len(route.GetAttributes()) > 0 {
+			converted.When.Attributes = make(map[string]string, len(route.GetAttributes()))
+			for key, value := range route.GetAttributes() {
+				converted.When.Attributes[key] = value
+			}
+		}
+		if len(route.GetAdd()) > 0 {
+			converted.Add = make(map[string]string, len(route.GetAdd()))
+			for key, value := range route.GetAdd() {
+				converted.Add[key] = value
+			}
+		}
+		fanout.Routes = append(fanout.Routes, converted)
+	}
+	if len(fanout.Handlers) == 0 {
+		return log.Config{}, fmt.Errorf("a fanout needs at least one handler: it describes where entries go")
+	}
+	return fanout, nil
 }
 
 // routesToProto renders the delivery plan in order, because a route's position is what

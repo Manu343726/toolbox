@@ -613,3 +613,327 @@ func writeConfig(t *testing.T, dir, contents string) {
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, config.ProjectDir, config.FileName), []byte(contents), 0o600))
 }
+
+func TestACallerCanConfigureTheFanoutForItsOwnWorkspace(t *testing.T) {
+	base := t.TempDir()
+	router, files := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) {
+		options.BaseDir = base
+		options.Providers = []string{log.ProviderJSON, log.ProviderText}
+	})
+
+	confirmation, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Level:     loggerv1.LogLevel_LOG_LEVEL_DEBUG,
+		Handlers: []*loggerv1.LogHandler{{
+			Name:     "agent",
+			Provider: log.ProviderJSON,
+			Level:    loggerv1.LogLevel_LOG_LEVEL_DEBUG,
+			Options:  map[string]string{"path": "logs/agent.log"},
+		}},
+		Routes: []*loggerv1.LogRoute{{
+			Name:     "the agent's own",
+			Handlers: []string{"agent"},
+			Add:      map[string]string{"sent_by": "agent"},
+		}},
+	}))
+	require.NoError(t, err)
+
+	// The answer says what the caller's entries will now do, so a caller that has redirected
+	// its logging knows rather than discovering it from a log it cannot read.
+	assert.True(t, confirmation.Msg.GetConfigured())
+	assert.Equal(t, "acme", confirmation.Msg.GetWorkspace())
+	assert.Equal(t, loggerv1.FanoutSource_FANOUT_SOURCE_CALLER, confirmation.Msg.GetSource())
+	require.Len(t, confirmation.Msg.GetHandlers(), 1)
+	assert.Equal(t, "agent", confirmation.Msg.GetHandlers()[0].GetName())
+
+	// The entry lands in the caller's sink, in the directory it asked for, and is tagged by
+	// the route the caller wrote.
+	response, err := service.Log(context.Background(), connect.NewRequest(&loggerv1.LogRequest{
+		Message: "advanced a run", Logger: "agent",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"agent"}, response.Msg.GetHandlers())
+
+	entry := readLines(t, &lines{dir: base, name: "logs/agent.log"})[0]
+	assert.Equal(t, "advanced a run", entry["msg"])
+	assert.Equal(t, "agent", entry["sent_by"])
+
+	// And it did not go where it would have, which is the whole observable difference.
+	assert.Empty(t, files["file"].all(t))
+	assert.Empty(t, files["project"].all(t))
+}
+
+func TestACallersFanoutCannotBeEscapedByNamingTheDeployment(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) {
+		options.BaseDir = base
+		options.Providers = []string{log.ProviderJSON}
+	})
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Handlers: []*loggerv1.LogHandler{{
+			Name: "agent", Provider: log.ProviderJSON,
+			Options: map[string]string{"path": "logs/agent.log"},
+		}},
+		Routes: []*loggerv1.LogRoute{{Handlers: []string{"agent"}}},
+	}))
+
+	// A fanout that is not scoped to a workspace would apply to the deployment's own entries,
+	// which is the one thing a caller must not be able to configure. The scope is what makes
+	// this operation safe to expose, so a request without one is refused rather than guessed.
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Contains(t, err.Error(), "needs a workspace to be scoped to")
+}
+
+func TestACallerCannotRouteToABackendTheDeploymentLacks(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) {
+		options.BaseDir = base
+		options.Providers = []string{log.ProviderJSON}
+	})
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Handlers: []*loggerv1.LogHandler{{
+			Name: "elsewhere", Provider: "loki",
+			Options: map[string]string{"endpoint": "http://loki:3100"},
+		}},
+		Routes: []*loggerv1.LogRoute{{Handlers: []string{"elsewhere"}}},
+	}))
+
+	// A caller's fanout may only name a backend this installation has, so it cannot use the
+	// service to reach something that was never part of this deployment.
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	assert.Contains(t, err.Error(), "loki")
+	assert.Contains(t, err.Error(), "json")
+}
+
+func TestAnEntryForAnotherWorkspaceIsNotRedirected(t *testing.T) {
+	base := t.TempDir()
+	router, files := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) {
+		options.BaseDir = base
+		options.Providers = []string{log.ProviderJSON}
+	})
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Handlers: []*loggerv1.LogHandler{{
+			Name: "agent", Provider: log.ProviderJSON,
+			Options: map[string]string{"path": "logs/agent.log"},
+		}},
+		Routes: []*loggerv1.LogRoute{{
+			Name: "only acme", Handlers: []string{"agent"},
+			// The caller is not configuring itself, because the scope is the caller's claim
+			// about which entries are its own — so a route can narrow that and nothing can
+			// widen it.
+		}},
+	}))
+	require.NoError(t, err)
+
+	// A different workspace's entry goes to the deployment's own routes, untouched.
+	response, err := service.Log(context.Background(), connect.NewRequest(&loggerv1.LogRequest{
+		Message: "globex's work", Workspace: "globex",
+	}))
+	require.NoError(t, err)
+	assert.NotEqual(t, []string{"agent"}, response.Msg.GetHandlers())
+	assert.Equal(t, []string{"file"}, response.Msg.GetHandlers())
+	assert.Empty(t, readLines(t, &lines{dir: base, name: "logs/agent.log"}))
+	assert.Len(t, files["file"].all(t), 1)
+}
+
+func TestAConfigurationIsReplacedNotAccumulated(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) {
+		options.BaseDir = base
+		options.Providers = []string{log.ProviderJSON}
+	})
+
+	first := func(name string) *connect.Request[loggerv1.SetConfigRequest] {
+		return connect.NewRequest(&loggerv1.SetConfigRequest{
+			Workspace: "acme",
+			Handlers: []*loggerv1.LogHandler{{Name: name, Provider: log.ProviderJSON,
+				Options: map[string]string{"path": "logs/" + name + ".log"}}},
+			Routes: []*loggerv1.LogRoute{{Handlers: []string{name}}},
+		})
+	}
+	_, err := service.SetConfig(context.Background(), first("first"))
+	require.NoError(t, err)
+	_, err = service.SetConfig(context.Background(), first("second"))
+	require.NoError(t, err)
+
+	response, err := service.Log(context.Background(), connect.NewRequest(&loggerv1.LogRequest{
+		Message: "advanced a run",
+	}))
+	require.NoError(t, err)
+
+	// A fanout is a whole plan, so a second one replaces the first rather than adding to it:
+	// otherwise a caller that retunes its logging would find entries still going to a sink it
+	// has just stopped asking for, with no way to know.
+	assert.Equal(t, []string{"second"}, response.Msg.GetHandlers())
+}
+
+func TestNamingAProjectWithoutAConfigurationStillJustNamesIt(t *testing.T) {
+	router, _ := router(t, defaultFanout(t))
+	service := serve(t, router)
+
+	confirmation, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+	}))
+
+	require.NoError(t, err)
+	// A caller with a project but no opinions about its routing sends an empty request, and
+	// is told it supplied nothing rather than being left to think it retuned something.
+	assert.False(t, confirmation.Msg.GetConfigured())
+	assert.Equal(t, "acme", confirmation.Msg.GetWorkspace())
+	assert.Equal(t, loggerv1.FanoutSource_FANOUT_SOURCE_DEPLOYMENT, confirmation.Msg.GetSource())
+}
+
+func TestGetConfigSaysWhereTheFanoutCameFrom(t *testing.T) {
+	project := t.TempDir()
+	name := filepath.Base(project)
+	writeConfig(t, project, fmt.Sprintf(`
+daemon:
+  host: 127.0.0.1
+  port: 9180
+logging:
+  level: warn
+  handlers:
+    project:
+      provider: json
+      options:
+        path: project.log
+  routes:
+    - name: the project's own
+      handlers: [project]
+`))
+	router, _ := router(t, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) { options.WorkDir = project })
+	_ = name
+
+	deployment, err := service.GetConfig(context.Background(),
+		connect.NewRequest(&loggerv1.GetConfigRequest{}))
+	require.NoError(t, err)
+	assert.Equal(t, loggerv1.FanoutSource_FANOUT_SOURCE_DEPLOYMENT, deployment.Msg.GetSource())
+
+	fromFile, err := service.GetConfig(context.Background(),
+		connect.NewRequest(&loggerv1.GetConfigRequest{Workspace: project}))
+	require.NoError(t, err)
+	// A caller entitled to know that its project's file is what would otherwise have answered,
+	// so it can tell that from a fanout it configured itself.
+	assert.Equal(t, loggerv1.FanoutSource_FANOUT_SOURCE_PROJECT_FILE, fromFile.Msg.GetSource())
+	assert.Equal(t, loggerv1.LogLevel_LOG_LEVEL_WARN, fromFile.Msg.GetLevel())
+}
+
+func TestAFanoutWithNoHandlerIsRefused(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) { options.BaseDir = base })
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Routes:    []*loggerv1.LogRoute{{Handlers: []string{"nowhere"}}},
+	}))
+
+	// A fanout with no sinks describes where entries go by not saying, and a route naming a
+	// sink that was not declared is exactly the typo that would record nothing.
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Contains(t, err.Error(), "at least one handler")
+}
+
+func TestAHandlerWithNoProviderIsRefused(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) { options.BaseDir = base })
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Handlers:  []*loggerv1.LogHandler{{Name: "agent"}},
+		Routes:    []*loggerv1.LogRoute{{Handlers: []string{"agent"}}},
+	}))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs a provider")
+}
+
+func TestAHandlerWithNoNameIsRefused(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) { options.BaseDir = base })
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Handlers:  []*loggerv1.LogHandler{{Provider: log.ProviderJSON}},
+		Routes:    []*loggerv1.LogRoute{{Handlers: []string{"agent"}}},
+	}))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs a name")
+}
+
+func TestARouteNamingNoHandlerIsRefused(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) { options.BaseDir = base })
+
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Handlers:  []*loggerv1.LogHandler{{Name: "agent", Provider: log.ProviderJSON}},
+		Routes:    []*loggerv1.LogRoute{{Name: "nowhere"}},
+	}))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must name the handlers")
+}
+
+func TestAConfigurationThatCannotWorkIsNotInstalled(t *testing.T) {
+	base := t.TempDir()
+	router, _ := routerIn(t, base, defaultFanout(t))
+	service := serve(t, router, func(options *logger.Options) { options.BaseDir = base })
+
+	// Two routes, both tagging, the second naming a sink the first already claimed: the router
+	// refuses the second, so the whole configuration is refused rather than half installed.
+	_, err := service.SetConfig(context.Background(), connect.NewRequest(&loggerv1.SetConfigRequest{
+		Workspace: "acme",
+		Handlers: []*loggerv1.LogHandler{{Name: "agent", Provider: log.ProviderJSON,
+			Options: map[string]string{"path": "logs/agent.log"}}},
+		Routes: []*loggerv1.LogRoute{
+			{Name: "everything", Handlers: []string{"agent"}},
+			{Name: "and tagged again", Handlers: []string{"agent"}, Add: map[string]string{"x": "y"}},
+		},
+	}))
+	require.Error(t, err)
+
+	// The entry carries no workspace, so the deployment's own default route is the only one
+	// that matches it — which is the proof that the refused configuration was never installed.
+	response, err := service.Log(context.Background(), connect.NewRequest(&loggerv1.LogRequest{
+		Message: "advanced a run",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"file"}, response.Msg.GetHandlers())
+}
+
+// routerIn is router with a chosen base directory, so a test can name a path it will read back.
+func routerIn(t *testing.T, dir string, fanout log.Config) (*log.Router, map[string]*lines) {
+	t.Helper()
+	registry := log.NewRegistry()
+	registry.BaseDir = dir
+	built, err := registry.Build(fanout)
+	require.NoError(t, err)
+	files := make(map[string]*lines, len(fanout.Handlers))
+	for _, handler := range fanout.Handlers {
+		name, _ := handler.Options["path"].(string)
+		if name == "" {
+			name = "out.log"
+		}
+		files[handler.Name] = &lines{dir: dir, name: name}
+	}
+	return built, files
+}

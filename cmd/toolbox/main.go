@@ -467,6 +467,9 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 				Registry:  fanout.Registry,
 				Providers: fanout.Registry.Providers(),
 				WorkDir:   workDir(),
+				// A caller's own configuration resolves a relative path here, because the
+				// caller is not in this process and cannot know where it runs.
+				BaseDir: resolved.LoggingBaseDir,
 			})
 		},
 		"model":  func() (*subsystem.Server, error) { return model.New(model.Options{}) },

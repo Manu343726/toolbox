@@ -73,6 +73,24 @@ Two traps that have already cost a day each:
   because a project whose directory is `001` would otherwise have a route that
   could never match itself.
 
+## A client configuring its own fanout
+
+`SetConfig` may state a fanout for the caller's own workspace. Three rules, and they are the
+safety of the feature rather than a style:
+
+- **A fanout must name a workspace.** Unscoped would mean deployment-wide, and there is
+  deliberately no request that changes the deployment's fanout — that is the file's.
+- **The router is looked up by workspace.** Another workspace's entry finds nothing and
+  reaches the deployment's routes. A single global slot for a caller's configuration is the
+  bug to look for: it makes every configured workspace capture every other one.
+- **Only a backend the installation has may be named.**
+
+A second configuration replaces the first; a fanout is a whole plan, not a patch set.
+
+A workspace name asserts which project a caller is serving, not who it is. Two callers
+asserting the same workspace share its configuration, and that belongs in the docs rather than
+in a comment nobody reads.
+
 ## Testing
 
 Read a real file rather than asserting on a fake handler: a test about routing

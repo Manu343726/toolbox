@@ -190,6 +190,62 @@ toolbox logger set-config --workspace acme
 the one logging failure a log cannot report, so the deployment counts it and `GetConfig`
 reports the count as `unrouted`.
 
+### A client configuring its own fanout
+
+A client can state where **its own** entries go, and the scope is enforced rather than
+documented:
+
+```sh
+toolbox logger set-config --workspace acme \
+  --level LOG_LEVEL_DEBUG \
+  --handlers '{"name":"agent","provider":"json","options":{"path":"logs/agent.log"}}' \
+  --routes  '{"name":"the agent'\''s own","handlers":["agent"],"add":{"sent_by":"agent"}}'
+```
+
+```json
+{
+  "workspace": "acme",
+  "source": "FANOUT_SOURCE_CALLER",
+  "configured": true,
+  "handlers": [{ "name": "agent", "provider": "json", "options": { "path": "logs/agent.log" } }],
+  "routes":   [{ "name": "the agent's own", "handlers": ["agent"], "add": { "sent_by": "agent" } }]
+}
+```
+
+`--handlers` and `--routes` take **one JSON object per occurrence**, each the same message
+`GetConfig` reports, so a client that read its fanout can send it back.
+
+Three rules make this safe rather than merely convenient:
+
+- **A fanout must name a workspace.** An unscoped configuration would be a deployment-wide
+  one, and that is the one thing a caller cannot configure. There is no request that changes
+  the deployment's fanout; that is the configuration file's.
+- **It applies only to entries carrying that workspace.** Another workspace's entry looks up a
+  different slot and reaches the deployment's own routes. A caller that redirects its own
+  logging cannot redirect anyone else's.
+- **It may only name a backend the installation has.** A caller cannot use the service to
+  reach a sink that was never part of this deployment.
+
+A second configuration for a workspace **replaces** the first, because a fanout is a whole
+plan rather than a set of patches.
+
+`GetConfig` and `SetConfig` report `source`, so a caller can tell its own configuration from
+its project's file and from the deployment's:
+
+| `source` | The fanout came from |
+| --- | --- |
+| `FANOUT_SOURCE_DEPLOYMENT` | the deployment's configuration file |
+| `FANOUT_SOURCE_PROJECT_FILE` | the named project's own configuration file |
+| `FANOUT_SOURCE_CALLER` | a `SetConfig` from a caller, for that workspace |
+
+A workspace name asserts which project a caller is serving; it does not establish identity.
+Two callers asserting the same workspace share its configuration. The boundary is *entries
+carrying this workspace*, not *entries from this process*.
+
+A relative path in a caller's configuration resolves against the **deployment's**
+configuration directory, because the caller is not in this process and cannot know where it
+runs. A caller that wants its logs somewhere particular says an absolute path.
+
 ### A project's name and a project's location
 
 `workspace` on a request is one field doing a reader's job, and it is resolved as either a
@@ -214,6 +270,7 @@ fanout its entries actually go through.
 | `logs/machine.log` | the first line says which fanout is in use and which file it was read from |
 | `GetConfig.failures` | entries a sink refused to write |
 | `GetConfig.unrouted` | entries that matched no route and reached no sink |
+| `GetConfig.source` | whether a workspace's fanout is the deployment's, its project's, or its own |
 | a sink's error on standard error | which route could not write, and why |
 
 `unrouted` is the number worth watching on a quiet deployment: a fanout whose routes no

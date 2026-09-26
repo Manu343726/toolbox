@@ -21,13 +21,21 @@ service LoggerService {
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
 
   // @toolbox.side-effects writes_state
-  // SetConfig records a project scope for entries the caller sends, so a
-  // route that matches on a project can tell which entries are that
-  // project's.
+  // SetConfig declares the project a caller is acting for, and optionally
+  // the fanout for the entries it sends as that project.
   //
-  // It does not change where entries go. A deployment's routes are its
-  // own configuration, and a caller that could widen the fanout by RPC
-  // would be a caller that could send anything anywhere.
+  // The two are separate on purpose. Naming a project is what lets a route
+  // tell which entries are that project's; supplying a fanout is how a
+  // client redirects its own, and it is scoped to that project.
+  //
+  // The scope is the whole point and is not negotiable over the wire. What
+  // a caller sets here applies to entries tagged with this workspace and to
+  // nothing else, so a caller configuring its own logging cannot redirect
+  // the deployment's own entries, or another project's. There is no request
+  // that changes the deployment's fanout: that is the configuration file's.
+  //
+  // A caller that supplies no fanout is only naming its project, which is
+  // what a caller with a project but no opinions about its routing wants.
   rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 
   // @toolbox.side-effects writes_state
@@ -71,7 +79,23 @@ message LogValue {
   string value = 2;
 }
 
-// LogHandler declares one sink in a deployment's fanout.
+// FanoutSource says where a reported fanout came from.
+enum FanoutSource {
+  // No source was determined.
+  FANOUT_SOURCE_UNSPECIFIED = 0;
+  // The deployment's own configuration file, which is the only thing that
+  // may state the deployment's fanout.
+  FANOUT_SOURCE_DEPLOYMENT = 1;
+  // The configuration file of the project named in the request, found by
+  // walking up from the directory the caller named.
+  FANOUT_SOURCE_PROJECT_FILE = 2;
+  // A fanout a caller supplied for its own workspace, through SetConfig.
+  FANOUT_SOURCE_CALLER = 3;
+}
+
+// LogHandler declares one sink in a fanout. It is used in both directions:
+// a deployment reports its sinks with it, and a caller states its own with
+// it.
 message LogHandler {
   // The name routes refer to this sink by.
   string name = 1;
@@ -83,7 +107,9 @@ message LogHandler {
   map<string, string> options = 4;
 }
 
-// LogRoute describes one way entries reach sinks.
+// LogRoute describes one way entries reach sinks. It is used in both
+// directions, and a route a caller supplies is reached only by entries
+// carrying the caller's own workspace.
 message LogRoute {
   // The route's name, for a diagnostic.
   string name = 1;
@@ -112,6 +138,9 @@ message GetConfigRequest {
 message GetConfigResponse {
   // The minimum severity an entry must reach to be routed at all.
   LogLevel level = 1;
+  // Where this fanout came from, so a caller can tell its own configuration
+  // from its project's file and from the deployment's.
+  FanoutSource source = 8;
   // The sinks, in a stable order.
   repeated LogHandler handlers = 2;
   // The delivery plan, in order.
@@ -129,18 +158,41 @@ message GetConfigResponse {
 
 // SetConfigRequest declares the project a caller is acting for.
 message SetConfigRequest {
-  // The project name, recorded for the entries the caller then sends.
-  //
-  // It is recorded rather than applied because routes are the
-  // deployment's: a caller may say which project it is working for, and
-  // a route that matches on a project decides where that goes.
+  // The project the caller is acting for, and the workspace the fanout
+  // below is scoped to.
   string workspace = 1;
+  // The minimum severity an entry from this workspace must reach to be
+  // routed at all. Left unspecified, the deployment's own minimum applies.
+  LogLevel level = 2;
+  // The sinks for this workspace's entries, in the order they are declared.
+  //
+  // A backend the deployment does not have is refused, so a caller cannot
+  // route to a sink that was never part of this installation.
+  repeated LogHandler handlers = 3;
+  // The delivery plan for this workspace's entries, in order. Every route
+  // that matches contributes, as it does for the deployment's own.
+  repeated LogRoute routes = 4;
 }
 
 // SetConfigResponse confirms the project a caller is acting for.
 message SetConfigResponse {
   // The project recorded, which is what later entries are tagged with.
   string workspace = 1;
+  // The fanout now in effect for this project, which is the one supplied
+  // here when there was one and the project's own otherwise.
+  //
+  // It is reported rather than assumed, so a caller can see where its
+  // entries will go instead of finding out from a log it cannot read.
+  LogLevel level = 2;
+  // The sinks in effect for this project.
+  repeated LogHandler handlers = 3;
+  // The delivery plan in effect for this project.
+  repeated LogRoute routes = 4;
+  // Where that fanout came from.
+  FanoutSource source = 5;
+  // Whether this call supplied a fanout or only named the project, so a
+  // caller that sent an empty configuration is not left thinking it did.
+  bool configured = 6;
 }
 
 // LogRequest is one entry.

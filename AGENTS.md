@@ -124,7 +124,18 @@ Read these before making architectural changes:
     root `build` skips a subsystem without a `cmd/` directory. See
     `docs/decisions/0012-logging.md`.
 
-15. **A configuration file is refused, not guessed at.** An unknown key, a
+15. **A client's logging configuration is scoped to its own workspace, and
+    the scope is enforced rather than documented.** `SetConfig` on the logger
+    subsystem may state a fanout for the caller's own entries, and the router
+    is looked up **by workspace** so another workspace's entry reaches the
+    deployment's own routes. A request with no workspace is refused, because an
+    unscoped configuration would be a deployment-wide one. A caller may only
+    name a backend the installation already has. What a workspace name does not
+    establish is identity: two callers asserting the same workspace share its
+    configuration, so the boundary is *entries carrying this workspace* and not
+    *entries from this process*. Say so rather than leaving it to be found.
+
+16. **A configuration file is refused, not guessed at.** An unknown key, a
     misspelled provider, a misspelled level, a bare number where text belongs and
     a route that sends nowhere are all errors naming what was wrong and what is
     accepted. Each of them is otherwise a fanout that is quietly not the one that

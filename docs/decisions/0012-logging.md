@@ -175,23 +175,44 @@ decided apart:
 A line saying `workspace: acme` is a fact about the entry. A line saying
 `workspace: /home/someone/src/acme` is a fact about the machine.
 
-### The fanout is the deployment's, and it is not settable over RPC
+### The deployment's fanout is the file's, and a caller may configure only its own
 
-The fanout lives in the configuration file, which ADR-0011 established as the deployment's
-description. A project's file is found by walking up from a directory, so a project states
-its own handlers and routes without a machine-wide file having to know the project exists.
-The section is opaque to `pkg/config`: that package finds the file, refuses a key nobody
-understands at the top level and hands the section over, and `pkg/log` reads it and refuses a
-key *it* does not. A document validated twice is validated by whichever reader was stricter.
+The deployment's fanout lives in the configuration file, which ADR-0011 established as the
+deployment's description. A project's file is found by walking up from a directory, so a
+project states its own handlers and routes without a machine-wide file having to know the
+project exists. The section is opaque to `pkg/config`: that package finds the file, refuses a
+key nobody understands at the top level and hands the section over, and `pkg/log` reads it and
+refuses a key *it* does not. A document validated twice is validated by whichever reader was
+stricter.
 
-`SetConfig` on the logger subsystem **records the project a caller is acting for**. It does
-not change where entries go. A caller that could widen the fanout by RPC would be a caller
-that could send anything anywhere, and the routes are the deployment's rather than the
-caller's.
+A caller may also configure a fanout, over `SetConfig`, and it is scoped to the caller's own
+workspace. The scope is the entire safety property of the feature, so it is enforced rather
+than documented: the router is looked up **by workspace**, so another workspace's entry finds
+nothing and reaches the deployment's own routes. A request with no workspace is refused,
+because an unscoped configuration would be a deployment-wide one, and there is deliberately no
+request that changes the deployment's fanout. A caller may only name a backend the
+installation already has, so the service cannot be used to reach something that was never part
+of this deployment.
+
+A caller's configuration replaces any previous one for that workspace rather than adding to
+it. A fanout is a whole plan, so a caller that retunes its logging and then finds entries still
+going to a sink it has stopped asking for has no way to find out.
 
 The first draft of this record said `SetConfig` retunes a running deployment without a
-restart. That is withdrawn: it is the wrong thing to hand out over a network, and the reason
-it was tempting is that it is convenient, which is not a reason.
+restart, and a later revision withdrew the capability entirely. Both were wrong in the same
+way: they treated "the fanout" as one thing. There are three — the deployment's, a project's
+and a caller's — and the question is not whether a client may configure logging but *whose*.
+One deployment's fanout is the operator's to decide; a client's own is the client's.
+
+What a workspace name does **not** establish is identity. A caller claiming a workspace is
+asserting which project it is serving, and another caller asserting the same workspace shares
+its configuration. That is the same trust the workspace attribute already requires for
+tagging, and it is worth stating plainly rather than leaving to be discovered: the boundary is
+"entries carrying this workspace", not "entries from this process".
+
+`GetConfig` and `SetConfig` both report `FANOUT_SOURCE_*`, so a caller entitled to know that
+its own configuration is in force — rather than its project's file, or the deployment's — is
+told.
 
 ### Configuration is data, and one reader builds it
 
