@@ -129,6 +129,17 @@ func Distill(template Template, client Client, options DistillOptions) (Entry, e
 		body = joinBody(body, appended)
 	}
 
+	// A manifest that does not include the skill's own document is not a manifest of a
+	// skill, and the specification requires the set to be complete. Refusing here rather
+	// than adding the missing entry is deliberate: a manifest is a *pin*, and a pin this
+	// package completed on the catalog's behalf would record a claim nobody made.
+	if _, found := findFile(template.Files, SkillFileName); !found {
+		return Entry{}, api.Errorf(api.KindInvalid,
+			"the skill %s has a manifest that does not list its own %s, and a manifest is "+
+				"complete by construction: a catalog that cannot enumerate a skill's files "+
+				"does not serve it", template.Describe(), SkillFileName)
+	}
+
 	document := servedFrontmatter(template.Frontmatter.Document, skill, capabilities)
 	content := RenderSkillMarkdown(document, body)
 	files := serveManifest(template.Files, content)

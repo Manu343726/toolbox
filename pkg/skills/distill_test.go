@@ -498,3 +498,33 @@ func TestTheAppendedPassageTellsTheModelWhatToDoInstead(t *testing.T) {
 		"working around it by guessing"),
 		"the instruction is about what the model should do, not about the missing tool alone")
 }
+
+// A manifest that does not list the skill's own document is not a manifest of a skill, and the
+// specification requires the set to be complete. It is refused rather than completed here: a
+// manifest is a pin, and a pin this package completed on a catalog's behalf would record a
+// claim nobody made.
+func TestAManifestWithoutTheSkillsOwnDocumentIsRefused(t *testing.T) {
+	template, err := skills.Parse("local", "review",
+		[]byte("---\nname: review\ndescription: Use this when reviewing.\n---\n\nBody.\n"),
+		[]skills.File{{Path: "references/check.md", Size: 1, Digest: "sha256:x"}})
+	require.NoError(t, err)
+
+	_, err = skills.Distill(template, skills.Client{Name: "claude-code"}, skills.DistillOptions{})
+	require.Error(t, err)
+	assert.Equal(t, api.KindInvalid, api.KindOf(err))
+	assert.Contains(t, err.Error(), "complete by construction")
+}
+
+// A skill with nothing but its own document is a complete skill, and saying so is what a nil
+// manifest means.
+func TestASkillWithOnlyItsOwnDocumentHasACompleteManifest(t *testing.T) {
+	template, err := skills.Parse("local", "review",
+		[]byte("---\nname: review\ndescription: Use this when reviewing.\n---\n\nBody.\n"), nil)
+	require.NoError(t, err)
+	require.Len(t, template.Files, 1)
+
+	entry, err := skills.Distill(template, skills.Client{Name: "claude-code"}, skills.DistillOptions{})
+	require.NoError(t, err)
+	require.Len(t, entry.Files, 1)
+	assert.Equal(t, skills.SkillFileName, entry.Files[0].Path)
+}

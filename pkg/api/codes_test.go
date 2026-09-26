@@ -106,3 +106,42 @@ func TestConnectErrorReportsAnUnreachableProviderAsUnavailable(t *testing.T) {
 func TestConnectErrorOfNothingIsNothing(t *testing.T) {
 	assert.NoError(t, api.ConnectError(nil))
 }
+
+// A failure that crossed ConnectRPC arrives carrying a code rather than this package's
+// classification, and a caller on the other side frequently needs the classification: a
+// gateway answering a protocol of its own has to decide which code *that* protocol wants, and
+// "there is no such skill" is NotFound inside ConnectRPC and InvalidParams inside the MCP Skills
+// extension, because there the URI is the parameter.
+func TestAFailureThatCrossedConnectRPCIsReadBackAsAKind(t *testing.T) {
+	assert.Equal(t, api.KindNotFound,
+		api.ConnectKind(api.ConnectError(api.Errorf(api.KindNotFound, "no such skill"))))
+	assert.Equal(t, api.KindInvalid,
+		api.ConnectKind(api.ConnectError(api.Errorf(api.KindInvalid, "a URI naming nothing"))))
+	assert.Equal(t, api.KindUnavailable,
+		api.ConnectKind(api.ConnectError(api.Errorf(api.KindUnavailable, "the catalog is down"))))
+
+	// A classification this process set wins over anything the transport said, because it is
+	// more specific than the code it would be mapped to.
+	precise := &api.Error{Kind: api.KindNotFound, Message: "no such catalog"}
+	assert.Equal(t, api.KindNotFound, api.ConnectKind(precise))
+
+	// A failure nobody classified is internal, and the mapping does not invent one to fill
+	// the gap.
+	assert.Equal(t, api.KindInternal, api.ConnectKind(errors.New("plain")))
+
+	// A peer that ended the call is named rather than folded into internal, because a caller
+	// that treats a cancelled call as a server fault reports a fault that did not happen. The
+	// cause is a plain error rather than a context one, so that KindOf — which maps a context
+	// that ended to unavailable, as it has always done — does not answer first.
+	for _, code := range []connect.Code{connect.CodeCanceled, connect.CodeDeadlineExceeded} {
+		assert.Empty(t, api.ConnectKind(connect.NewError(code, errors.New("the peer ended the call"))),
+			"code %d is the peer stopping, not a failure of the operation", code)
+	}
+
+	// A locally classified failure still wins, because ConnectError wraps it: a kind this
+	// process set is more specific than the code it maps to.
+	assert.Equal(t, api.KindNotFound,
+		api.ConnectKind(api.ConnectError(api.Errorf(api.KindNotFound, "no such skill"))))
+
+	assert.Empty(t, api.ConnectKind(nil), "a nil failure is not a failure to classify")
+}

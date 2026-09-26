@@ -104,6 +104,11 @@ type Options struct {
 	// describe a contract rather than provide a capability. It is false by default,
 	// because a client that already knows the contract has no use for it.
 	IncludeReflection bool
+	// Skills serves the MCP Skills extension from this gateway. Nil, the default,
+	// declares no extension: a server that declared one it did not implement would be
+	// making a claim it cannot keep, and a client reading declarations the
+	// specification-correct way would look for methods that answer "not found".
+	Skills SkillsSource
 }
 
 // Feature is one reflected RPC method that can be exposed as an MCP tool.
@@ -164,6 +169,10 @@ type Server struct {
 	source  Source
 	options Options
 	sdk     *sdkmcp.Server
+	// skills is the source the Skills extension is served from, or nil when the
+	// deployment serves none. It is written once during construction and read only by
+	// the handlers the SDK dispatches, so it needs no lock of its own.
+	skills SkillsSource
 
 	mu      sync.RWMutex
 	entries map[string]*featureEntry
@@ -227,7 +236,10 @@ func New(ctx context.Context, source Source, options Options) (*Server, error) {
 	sortOwners(candidates)
 	namer := newToolNamer(candidates)
 
-	server := newServer(options)
+	server, err := newServer(options)
+	if err != nil {
+		return nil, err
+	}
 	toolNames := make(map[string]string)
 	for _, entry := range entries {
 		if err := server.addEntry(entry, toolNames, namer); err != nil {
@@ -315,15 +327,42 @@ type serviceOwnerProvider interface {
 // newServer creates a server with the always-on management surface. The
 // provider-neutral entries are added afterwards, so every MCP this package
 // generates behaves identically whichever description it came from.
-func newServer(options Options) *Server {
-	return &Server{
+func newServer(options Options) (*Server, error) {
+	// Capabilities are fixed when the server is created, so the extension is declared here
+	// rather than afterwards. The specification says extensions are declared in the
+	// `extensions` field of the `server/discover` response at revision 2026-07-28, and that
+	// field is built from the server's capabilities — so a declaration made later would not
+	// appear where a client looks for it.
+	capabilities := &sdkmcp.ServerCapabilities{}
+	if options.Skills != nil {
+		capabilities.AddExtension(SkillsExtension, map[string]any{
+			// The extension's own setting, and the gate on its third method.
+			"directoryRead": DirectoryRead,
+		})
+		// A skill's files are read with the standard resources/read, which the extension
+		// requires. It is declared explicitly because a deployment that has integrated
+		// catalogs but whose project has not used a skill yet would otherwise infer no
+		// resources capability and serve the extension with a method that cannot work.
+		capabilities.Resources = &sdkmcp.ResourceCapabilities{}
+	}
+	server := &Server{
 		options: options,
 		entries: make(map[string]*featureEntry),
 		sdk: sdkmcp.NewServer(
 			&sdkmcp.Implementation{Name: options.Name, Version: options.Version},
-			&sdkmcp.ServerOptions{Instructions: options.Description},
+			&sdkmcp.ServerOptions{
+				Instructions: options.Description,
+				// A non-nil value is required to declare anything at all: nil means the
+				// SDK's historical default of the logging capability alone, which is not
+				// what a gateway serves. Fields it does not set are still inferred.
+				Capabilities: capabilities,
+			},
 		),
 	}
+	if err := server.installSkills(options.Skills); err != nil {
+		return nil, err
+	}
+	return server, nil
 }
 
 // addEntry registers one feature, refusing a duplicate identifier or tool name

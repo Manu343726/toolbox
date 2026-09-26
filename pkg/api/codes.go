@@ -47,6 +47,63 @@ func ConnectCode(kind ErrorKind) connect.Code {
 	}
 }
 
+// ConnectKind reads a failure that arrived over ConnectRPC as the kind it was
+// classified as on the other side.
+//
+// It is the inverse of ConnectCode and it exists because a caller on this side of
+// a transport frequently needs the classification rather than the code: a gateway
+// answering a protocol of its own has to decide which code *that* protocol wants,
+// and a subsystem's ConnectRPC code is not necessarily the right answer to a
+// different protocol's question. "There is no such skill" is NotFound inside
+// ConnectRPC and InvalidParams inside the MCP Skills extension, because there the
+// URI is the parameter.
+//
+// A failure that carries no code is internal, which is what KindOf already says
+// about an unclassified failure; this does not invent a classification to fill the
+// gap. The codes that have no kind of their own — cancelled, and the two the SDK
+// raises about a peer — are named rather than folded into internal, because a
+// caller that treats a cancelled call as a server fault reports a fault that did
+// not happen.
+func ConnectKind(err error) ErrorKind {
+	if err == nil {
+		return ""
+	}
+	// The transport's code is read *before* KindOf, because KindOf answers "internal" for
+	// anything it does not recognise — and a failure that crossed the wire is recognised by
+	// its code even though it carries no classification. Asking KindOf first would replace a
+	// precise answer with the framework's word for "nobody classified this".
+	//
+	// A classification this process set is not lost by that: ConnectError wraps the original
+	// error, so a locally classified failure still unwraps to one and its kind is what the
+	// code was derived from in the first place.
+	var crossed *connect.Error
+	if errors.As(err, &crossed) {
+		switch crossed.Code() {
+		case connect.CodeInvalidArgument:
+			return KindInvalid
+		case connect.CodeNotFound:
+			return KindNotFound
+		case connect.CodeFailedPrecondition:
+			return KindFailedPrecondition
+		case connect.CodePermissionDenied:
+			return KindDenied
+		case connect.CodeAlreadyExists:
+			return KindAlreadyExists
+		case connect.CodeUnimplemented:
+			return KindUnsupported
+		case connect.CodeUnavailable, connect.CodeResourceExhausted:
+			return KindUnavailable
+		case connect.CodeCanceled, connect.CodeDeadlineExceeded:
+			// The peer stopped waiting. Neither is a failure of the operation, so neither
+			// is reported as one.
+			return ""
+		default:
+			return KindInternal
+		}
+	}
+	return KindOf(err)
+}
+
 // ConnectError maps a failure onto a ConnectRPC error carrying the code its kind
 // calls for, so the classification survives the transport instead of being
 // re-derived from a message.

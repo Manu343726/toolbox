@@ -63,7 +63,12 @@ func jsonSchemaForField(field protoreflect.FieldDescriptor, parameter *docs.Para
 	schema := jsonSchemaForSingular(field, parameter, visited)
 	if field.IsMap() {
 		schema["type"] = "object"
-		schema["additionalProperties"] = jsonSchemaForValue(field.MapValue(), nil, make(map[protoreflect.FullName]bool))
+		// The same visited set, not a fresh one. A map's value type is reached by the same
+		// walk as any other field, and a fresh set here would forget every ancestor — which
+		// makes the cycle guard useless for exactly the shape that recurses through a map.
+		// `google.protobuf.Struct` is such a shape: Struct → map<string, Value> → Value →
+		// Struct, and with a fresh set at the map the walk never terminates.
+		schema["additionalProperties"] = jsonSchemaForValue(field.MapValue(), nil, visited)
 		delete(schema, "items")
 		return schema
 	}

@@ -98,7 +98,10 @@ func NewFromAPICatalog(ctx context.Context, catalog api.Catalog, invoker api.Inv
 	sortOwners(candidates)
 	namer := newToolNamer(candidates)
 
-	server := newServer(options)
+	server, err := newServer(options)
+	if err != nil {
+		return nil, err
+	}
 	toolNames := make(map[string]string)
 	for _, described := range selected {
 		for _, entry := range apiFeatures(described, byID, invoker, options.Policy, exposures, options.InitialExposure) {

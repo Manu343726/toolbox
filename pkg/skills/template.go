@@ -437,10 +437,16 @@ func ReadDirectory(catalog, name, dir string) (Template, error) {
 
 // Parse reads a skill from its SKILL.md and a manifest the caller already computed.
 //
-// A catalog that holds files it did not read from a directory — one that downloaded them,
-// or that read them out of an archive — uses this and supplies the manifest itself. The
-// split is deliberate: reading a document is this package's business, and deciding what
-// files exist is the catalog's, because only the catalog knows what its source contains.
+// A catalog that holds files it did not read from a directory — one that downloaded them, or
+// that read them out of an archive — uses this and supplies the manifest itself. The split is
+// deliberate: reading a document is this package's business, and deciding what files exist is
+// the catalog's, because only the catalog knows what its source contains.
+//
+// A nil manifest is read as "this skill is one file". That is a claim the caller can make and
+// it is a complete one: a skill with nothing but its own document has nothing else to list.
+// The alternative — treating nil as unknown and producing a manifest that omits the skill's
+// own document — would hand a caller an entry the specification forbids, so a manifest that
+// cannot be complete is refused rather than completed here.
 func Parse(catalog, name string, content []byte, manifest []File) (Template, error) {
 	document, body, err := splitFrontmatter(content)
 	if err != nil {
@@ -450,12 +456,16 @@ func Parse(catalog, name string, content []byte, manifest []File) (Template, err
 	if err != nil {
 		return Template{}, err
 	}
+	files := copyManifest(manifest)
+	if manifest == nil {
+		files = []File{NewFile(SkillFileName, content)}
+	}
 	return Template{
 		Catalog:     catalog,
 		Name:        name,
 		Frontmatter: front,
 		Body:        body,
-		Files:       copyManifest(manifest),
+		Files:       files,
 	}, nil
 }
 

@@ -204,13 +204,14 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 	}
-	bridge, err := toolboxmcp.NewFromDescriptors(cmd.Context(), descriptors, toolboxmcp.Options{
-		Name:              "toolbox",
-		Description:       "Aggregated Model Context Protocol server for Toolbox subsystems.",
-		Policy:            catalog.policy,
-		InitialExposure:   initialExposure,
-		IncludeReflection: includeReflection,
-	})
+	bridge, err := toolboxmcp.NewFromDescriptors(cmd.Context(), descriptors, withSkills(
+		cmd.Context(), h, toolboxmcp.Options{
+			Name:              "toolbox",
+			Description:       "Aggregated Model Context Protocol server for Toolbox subsystems.",
+			Policy:            catalog.policy,
+			InitialExposure:   initialExposure,
+			IncludeReflection: includeReflection,
+		}))
 	if err != nil {
 		return err
 	}
@@ -252,15 +253,17 @@ func runCatalogMCP(
 			fmt.Fprintf(cmd.ErrOrStderr(), "toolbox: %s was not registered: %s\n", entry.Subsystem, entry.Skipped)
 		}
 	}
-	bridge, err := toolboxmcp.NewFromAPICatalog(cmd.Context(), catalog.service.Catalog(), catalog.service.Invoker(), toolboxmcp.APICatalogOptions{
-		Options: toolboxmcp.Options{
-			Name:              "toolbox",
-			Description:       "Model Context Protocol server for Toolbox subsystems, built from the API catalog.",
-			Policy:            catalog.policy,
-			InitialExposure:   initialExposure,
-			IncludeReflection: includeReflection,
-		},
-	})
+	bridge, err := toolboxmcp.NewFromAPICatalog(
+		cmd.Context(), catalog.service.Catalog(), catalog.service.Invoker(),
+		toolboxmcp.APICatalogOptions{
+			Options: withSkills(cmd.Context(), h, toolboxmcp.Options{
+				Name:              "toolbox",
+				Description:       "Model Context Protocol server for Toolbox subsystems, built from the API catalog.",
+				Policy:            catalog.policy,
+				InitialExposure:   initialExposure,
+				IncludeReflection: includeReflection,
+			}),
+		})
 	if err != nil {
 		return err
 	}
@@ -493,7 +496,16 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 			}
 			return registry.New(options)
 		},
-		"skill":    func() (*subsystem.Server, error) { return skill.New(skill.Options{}) },
+		// The skills subsystem is given the project's own configuration directory, which is
+		// where the local catalog and the project's `skills:` list live. Without it the
+		// subsystem would be a working deployment offering nothing — correct for a
+		// deployment with no project, and wrong for one that has skills in its own tree.
+		"skill": func() (*subsystem.Server, error) {
+			return skill.New(skill.Options{
+				ProjectDir: projectDir(resolved),
+				Config:     skill.NewFileConfig(resolved),
+			})
+		},
 		"tool":     func() (*subsystem.Server, error) { return tool.New(tool.Options{}) },
 		"workflow": func() (*subsystem.Server, error) { return workflow.New(workflow.Options{}) },
 	}
