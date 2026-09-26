@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
+	versions "github.com/Manu343726/toolbox/pkg/version"
 	agentv1 "github.com/Manu343726/toolbox/subsystems/agent/agentv1"
 	"github.com/Manu343726/toolbox/subsystems/agent/agentv1/agentv1connect"
 	"google.golang.org/protobuf/proto"
@@ -73,7 +74,7 @@ func (s *Store) Get(id, version string) (*agentv1.AgentProfile, error) {
 	}
 	var latest *agentv1.AgentProfile
 	for _, profile := range s.profiles {
-		if profile.GetId() == id && (latest == nil || profile.GetVersion() > latest.GetVersion()) {
+		if profile.GetId() == id && (latest == nil || versions.Compare(profile.GetVersion(), latest.GetVersion()) > 0) {
 			latest = profile
 		}
 	}
@@ -93,9 +94,12 @@ func (s *Store) List(prefix string) []*agentv1.AgentProfile {
 		}
 	}
 	s.mu.RUnlock()
+	// Versions of one resource are ordered by value rather than as text, so a
+	// listing reads oldest to newest instead of putting the tenth ahead of the
+	// second. A client reading a listing is deciding which to ask for.
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].GetId() == result[j].GetId() {
-			return result[i].GetVersion() < result[j].GetVersion()
+			return versions.Compare(result[i].GetVersion(), result[j].GetVersion()) < 0
 		}
 		return result[i].GetId() < result[j].GetId()
 	})
@@ -161,7 +165,7 @@ func (h *Handler) PutAgent(_ context.Context, req *connect.Request[agentv1.PutAg
 
 // GetAgent returns one profile.
 func (h *Handler) GetAgent(_ context.Context, req *connect.Request[agentv1.GetAgentRequest]) (*connect.Response[agentv1.GetAgentResponse], error) {
-	if req == nil || req.Msg == nil || req.Msg.GetId() == "" {
+	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetId()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id is required"))
 	}
 	profile, err := h.store.Get(req.Msg.GetId(), req.Msg.GetVersion())

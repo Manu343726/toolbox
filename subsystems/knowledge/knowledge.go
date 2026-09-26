@@ -163,7 +163,7 @@ func (h *Handler) PutSource(_ context.Context, req *connect.Request[knowledgev1.
 
 // GetSource returns one source.
 func (h *Handler) GetSource(_ context.Context, req *connect.Request[knowledgev1.GetSourceRequest]) (*connect.Response[knowledgev1.GetSourceResponse], error) {
-	if req == nil || req.Msg == nil || req.Msg.GetId() == "" {
+	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetId()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id is required"))
 	}
 	source, err := h.store.Get(req.Msg.GetId())

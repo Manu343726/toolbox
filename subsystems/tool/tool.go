@@ -116,7 +116,7 @@ func (h *Handler) ListTools(_ context.Context, req *connect.Request[toolv1.ListT
 
 // InvokeTool invokes a registered tool.
 func (h *Handler) InvokeTool(ctx context.Context, req *connect.Request[toolv1.InvokeToolRequest]) (*connect.Response[toolv1.InvokeToolResponse], error) {
-	if req == nil || req.Msg == nil || req.Msg.GetName() == "" {
+	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetName()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name is required"))
 	}
 	h.mu.RLock()

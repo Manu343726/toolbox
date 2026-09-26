@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
+	versions "github.com/Manu343726/toolbox/pkg/version"
 	promptv1 "github.com/Manu343726/toolbox/subsystems/prompt/promptv1"
 	"github.com/Manu343726/toolbox/subsystems/prompt/promptv1/promptv1connect"
 	"google.golang.org/protobuf/proto"
@@ -73,7 +74,7 @@ func (s *Store) Get(id, version string) (*promptv1.PromptTemplate, error) {
 	}
 	var latest *promptv1.PromptTemplate
 	for _, value := range s.prompts {
-		if value.GetId() == id && (latest == nil || value.GetVersion() > latest.GetVersion()) {
+		if value.GetId() == id && (latest == nil || versions.Compare(value.GetVersion(), latest.GetVersion()) > 0) {
 			latest = value
 		}
 	}
@@ -93,9 +94,12 @@ func (s *Store) List(prefix string) []*promptv1.PromptTemplate {
 		}
 	}
 	s.mu.RUnlock()
+	// Versions of one resource are ordered by value rather than as text, so a
+	// listing reads oldest to newest instead of putting the tenth ahead of the
+	// second. A client reading a listing is deciding which to ask for.
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].GetId() == result[j].GetId() {
-			return result[i].GetVersion() < result[j].GetVersion()
+			return versions.Compare(result[i].GetVersion(), result[j].GetVersion()) < 0
 		}
 		return result[i].GetId() < result[j].GetId()
 	})
@@ -161,7 +165,7 @@ func (h *Handler) PutPrompt(_ context.Context, req *connect.Request[promptv1.Put
 
 // GetPrompt returns one prompt template.
 func (h *Handler) GetPrompt(_ context.Context, req *connect.Request[promptv1.GetPromptRequest]) (*connect.Response[promptv1.GetPromptResponse], error) {
-	if req == nil || req.Msg == nil || req.Msg.GetId() == "" {
+	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetId()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id is required"))
 	}
 	value, err := h.store.Get(req.Msg.GetId(), req.Msg.GetVersion())
@@ -182,7 +186,7 @@ func (h *Handler) ListPrompts(_ context.Context, req *connect.Request[promptv1.L
 
 // RenderPrompt renders a stored template.
 func (h *Handler) RenderPrompt(_ context.Context, req *connect.Request[promptv1.RenderPromptRequest]) (*connect.Response[promptv1.RenderPromptResponse], error) {
-	if req == nil || req.Msg == nil || req.Msg.GetId() == "" {
+	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetId()) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id is required"))
 	}
 	value, err := h.store.Get(req.Msg.GetId(), req.Msg.GetVersion())

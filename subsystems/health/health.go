@@ -4,6 +4,7 @@ package health
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
@@ -39,7 +40,7 @@ type Handler struct {
 
 // NewHandler creates a health handler.
 func NewHandler(options Options) *Handler {
-	componentName := options.ComponentName
+	componentName := strings.TrimSpace(options.ComponentName)
 	if componentName == "" {
 		componentName = Name
 	}
@@ -52,6 +53,7 @@ func NewHandler(options Options) *Handler {
 
 // New is the programmatic in-process entrypoint for the health service.
 func New(options Options) (*subsystem.Server, error) {
+	options.ComponentName = strings.TrimSpace(options.ComponentName)
 	if options.ComponentName == "" {
 		options.ComponentName = Name
 	}
@@ -77,13 +79,21 @@ func New(options Options) (*subsystem.Server, error) {
 func (h *Handler) Check(ctx context.Context, req *connect.Request[healthv1.CheckRequest]) (*connect.Response[healthv1.CheckResponse], error) {
 	component := ""
 	if req != nil && req.Msg != nil {
-		component = req.Msg.GetComponentName()
+		// The contract says an empty component name checks the server itself, and a
+		// name of only whitespace says the same thing to whoever sent it. Treating
+		// the two differently made a client that built the field from an unset
+		// variable answer not-found for a subsystem that is right there.
+		component = strings.TrimSpace(req.Msg.GetComponentName())
 	}
 	if component != "" && component != h.componentName {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("component %q is not hosted by %q", component, h.componentName))
 	}
 	if h.check != nil {
 		if err := h.check(ctx); err != nil {
+			// An unhealthy component is a successful answer about an unhealthy
+			// component, not a failed call. A probe that could not tell the two
+			// apart would report a deployment that is up and refusing work as one
+			// that is not answering at all, and the two need different responses.
 			return connect.NewResponse(&healthv1.CheckResponse{
 				Status:  healthv1.HealthStatus_HEALTH_STATUS_NOT_SERVING,
 				Message: err.Error(),
