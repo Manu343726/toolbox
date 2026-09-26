@@ -152,26 +152,21 @@ of readers anyway, and a person writing one should not have to choose between Cl
 Code's `when_to_use` and Copilot's `argument-hint`. The union is what makes "write once,
 works in the client you are in" true rather than aspirational.
 
-The union, as fields:
+The union, by **what kind of thing a feature is**. The kind is what decides how
+distillation treats it, which is why the table is organised this way rather than by
+which client contributed it.
 
-| Field | From | Notes |
-|---|---|---|
-| `name` | standard | Required. 1–64 chars, lowercase and digits with single hyphens, matching the directory |
-| `description` | standard | Required. 1–1024 chars, and the field every client selects on |
-| `license` | standard | |
-| `compatibility` | standard | |
-| `metadata` | standard | String to string |
-| `allowed-tools` | standard | **Not acted on.** See below |
-| `when_to_use` | Claude Code | Appended to the description in a listing, and counts toward its 1,536-character cap |
-| `argument-hint` | Claude Code, Copilot | Same name and sense in both |
-| `arguments` | Claude Code | Named positional arguments for substitution |
-| `disable-model-invocation` | Claude Code, Copilot | Same name and sense in both |
-| `user-invocable` | Claude Code, Copilot | Same name and sense in both |
-| `disallowed-tools` | Claude Code | Narrows the tool pool while the skill is active |
-| `model` | Claude Code | |
-| `effort` | Claude Code | |
-| `context` | Claude Code, Copilot | `fork` runs the skill in a subagent |
-| `com.github.manu343726.toolbox/enabled` | Toolbox | Whether the skill is part of the project at all |
+| Kind | Fields |
+|---|---|
+| **Identity** | `name` (standard, required, 1–64 chars, lowercase and digits with single hyphens, matching the directory), `description` (standard, required, 1–1024 chars, the field every client selects on) |
+| **Classification** | `license`, `compatibility`, `metadata` (standard) |
+| **Invocation** | `user-invocable` (Claude Code, Copilot), `disable-model-invocation` (Claude Code, Copilot), `allow_implicit_invocation` (Codex, `policy` block), `when_to_use` (Claude Code), `argument-hint` (Claude Code, Copilot), `arguments` (Claude Code), `default_prompt` (Codex, `interface`), `context` (Claude Code, Copilot) |
+| **Execution** | `model`, `effort` (Claude Code) |
+| **Permission request** | `allowed-tools` (standard) |
+| **Permission restriction** | `disallowed-tools` (Claude Code) |
+| **Requirement** | `dependencies.tools` (Codex) |
+| **Presentation** | `interface.display_name`, `interface.short_description`, `interface.icon_small`, `interface.icon_large`, `interface.brand_color` (Codex) |
+| **Toolbox** | `com.github.manu343726.toolbox/enabled` |
 
 And as files, because a skill's features are not only its frontmatter:
 
@@ -179,10 +174,40 @@ And as files, because a skill's features are not only its frontmatter:
 |---|---|---|
 | `SKILL.md` | standard | Required |
 | `references/`, `scripts/`, `assets/` | standard | Conventional; any supporting file is permitted |
-| `agents/openai.yaml` | Codex | **Not frontmatter** — a separate file. Carries `interface` display metadata, `policy.allow_implicit_invocation`, and declared tool `dependencies` |
+| `agents/openai.yaml` | Codex | **Not frontmatter** — a separate file, holding the `interface`, `policy` and `dependencies` blocks |
 
-`agents/openai.yaml` being a file rather than a field is why the manifest's completeness
-is not in tension with per-client behaviour. A template that includes one carries it for
+### A request for more authority is not a statement of need
+
+**`allowed-tools` and `dependencies.tools` are two different features and are never
+conflated**, because they are opposites in kind and the difference is a permission
+boundary:
+
+| | `allowed-tools` | `dependencies.tools` |
+|---|---|---|
+| Says | "**pre-approve** these tools for me" | "this skill **needs** a tool called X" |
+| Kind | a request for authority | a statement of need |
+| If the framework acts on it | the model's permissions widen | nothing widens; the skill either works or does not |
+| This framework | **never acts on it** | **honours it** |
+
+A skill declaring a dependency is telling the truth about what it needs to run, and in
+a Toolbox deployment that is checkable: the deployment knows which MCP tools it exposes,
+so the framework can say whether a skill's declared tool is actually there. A skill
+declaring `allowed-tools` is asking to be trusted, and one client of four grants that
+ask while three ignore it.
+
+So the taxonomy carries a rule, and the rule is about direction:
+
+- **A feature that asks for more authority is never acted on.**
+- **A feature that asks for less is carried, and can only reduce.** `disallowed-tools`
+  narrows the tool pool while a skill is active; if a client acts on it the model has
+  fewer tools, and if it does not, nothing changed. Carrying it is safe in the one
+  direction that matters, so distillation carries it.
+- **A feature that states a need is checked rather than granted.** A dependency is
+  satisfied or it is not, and telling the author which is which is more useful than
+  pretending.
+
+`agents/openai.yaml` being a file rather than a field is why manifest completeness is
+not in tension with per-client behaviour. A template that includes one carries it for
 every client; the three that do not read it ignore it, and it is listed either way.
 
 ### The distillation projection
@@ -192,15 +217,19 @@ Distillation takes the union and projects it for one client. What it does, per f
 | Feature in the template | Distilled for a client that has it | Distilled for a client that does not |
 |---|---|---|
 | `name`, `description` | Carried unchanged | Carried unchanged |
-| `argument-hint`, `user-invocable`, `disable-model-invocation`, `context` | Carried unchanged — same names, same senses | Left in place; the client ignores it |
-| `when_to_use`, `arguments`, `disallowed-tools`, `model`, `effort` | Carried unchanged | Left in place; the client ignores it |
-| `license`, `compatibility`, `metadata` | Carried unchanged | Left in place; the client ignores it |
-| `allowed-tools` | Never carried, to any client | — |
-| `agents/openai.yaml` | Carried unchanged | Left in place; the client ignores it |
+| `license`, `compatibility`, `metadata` | Carried unchanged | Left in place; ignored |
+| `user-invocable`, `disable-model-invocation`, `allow_implicit_invocation` | Carried unchanged — same names, same senses | Left in place; ignored |
+| `argument-hint`, `arguments`, `when_to_use`, `default_prompt`, `context` | Carried unchanged | Left in place; ignored |
+| `model`, `effort` | Carried unchanged | Left in place; ignored |
+| `interface.display_name`, `short_description`, `icon_small`, `icon_large`, `brand_color` | Carried unchanged | Left in place; ignored |
+| `disallowed-tools` | Carried unchanged, and honoured — it can only narrow | Left in place; ignored |
+| `dependencies.tools` | Carried unchanged, and **checked** against the deployment's exposed tools | Carried unchanged; checked |
+| `allowed-tools` **Never carried, to any client** | **Never carried** |
+| `agents/openai.yaml` | Carried unchanged | Left in place; ignored |
 | A dependency on executing `scripts/`, when the client cannot run them | — | **Instructions appended to the body** saying how to achieve the same thing otherwise |
 | `toolbox/enabled: false` | Not served at all | Not served at all |
 
-Three things fall out of that table, and they are the design:
+Four things fall out of that table, and they are the design:
 
 - **Nothing is dropped and nothing is renamed.** Every client ignores a field it does
   not recognise, and three of the four say so in their documentation. The projection is
@@ -211,8 +240,12 @@ Three things fall out of that table, and they are the design:
   exactly as written.
 - **`allowed-tools` is the one field never carried.** One client of four treats it as a
   request to elevate its own permissions and the other three ignore it, so carrying it
-  would give the field two meanings depending on who read it. This is the concrete
-  reason, and it was a decision before it was evidence.
+  would give the field two different meanings depending on who read it. This is the
+  concrete reason, and it was a decision before it was evidence.
+- **`disallowed-tools` and `dependencies` are carried, and for opposite reasons.** One
+  narrows, so acting on it can only make a model less capable; the other states a need,
+  and acting on it costs nothing. Neither is a request, which is precisely what separates
+  them from `allowed-tools`.
 
 **A consequence worth stating:** because distillation appends, a skill's distilled body
 is a *superset* of the author's instructions, never a different skill. Two clients
@@ -702,12 +735,23 @@ own tools.
 
 Decided:
 
-- **`allowed-tools` is ignored**, and that is a decision rather than a gap. The
-  specification is explicit that a remote server populating this field is *requesting
-  elevated access on the host*, not describing its own environment — so a default of
-  "honour it" is not available. A skill naming `allowed-tools` is served, the field is
-  not acted on, and the reason is recorded here so it can be revisited deliberately
-  rather than rediscovered.
+- **A feature that asks for more authority is never acted on.** `allowed-tools` is the
+  only one, and ignoring it is a decision rather than a gap. The specification is
+  explicit that a remote server populating this field is *requesting elevated access on
+  the host*, not describing its own environment — so a default of "honour it" is not
+  available. A skill naming it is served, the field is not acted on, and the reason is
+  recorded here so it can be revisited deliberately rather than rediscovered.
+- **A feature that asks for less is carried.** `disallowed-tools` narrows the tool pool
+  while a skill is active, so acting on it can only leave a model less capable than it
+  would otherwise be. Refusing it would mean a model kept a capability the skill's
+  author asked to have taken away.
+- **A feature that states a need is checked, not granted.** `dependencies.tools` says
+  what a skill requires, which in a Toolbox deployment is verifiable: the deployment
+  knows which MCP tools it exposes. Reporting a dependency that is not there is useful
+  to the author; silently satisfying it would not be.
+- **The three are never treated as one thing.** A request for authority, a request for
+  restriction, and a statement of need are three different claims about authority, and
+  the union keeps them apart.
 
 Open:
 
