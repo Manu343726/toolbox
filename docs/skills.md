@@ -10,8 +10,10 @@ decided* are open questions, and a section that is marked as such is not yet
 implemented — this document records intent as well as fact, and the two are labelled
 separately for that reason.
 
-**Status: the specification is being agreed. Phases 3, 7 and part of 8 are open, and
-nothing is implemented.**
+**Status: every phase is decided except two details noted below, and nothing is
+implemented.** The two open items are the exact Toolbox property names beyond `enabled`,
+and whether a catalog that cannot enumerate a skill is refused or served as
+`"dynamic"`.
 
 ## The plan
 
@@ -21,12 +23,12 @@ Nine phases. Each closes before the next opens.
 |---|---|---|---|
 | 1 | **Upgrade the MCP Go SDK to v1.8.0** | **decided** | A dependency that negotiates `2026-07-28` and implements `server/discover` |
 | 2 | **The catalog model** | **decided** | A catalog role, aggregation, and fully-qualified references |
-| 3 | **The catalog RPC contract** | open | The provider contract a catalog subsystem implements |
+| 3 | **The catalog RPC contract** | **decided** | Seven methods, derived from what the design requires of a catalog |
 | 4 | **The canonical skill and distillation** | **decided** | The union of every client's features, projected per client |
-| 5 | **The aggregate contract** | **decided** | `SkillService`: list, get, read file, validate |
+| 5 | **The aggregate contract** | **decided** | `SkillService`, plus a read of which pinned skills have gone out of date |
 | 6 | **The reader: the format in a root package** | **decided** | `pkg/skills`, mounted by whichever subsystem serves a catalog |
 | 7 | **The project configuration** | **decided** | `skills:` names qualified references; `local` is implicit |
-| 8 | **Security posture** | partly decided | `allowed-tools` ignored; config writes confirmed; the rest open |
+| 8 | **Security posture** | **decided** | Authority never widened; the project's list is the permission; drift is reported |
 | 9 | **Implement** | **decided** | The feature, end to end, against the specification's requirements |
 
 ### Phase 1 — upgrade the SDK
@@ -550,9 +552,13 @@ the error says so and names the path to the repository, because the person who h
 look at it is the person who can decide what it meant. A catalog that resolved its own
 conflicts would be choosing a side in someone else's repository.
 
-**Not yet decided:** the identity a commit is made with, and whether the catalog commits
-on every modification or batches them. Both are visible facts in somebody's history,
-and neither should be a default nobody chose.
+**Every modification is its own commit.** Not batched: a change is a change, and a
+history that shows one commit per thing is a history somebody can read.
+
+**The commit identity is configured, not assumed.** It is stated in the deployment's
+configuration file, and a project may override it — because the deployment is a machine
+and the project is where the work is, and the person whose repository it is should get
+the last word on whose name is on the commit.
 
 ### Copying and moving between catalogs
 
@@ -563,6 +569,135 @@ Both are refused when the **target** cannot be written: a read-only catalog does
 accept a skill, and saying so is the point of declaring one. A `move` also needs a
 source it can remove from, which is its own condition rather than an inference from
 copying.
+
+## The catalog contract
+
+A catalog is a provider role, so it has a contract, and the contract is derived from
+what the design above says a catalog has to do. Every method here exists because
+something above needs it; nothing here is speculative.
+
+The contract is a provider contract in the same sense as `parser`, `adapter` and
+`invoker`: a subsystem implements it, the deployment registers the implementation, and
+the aggregator resolves to one by identifier. A deployment may run with no catalogs
+beyond `local` and nothing else is affected.
+
+### What the design requires of a catalog
+
+| Requirement | Comes from |
+|---|---|
+| Say whether it can be written to | `copy` and `move` are refused against a read-only target, so the refusal needs a fact to refuse on |
+| List its skills | the aggregate presents every catalog's skills as one surface |
+| Answer a query itself | `find` pushes the query down, so a large catalog is not shipped to be filtered here |
+| Return an entry with a complete manifest | the manifest is the pin, and the pin is how drift is detected |
+| Read a file, with its digest and size | a client verifies what it fetched; the pin is only as good as the digests in it |
+| Take a whole skill, and remove one | the git catalog is read-write, and `copy` and `move` are two independent operations |
+| Report its own limits | a client has to know a skill is too large before it tries |
+
+### The service
+
+```text
+service SkillCatalogService {
+  // @toolbox.side-effects read_only
+  rpc DescribeCatalog(DescribeCatalogRequest) returns (DescribeCatalogResponse);
+
+  // @toolbox.side-effects read_only
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // @toolbox.side-effects read_only
+  rpc FindSkills(FindSkillsRequest) returns (FindSkillsResponse);
+
+  // @toolbox.side-effects read_only
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+
+  // @toolbox.side-effects read_only
+  rpc ReadSkillFile(ReadSkillFileRequest) returns (ReadSkillFileResponse);
+
+  // @toolbox.side-effects create update
+  rpc PutSkill(PutSkillRequest) returns (PutSkillResponse);
+
+  // @toolbox.side-effects delete
+  rpc DeleteSkill(DeleteSkillRequest) returns (DeleteSkillResponse);
+}
+```
+
+The side effects are the framework's own vocabulary, and they are the reason a policy
+can govern this contract. Everything that reads is `read_only`; a write is `create
+update` because a catalog write is neither purely one nor the other; and a delete says
+`delete` because that is a different consequence and a deployment may reasonably want
+to allow one without the other.
+
+### The messages
+
+```text
+// CatalogInfo is what a catalog says about itself.
+message CatalogInfo {
+  // Catalog identifier, the first segment of every skill reference and URI.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // What this catalog is for.
+  string description = 3;
+  // True when this catalog accepts PutSkill and DeleteSkill. A read-only catalog
+  // refusing a write is what makes "copy and move" answerable.
+  bool writable = 4;
+  // Where the catalog keeps its skills, when that is a location a person can look at.
+  // A git catalog names its checkout; a remote one names its origin.
+  string location = 5;
+}
+
+// SkillRef identifies one skill within a catalog.
+message SkillRef {
+  // Catalog identifier.
+  string catalog = 1;
+  // Skill name, which is also its directory's name.
+  string name = 2;
+}
+
+// SkillFile is one file in a skill's manifest.
+message SkillFile {
+  // Path within the skill, slash-separated, relative to the skill's directory.
+  string path = 1;
+  // Byte length of the content.
+  int64 size = 2;
+  // SHA-256 of the raw bytes, as "sha256:{64 lowercase hex}".
+  string digest = 3;
+  // What to serve the file as.
+  string mime_type = 4;
+}
+
+// SkillEntry is a skill as a catalog holds it: the manifest, and the frontmatter
+// rendered verbatim. This is the pin, and it is what drift is detected against.
+message SkillEntry {
+  // Reference, resolving to skill://<catalog>/<name>/SKILL.md.
+  SkillRef ref = 1;
+  // Resource URI of the SKILL.md.
+  string uri = 2;
+  // The SKILL.md frontmatter, verbatim, including fields this framework has no
+  // opinion about. A host builds its registry from this alone.
+  google.protobuf.Struct frontmatter = 3;
+  // Every file of the skill, each exactly once, SKILL.md included. Complete by
+  // construction: a catalog that cannot enumerate a skill does not serve it.
+  repeated SkillFile resources = 4;
+  // The limits that applied when this entry was produced, so a client knows a
+  // skill was within them without knowing the framework's numbers.
+  int32 max_files = 5;
+  int64 max_bytes = 6;
+}
+```
+
+`ListSkills` and `FindSkills` return `SkillRef` plus the two fields a client selects
+on, rather than whole entries. A deployment with many skills would otherwise fetch
+every manifest to decide which one to load — and three of the four target clients
+already budget that initial listing, so the aggregator cannot be the thing that makes it
+expensive.
+
+`PutSkill` carries the whole skill rather than a file at a time. `copy` and `move` read
+one skill and write another, and a whole-skill put is what both of them are, as well as
+what a git-backed commit is: one change, one commit.
+
+**Not yet decided:** whether a catalog that cannot enumerate a skill is *refused* or
+served as `"dynamic"`. The specification's `"dynamic"` marker exists for content whose
+digests cannot be published, and a remote catalog that will not enumerate is that case.
 
 ## Serving skills over MCP
 
@@ -760,14 +895,29 @@ Decided:
 
 Open:
 
-- **Not yet decided:** what approval, if any, a skill load requires, and whether an
-  approval is bound to the entry's `resources` set. The specification requires that
-  binding wherever a host persists approvals, because a changed set means the content a
-  person agreed to is no longer the content being loaded.
-- **Not yet decided:** how a skill's origin is made visible to a model that receives
-  its content. A catalog prefix is not the same thing as an origin: a skill from
-  `skills.sh` is third-party content, and a project that includes one should be able to
-  see that before the skill's text reaches a model.
+- **A load asks the user nothing. The project's list is the permission.** A skill the
+  project names is a skill the project exposes, and a person who put a name in their own
+  configuration has already decided it. There is no second prompt between a project and
+  a skill, and a tool that adds one is subject to the configuration-confirmation rule
+  rather than to a separate approval of its own.
+- **A named skill is pinned, and the pin is the manifest.** The `skills:` entry records
+  the skill's name *and* the manifest of its files with their digests, which is what
+  makes a change detectable. A catalog is live — `skills.sh` publishes updates, a git
+  catalog can be pulled — so the content behind a name can change under a project that
+  never asked it to.
+- **A changed skill is marked outdated and the user is told, not blocked.** When the
+  catalog's manifest for a pinned skill no longer matches the pin, the skill is marked
+  outdated and the change reported, and the project chooses whether to pull the update
+  or stay where it is. The specification's content-bound approval is the same idea — a
+  changed set means the content someone agreed to is no longer the content in use —
+  and this is where that lands: the pin is the agreement, drift is visible, and nothing
+  is refused behind the user's back.
+- **A skill's origin is visible in the URI and in the project's list, and that is
+  enough.** The origin is the catalog, it is the first segment of every URI the skill
+  is served under, and a project exposes a non-local skill only by naming it in
+  `skills:`. The exposure *is* the record: there is nothing a model could read that the
+  URI and the configuration do not already say, so no separate mechanism is wanted or
+  needed.
 - **A change to a project's configuration file is confirmed by the user.** Settled,
   and settled as a general framework rule rather than a skills one: a person writes and
   reviews their project's configuration, so an operation that would change it asks first
