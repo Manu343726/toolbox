@@ -74,9 +74,22 @@ func RegisterProtoSource(path string, source []byte) error {
 // register its own contract is broken at build time, and a process that started anyway would
 // serve help with no descriptions and no annotations, which is exactly the failure this exists
 // to remove.
+//
+// It also contributes the contract to [DefaultCatalog], which is what a subsystem falls back to
+// when nothing else gave it documentation. Registering the source without doing so would leave
+// the default catalog permanently empty — a subsystem that serves documentation would serve none,
+// and every other subsystem would default to describing nothing. Both come from the same source
+// here, so the two can no longer disagree about what a contract says.
 func RegisterEmbeddedProtoSource(path string, source []byte) {
 	if err := RegisterProtoSource(path, source); err != nil {
 		panic(err)
+	}
+	compiledFile, err := compileSource(path)
+	if err != nil {
+		panic(err)
+	}
+	if err := defaultCatalog.AddFile(compiledFile); err != nil {
+		panic(fmt.Errorf("the contract in %s cannot be documented: %w", path, err))
 	}
 }
 

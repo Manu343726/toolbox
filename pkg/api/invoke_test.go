@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
 	apiv1 "github.com/Manu343726/toolbox/pkg/api/apiv1"
+	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -155,4 +156,27 @@ func TestServeInvokeRefusesAnAbsentInvoker(t *testing.T) {
 	_, err := api.ServeInvoke(context.Background(), nil, connect.NewRequest(anInvokeRequest(t)))
 	require.Error(t, err)
 	assert.Equal(t, api.KindUnsupported, api.KindOf(err))
+}
+
+// Every subsystem links contracts; every one of them is registered from init by a
+// docs_embed.go. A registration that reached only the proto-source tunnel and not
+// the default catalog would be invisible: the process starts, help works, and
+// every contract simply has no description. This is the assertion that the
+// default catalog is not empty in a process that links the framework's own.
+func TestALinkedContractIsInTheDefaultCatalog(t *testing.T) {
+	// This binary links pkg/api's own contract, registered by its docs_embed.go,
+	// so the default catalog must describe it without any test registering it.
+	documented, err := shareddocs.DefaultCatalog().Get("toolbox.api.v1.ApiInvokerService")
+	require.NoError(t, err, "a linked contract is in the default catalog")
+	assert.NotEmpty(t, documented.Description)
+	assert.NotEmpty(t, documented.Methods)
+
+	// The prose came from the .proto, not from the generated descriptor: a
+	// description read from structure alone would be empty, and an operation with
+	// no @toolbox.side-effects line is one a policy cannot grant by naming read or
+	// write.
+	method := documented.Methods[0]
+	assert.NotEmpty(t, method.Description)
+	assert.NotEmpty(t, method.Annotations,
+		"an operation whose classification was lost cannot be authorized")
 }
