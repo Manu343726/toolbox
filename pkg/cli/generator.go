@@ -77,7 +77,7 @@ func (g *Generator) Generate(ctx context.Context, serviceNames ...string) (*cobr
 	}
 	root := &cobra.Command{
 		Use:           g.options.CommandName,
-		Short:         firstLine(g.options.Description),
+		Short:         firstSentence(g.options.Description),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
@@ -115,6 +115,7 @@ func (g *Generator) Generate(ctx context.Context, serviceNames ...string) (*cobr
 		}
 		root.AddCommand(built.methods...)
 	}
+	InstallHelpLayout(root)
 	return root, nil
 }
 
@@ -135,11 +136,12 @@ func (g *Generator) commandForSchema(schema *discovery.ServiceSchema) (*cobra.Co
 	// of this function expects: a command that holds a service's methods.
 	holder := &cobra.Command{
 		Use:   shortServiceName(schema.Name),
-		Short: firstLine(documentationDescription(schema)),
+		Short: firstSentence(documentationDescription(schema)),
 		Long:  schema.Name,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	holder.AddCommand(built.methods...)
+	InstallHelpLayout(holder)
 	return holder, nil
 }
 
@@ -212,7 +214,7 @@ func (g *Generator) commandForSchemaUnder(parentName, name string, schema *disco
 	}
 	serviceCommand := &cobra.Command{
 		Use:   serviceName,
-		Short: firstLine(description),
+		Short: firstSentence(description),
 		Long:  schema.Name,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
@@ -247,8 +249,8 @@ func (g *Generator) methodsForSchema(schema *discovery.ServiceSchema) ([]*cobra.
 		methodName := camelToKebab(method.Name)
 		methodCommand := &cobra.Command{
 			Use:   methodName,
-			Short: firstLine(methodDescription),
-			Long:  fmt.Sprintf("%s/%s\n\n%s", schema.Name, method.Name, methodDescription),
+			Short: firstSentence(methodDescription),
+			Long:  fmt.Sprintf("%s/%s\n\n%s", schema.Name, method.Name, unwrap(methodDescription)),
 		}
 		// A streaming method gets its input flags too. It cannot be invoked by this
 		// generator, and saying so is the answer — but a command that accepts nothing
@@ -258,7 +260,7 @@ func (g *Generator) methodsForSchema(schema *discovery.ServiceSchema) ([]*cobra.
 		bindings := addMessageFlags(methodCommand, method.Input, "", parameterDocs)
 		if method.ClientStreaming || method.ServerStreaming {
 			streaming := "This method streams, and the generated CLI invokes unary methods only."
-			methodCommand.Short = strings.TrimSpace(firstLine(methodDescription) + " (streaming)")
+			methodCommand.Short = strings.TrimSpace(firstSentence(methodDescription) + " (streaming)")
 			// Stated in the long help as well as the short one: a caller who ran the
 			// method's own --help is the one who needs to know before typing it, and the
 			// short form is only visible from the parent's command list.
@@ -385,7 +387,11 @@ func addMessageFlagsAt(command *cobra.Command, message protoreflect.MessageDescr
 		bindPath = append(bindPath, indexPath...)
 		bindPath = append(bindPath, field.Index())
 		kind := kindForField(field)
-		description := parameterDocs[docPrefix+string(field.Name())]
+		// The description is flattened here rather than at each use, because a flag's help is
+		// laid out in one column beside its name: a line break inherited from the source file
+		// is a ragged row, and a paragraph break in the middle of one renders as a blank line
+		// and a fresh indent, which reads as three separate flags.
+		description := flatten(parameterDocs[docPrefix+string(field.Name())])
 		if description == "" {
 			description = fieldKindString(field)
 		}
@@ -801,11 +807,4 @@ func camelToKebab(value string) string {
 		}
 	}
 	return builder.String()
-}
-
-func firstLine(value string) string {
-	if index := strings.IndexByte(value, '\n'); index >= 0 {
-		return strings.TrimSpace(value[:index])
-	}
-	return strings.TrimSpace(value)
 }

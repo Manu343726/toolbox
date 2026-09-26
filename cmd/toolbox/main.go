@@ -16,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/Manu343726/toolbox/pkg/api"
+	"github.com/Manu343726/toolbox/pkg/cli"
 	"github.com/Manu343726/toolbox/pkg/config"
 	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/Manu343726/toolbox/pkg/host"
@@ -60,6 +61,10 @@ func newRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		RunE:          runServe,
 	}
+	// The same layout the generated roots install, from the same function, so the host's
+	// `--help` and a subsystem command's `--help` are laid out by one implementation. Two
+	// copies would drift, and the drift would be invisible until somebody compared them.
+	cli.InstallHelpLayout(root)
 	// Persistent, because every subcommand resolves the same deployment: which subsystems,
 	// which policy, which core, which workspace. A local flag on the root is invisible to a
 	// subcommand, so `toolbox mcp --all` would read a flag it never had.
