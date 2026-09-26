@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -100,6 +101,56 @@ func Binaries(root string) ([]Binary, error) {
 	}
 	sort.Slice(found, func(i, j int) bool { return found[i].Path < found[j].Path })
 	return found, nil
+}
+
+// TrackedBinaries reports every file git is tracking that is a compiled artefact.
+//
+// This is the check that matters for the repository rather than for a working
+// tree: a binary in a bin/ directory is ignored and harmless, while a binary
+// git is tracking is in the history, in every clone, and in every pack. It asks
+// git which files those are rather than walking the tree, so a file that is
+// tracked and absent from the checkout — a submodule, a path excluded by
+// sparse-checkout — is reported as unreadable rather than passed over.
+//
+// The list comes from git rather than from a rule about which paths hold builds,
+// because the name of a build is the module's name and that changes with every
+// subsystem added.
+func TrackedBinaries(root string) ([]Binary, error) {
+	tracked, err := trackedFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	found := make([]Binary, 0)
+	for _, path := range tracked {
+		kind, err := identify(filepath.Join(root, path))
+		if err != nil {
+			return nil, fmt.Errorf("read the tracked file %s: %w", path, err)
+		}
+		if kind == "" {
+			continue
+		}
+		found = append(found, Binary{Path: path, Kind: kind})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].Path < found[j].Path })
+	return found, nil
+}
+
+// trackedFiles asks git which files in a tree it is tracking.
+func trackedFiles(root string) ([]string, error) {
+	// -z so a path with a space or a newline in it survives, which is why this
+	// reads NUL-separated rather than running git and splitting its output.
+	command := exec.Command("git", "-C", root, "ls-files", "-z")
+	var stdout bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &bytes.Buffer{}
+	if err := command.Run(); err != nil {
+		return nil, fmt.Errorf("ask git which files it tracks in %s: %w", root, err)
+	}
+	raw := strings.TrimSuffix(stdout.String(), "\x00")
+	if raw == "" {
+		return nil, nil
+	}
+	return strings.Split(raw, "\x00"), nil
 }
 
 // identify returns what a file's first bytes say it is, or an empty string when it

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,13 +182,56 @@ func TestTheDaemonReportsItsResolvedConfiguration(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, writeFile(t, dir, "daemon:\n  port: 1\n  launch: explicit\nmcp:\n  port: 2\n"))
 
-	_, stderr, _ := runRootIn(t, "daemon", "--config", fileIn(dir), "--component", "registry")
-	// The daemon will not bind port 1, so the command fails — but it has already reported
-	// what it resolved, and that report is what is under test.
+	// The ports here are the two this test has always used, and whether the daemon
+	// goes on to serve depends on who is running this: an unprivileged process cannot
+	// bind port 1 and the command fails, while a privileged one can and the daemon
+	// serves until interrupted. Rather than rely on either, the report is read as
+	// soon as it is written and the daemon is then asked to stop — so the test is the
+	// same assertion on a developer's machine and on a root runner in a container.
+	//
+	// The report goes to stderr through a locked buffer, because it is read from
+	// another goroutine than the one running the command.
+	reported := &lockedBuffer{}
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runRootInto(t, ctx, reported, reported, "daemon", "--config", fileIn(dir), "--component", "registry")
+	}()
+	requireEventually(t, func() bool {
+		return strings.Contains(reported.String(), "launch is")
+	}, "the daemon never reported its resolved configuration")
+	stop()
+	<-done
+
+	stderr := reported.String()
 	assert.Contains(t, stderr, "daemon at 127.0.0.1:1")
 	assert.Contains(t, stderr, "Model Context Protocol at 127.0.0.1:2")
 	assert.Contains(t, stderr, "launch is explicit")
 	assert.Contains(t, stderr, "config file", "and where each value came from")
+}
+
+// lockedBuffer collects command output for a test reading it from another goroutine.
+//
+// The bytes.Buffer the command helpers use is not safe to read while the command is
+// still writing, and the tests that need to read early are exactly the ones whose
+// command may go on to serve. A mutex is the whole of it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // The launch mode reaches the daemon as well as the client, so a daemon started by a client

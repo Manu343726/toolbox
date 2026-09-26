@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -303,12 +304,23 @@ func runRootInContext(t *testing.T, ctx context.Context, args ...string) (string
 	t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
+	err := runRootInto(t, ctx, stdout, stderr, args...)
+	return stdout.String(), stderr.String(), err
+}
+
+// runRootInto executes the real command writing to writers the test supplies.
+//
+// It is runRootInContext for a test that has to read the output before the command
+// returns, which is what a command that then serves forever requires: the report it
+// writes first is the one under test, and waiting for the process to finish would
+// wait for a daemon that never does.
+func runRootInto(t *testing.T, ctx context.Context, stdout, stderr io.Writer, args ...string) error {
+	t.Helper()
 	root := rootFor(t)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)
-	err := root.ExecuteContext(ctx)
-	return stdout.String(), stderr.String(), err
+	return root.ExecuteContext(ctx)
 }
 
 // nothingListening reports whether anything is bound to an address, which is how a test sees

@@ -296,7 +296,7 @@ GOWORK=off make -C subsystems/<name> test
 ```
 
 `make test` covers `make check-repo` as well, because it is part of `./...`, so
-these two need no separate command — but they are named here because they catch a
+these need no separate command — but they are named here because each catches a
 mistake nothing else reports:
 
 - **A Go file whose package clause does not match its directory's is never
@@ -313,9 +313,29 @@ mistake nothing else reports:
   at the repository root. A binary inside a `bin/` directory is a local build
   somebody asked for; one anywhere else is a stray, and is reported by what it is
   rather than by what it is called, so the rule does not go stale as subsystems
-  are added.
+  are added. The tracked-file half is the one that matters: a binary in a `bin/`
+  directory is ignored and harmless, while one git is tracking is in the history
+  and in every clone.
+- **A subsystem that is not in the CI matrix is never tested on its own.** The
+  matrix is a hand-written list, and a new subsystem does not appear in it by
+  itself. Nothing fails when that happens: the matrix runs, every module it names
+  passes, and the subsystem that was just added is untested. The check also
+  reports a matrix row that names no module, which is the other way the list goes
+  stale — a subsystem renamed or removed leaves a job that tests nothing and still
+  reports green.
 
-Run `make check-repo` to run either on its own.
+Run `make check-repo` to run these on their own. `REPOCHECK_ROOT=subsystems/<name>`
+narrows them to one module, which is what the CI matrix job does so that a
+subsystem's own shape is checked in the job that asserts it stands alone. The
+whole-repository checks skip themselves when narrowed, because a matrix or a
+subsystem layout is not visible from inside one module.
+
+**Tests must not depend on the privileges of the machine running them.** A
+privileged runner — a root container, a CI user — can bind port 1, so a test that
+relies on a privileged bind *failing* hangs instead of failing. Where a test needs
+a command that may go on to serve, it reads what the command reported through a
+locked buffer and cancels the context; it does not wait for a process that never
+returns.
 
 Do not weaken tests, skip tests, or replace assertions with logs to make a
 failure disappear.

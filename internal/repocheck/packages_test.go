@@ -189,29 +189,3 @@ func TestNoGoFileInThisRepositoryDeclaresAnotherPackage(t *testing.T) {
 			joinLines(reported))
 	}
 }
-
-// repositoryRoot walks up to the workspace file, so the test does not depend on
-// where in the tree it runs from.
-func repositoryRoot(t *testing.T) string {
-	t.Helper()
-	directory, err := os.Getwd()
-	require.NoError(t, err)
-	for {
-		if _, err := os.Stat(filepath.Join(directory, "go.work")); err == nil {
-			return directory
-		}
-		parent := filepath.Dir(directory)
-		if parent == directory {
-			t.Fatal("no go.work above this test, so the repository root cannot be found")
-		}
-		directory = parent
-	}
-}
-
-func joinLines(lines []string) string {
-	out := ""
-	for _, line := range lines {
-		out += "\n  - " + line
-	}
-	return out
-}

@@ -10,7 +10,7 @@ MODULE := github.com/Manu343726/toolbox
 FRAMEWORK_PROTO_DIR := pkg/api/proto
 FRAMEWORK_PROTO := $(FRAMEWORK_PROTO_DIR)/toolbox/api/v1/api.proto
 
-.PHONY: all build test test-short fmt vet clean proto proto-tools host check-tests
+.PHONY: all build test test-short fmt vet clean proto subsystems-proto proto-tools host check-tests check-repo
 
 all: build
 
@@ -22,19 +22,45 @@ proto: $(FRAMEWORK_PROTO)
 	@command -v protoc-gen-connect-go >/dev/null || (echo "run 'make proto-tools' first" >&2; exit 1)
 	protoc --proto_path=$(FRAMEWORK_PROTO_DIR) --go_out=. --go_opt=module=$(MODULE) --connect-go_out=. --connect-go_opt=module=$(MODULE) toolbox/api/v1/api.proto
 
+# Generate every subsystem's own contract.
+#
+# Not one subsystem's build can run before another's generated packages exist, and
+# every subsystem's is in a different module: each imports registryv1, so a checkout
+# that has generated only the contract being built has no code to compile. The order
+# is therefore all of generation before any of compilation, which is why this is a
+# target of its own rather than a prerequisite threaded through each subsystem's
+# Makefile.
+#
+# It is also why the CI matrix can test a subsystem on its own: that job generates
+# this module's contracts and its dependencies' first, with the workspace disabled so
+# the rest resolve to the local directories rather than to published versions.
+subsystems-proto:
+	@for subsystem in $(SUBSYSTEMS); do \
+		if grep -qE '^proto:' subsystems/$$subsystem/Makefile 2>/dev/null; then \
+			$(MAKE) -C subsystems/$$subsystem proto || exit 1; \
+		fi; \
+	done
+
 # Build each independent subsystem through its own Makefile.
-build:
+#
+# The framework's own contract is generated first, and not only for its own sake: a
+# subsystem imports the root module's generated packages, so a checkout that has
+# never run protoc cannot build any of them. The order is the whole content of this
+# target — root contract, then every subsystem, then the host that composes them —
+# and a subsystem whose build fails stops the run rather than being skipped, because
+# the copy after it is what reports a subsystem as built.
+build: proto subsystems-proto
 	@mkdir -p $(BIN_DIR)
 	@for subsystem in $(SUBSYSTEMS); do \
 		if [ -d subsystems/$$subsystem/cmd ]; then \
-			$(MAKE) -C subsystems/$$subsystem build; \
-			cp subsystems/$$subsystem/bin/$$subsystem $(BIN_DIR)/$$subsystem; \
+			$(MAKE) -C subsystems/$$subsystem build || exit 1; \
+			cp subsystems/$$subsystem/bin/$$subsystem $(BIN_DIR)/$$subsystem || exit 1; \
 		fi; \
 	done
 	@$(MAKE) -C cmd/toolbox build
 	@cp cmd/toolbox/bin/toolbox $(BIN_DIR)/toolbox
 
-host:
+host: proto subsystems-proto
 	@$(MAKE) -C cmd/toolbox build
 
 check-tests:
@@ -45,16 +71,18 @@ check-tests:
 		fi; \
 	done
 
-test: check-tests
+# A subsystem test needs the framework's own generated packages, so the root
+# contract comes first for the same reason it does in build.
+test: check-tests proto subsystems-proto
 	@for subsystem in $(SUBSYSTEMS); do \
-		$(MAKE) -C subsystems/$$subsystem test; \
+		$(MAKE) -C subsystems/$$subsystem test || exit 1; \
 	done
 	@$(MAKE) -C cmd/toolbox test
 	@go test -count=1 ./...
 
-test-short: check-tests
+test-short: check-tests proto subsystems-proto
 	@for subsystem in $(SUBSYSTEMS); do \
-		$(MAKE) -C subsystems/$$subsystem test-short; \
+		$(MAKE) -C subsystems/$$subsystem test-short || exit 1; \
 	done
 	@$(MAKE) -C cmd/toolbox test
 	@go test -short -count=1 ./...
@@ -79,7 +107,7 @@ fmt:
 	@for subsystem in $(SUBSYSTEMS); do $(MAKE) -C subsystems/$$subsystem fmt; done
 	@$(MAKE) -C cmd/toolbox fmt
 
-vet:
+vet: proto subsystems-proto
 	@for subsystem in $(SUBSYSTEMS); do $(MAKE) -C subsystems/$$subsystem vet; done
 	@$(MAKE) -C cmd/toolbox vet
 	@go vet ./...

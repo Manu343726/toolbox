@@ -167,3 +167,37 @@ func TestNoBuildOutputSitsBesideTheSourceInThisRepository(t *testing.T) {
 			joinLines(reported))
 	}
 }
+
+// A binary git is tracking is in the history, in every clone and in every pack,
+// which is the difference between a stray file and an accident. This is the check
+// that reports it, and it asks git rather than guessing from a path: the name of a
+// build is the module's name, and that changes with every subsystem added.
+func TestNoTrackedFileIsABuildOutput(t *testing.T) {
+	found, err := repocheck.TrackedBinaries(repositoryRoot(t))
+	require.NoError(t, err)
+
+	if len(found) > 0 {
+		reported := make([]string, 0, len(found))
+		for _, binary := range found {
+			reported = append(reported, binary.Error())
+		}
+		t.Errorf("git is tracking build outputs:%s", joinLines(reported))
+	}
+}
+
+// The repository's own files are the false-positive case: a check that reported one
+// of them would run on every push and be turned off.
+func TestTrackedSourceIsNotReported(t *testing.T) {
+	found, err := repocheck.TrackedBinaries(repositoryRoot(t))
+	require.NoError(t, err)
+	for _, binary := range found {
+		assert.NotContains(t, binary.Path, ".go", "a Go source file is not a build output")
+	}
+}
+
+func TestATreeGitDoesNotKnowHasNoTrackedFiles(t *testing.T) {
+	// git ls-files outside a repository is an error rather than an empty answer, and
+	// an empty answer would report "nothing tracked" for a tree nobody has checked out.
+	_, err := repocheck.TrackedBinaries(t.TempDir())
+	require.Error(t, err)
+}
