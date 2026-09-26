@@ -52,6 +52,40 @@ func (s *Service) DescribeCatalog(
 	}), nil
 }
 
+// ListCatalogs returns every catalog this provider holds.
+//
+// It is the provider's own answer rather than the aggregator's guess, because a provider is
+// not a catalog: this one holds a checkout per registered remote, and a deployment's catalogs
+// are those names rather than anything about this subsystem. A provider serving a single
+// catalog answers with that one.
+func (s *Service) ListCatalogs(
+	ctx context.Context, _ *connect.Request[skillv1.ListCatalogsRequest],
+) (*connect.Response[skillv1.ListCatalogsResponse], error) {
+	registrations := s.registry.All()
+	listed := make([]*skillv1.CatalogInfo, 0, len(registrations))
+	for _, registration := range registrations {
+		catalog, err := s.directory(registration)
+		if err != nil {
+			return nil, connectFailure(err)
+		}
+		names, err := catalog.Names()
+		if err != nil {
+			return nil, connectFailure(err)
+		}
+		listed = append(listed, &skillv1.CatalogInfo{
+			Id:   registration.ID,
+			Name: registration.ID,
+			Description: descriptionFor(registration, len(names)) +
+				" A skill in it is a directory with a SKILL.md, read the same way a project's " +
+				"own skills are read.",
+			Writable: !registration.ReadOnly,
+			Location: catalog.Location(),
+		})
+	}
+	sort.Slice(listed, func(i, j int) bool { return listed[i].GetId() < listed[j].GetId() })
+	return connect.NewResponse(&skillv1.ListCatalogsResponse{Catalogs: listed}), nil
+}
+
 // ListSkills returns every skill this catalog holds, as references.
 //
 // References and descriptions rather than whole entries, because a client decides what to load

@@ -39,6 +39,7 @@ import (
 	registryv1 "github.com/Manu343726/toolbox/subsystems/registry/registryv1"
 	registryv1connect "github.com/Manu343726/toolbox/subsystems/registry/registryv1/registryv1connect"
 	skill "github.com/Manu343726/toolbox/subsystems/skill"
+	"github.com/Manu343726/toolbox/subsystems/skillgit"
 	tool "github.com/Manu343726/toolbox/subsystems/tool"
 	workflow "github.com/Manu343726/toolbox/subsystems/workflow"
 	"github.com/spf13/cobra"
@@ -500,10 +501,25 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 		// where the local catalog and the project's `skills:` list live. Without it the
 		// subsystem would be a working deployment offering nothing — correct for a
 		// deployment with no project, and wrong for one that has skills in its own tree.
+		// The git-backed catalog provider is a deployment service, not a project's: a
+		// catalog outlives the project that first named one of them, so its storage is the
+		// deployment's own.
+		"skillgit": func() (*subsystem.Server, error) {
+			return skillgit.New(skillgit.Options{DataDir: skillgit.DefaultDataDir()})
+		},
 		"skill": func() (*subsystem.Server, error) {
+			// The aggregator resolves a qualified reference through the deployment's
+			// provider list, so a catalog an integrated provider serves is reachable by
+			// name. A deployment with no catalog providers still works: the directory is
+			// live rather than a snapshot, so it is simply empty until one is started.
+			directory, err := skillDirectory(h, providers)
+			if err != nil {
+				return nil, err
+			}
 			return skill.New(skill.Options{
 				ProjectDir: projectDir(resolved),
 				Config:     skill.NewFileConfig(resolved),
+				Directory:  directory,
 			})
 		},
 		"tool":     func() (*subsystem.Server, error) { return tool.New(tool.Options{}) },
@@ -551,6 +567,7 @@ func providerRecords(h *host.Host) []api.Provider {
 		"apigrpc":    apigrpc.Providers(endpoints["apigrpc"]),
 		"apiopenapi": apiopenapi.Providers(endpoints["apiopenapi"]),
 		"apimcp":     apimcp.Providers(endpoints["apimcp"]),
+		"skillgit":   skillgit.Providers(endpoints["skillgit"]),
 	}
 	records := make([]api.Provider, 0, 9)
 	for subsystem, provided := range claims {

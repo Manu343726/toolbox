@@ -303,9 +303,9 @@ func (s *Service) entry(registration Registration, name string) (*skillv1.SkillE
 // The head and the skill count are read from the checkout rather than from the registration,
 // because a catalog's content is whatever its checkout holds and a status that described the
 // registration alone would be describing the intention rather than the thing.
-func (s *Service) status(ctx context.Context, registration Registration) (*skillgitv1.CatalogStatus, error) {
+func (s *Service) status(ctx context.Context, registration Registration) (*skillgitv1.CheckoutStatus, error) {
 	path := filepath.Join(s.registry.DataDir(), registration.Directory)
-	status := &skillgitv1.CatalogStatus{
+	status := &skillgitv1.CheckoutStatus{
 		Id:        registration.ID,
 		Name:      registration.ID,
 		Remote:    describeRemote(registration.Remote),
@@ -337,9 +337,9 @@ func (s *Service) status(ctx context.Context, registration Registration) (*skill
 }
 
 // sortedStatuses renders every registration, ordered by identifier.
-func (s *Service) sortedStatuses(ctx context.Context) ([]*skillgitv1.CatalogStatus, error) {
+func (s *Service) sortedStatuses(ctx context.Context) ([]*skillgitv1.CheckoutStatus, error) {
 	registrations := s.registry.All()
-	statuses := make([]*skillgitv1.CatalogStatus, 0, len(registrations))
+	statuses := make([]*skillgitv1.CheckoutStatus, 0, len(registrations))
 	for _, registration := range registrations {
 		status, err := s.status(ctx, registration)
 		if err != nil {

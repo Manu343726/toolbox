@@ -15,6 +15,18 @@ import (
 	"github.com/Manu343726/toolbox/subsystems/skill"
 )
 
+// skillDirectory builds the directory the aggregator resolves a qualified reference through.
+//
+// It reads the deployment's *live* provider list rather than a snapshot, so a catalog
+// registered after this process started is a catalog a project may name — and a provider
+// subsystem that restarted on a new port is still the same provider.
+// It does no work here: the directory resolves nothing until a request arrives, which is what
+// lets it be built while the host is still starting and still be correct afterwards.
+func skillDirectory(h *host.Host, providers *host.ProviderDirectory) (skill.CatalogDirectory, error) {
+	client := core.NewClient(core.ClientOptions{Resolver: hostResolver{host: h}})
+	return skill.NewResolverDirectory(providers, client)
+}
+
 // skillsSource binds the skills service and returns what the gateway's Skills extension is
 // served from.
 //

@@ -17,15 +17,21 @@ import (
 // what to clone is not a catalog's business, and a contract that mixed the two would make every
 // provider responsible for it.
 
-// ListCatalogs returns the catalogs this deployment has registered.
-func (s *Service) ListCatalogs(
-	ctx context.Context, _ *connect.Request[skillgitv1.ListCatalogsRequest],
-) (*connect.Response[skillgitv1.ListCatalogsResponse], error) {
+// ListCheckouts returns the state of every checkout this provider holds.
+//
+// Which catalogs are *served* is the catalog contract's question, and it is answered there
+// by every provider. This one is about this provider's own storage: which commit, whether it
+// is clean, whether it can sync. Those are facts about a directory, and they are the ones a
+// person deciding whether to depend on a checkout needs and a caller of the catalog contract
+// has no way to ask for.
+func (s *Service) ListCheckouts(
+	ctx context.Context, _ *connect.Request[skillgitv1.ListCheckoutsRequest],
+) (*connect.Response[skillgitv1.ListCheckoutsResponse], error) {
 	statuses, err := s.sortedStatuses(ctx)
 	if err != nil {
 		return nil, connectFailure(err)
 	}
-	return connect.NewResponse(&skillgitv1.ListCatalogsResponse{Catalogs: statuses}), nil
+	return connect.NewResponse(&skillgitv1.ListCheckoutsResponse{Checkouts: statuses}), nil
 }
 
 // RegisterCatalog clones a remote and serves it as a catalog under a name.
@@ -145,7 +151,7 @@ func (s *Service) CreateCatalog(
 	if err != nil {
 		return nil, connectFailure(err)
 	}
-	return connect.NewResponse(&skillgitv1.CreateCatalogResponse{Catalog: status}), nil
+	return connect.NewResponse(&skillgitv1.CreateCatalogResponse{Checkout: status}), nil
 }
 
 // SyncCatalog updates a catalog from its remote.
@@ -175,7 +181,7 @@ func (s *Service) SyncCatalog(
 		return nil, connectFailure(err)
 	}
 	return connect.NewResponse(&skillgitv1.SyncCatalogResponse{
-		Catalog:      status,
+		Checkout:     status,
 		PreviousHead: before,
 		Head:         after,
 		Changed:      before != after,
@@ -220,7 +226,7 @@ func (s *Service) PushCatalog(
 		return nil, connectFailure(err)
 	}
 	return connect.NewResponse(&skillgitv1.PushCatalogResponse{
-		Catalog: status, Head: head, Pushed: true,
+		Checkout: status, Head: head, Pushed: true,
 	}), nil
 }
 
@@ -305,7 +311,7 @@ func (s *Service) registeredResponse(
 			"clients read."
 	}
 	return connect.NewResponse(&skillgitv1.RegisterCatalogResponse{
-		Catalog: status, Skills: status.GetSkills(),
+		Checkout: status, Skills: status.GetSkills(),
 	}), nil
 }
 

@@ -50,11 +50,29 @@ func ignoredSourceFiles(t *testing.T, root string) []string {
 			continue
 		}
 		path := strings.TrimSpace(strings.TrimPrefix(line, "!! "))
+		// A `bin/` directory holds build and tool output, which is the same exemption the
+		// binary check makes and for the same reason: a binary somebody asked to be built
+		// there is harmless, and so is whatever a tool wrote beside it. The directory is the
+		// signal, not the extension — a `.yml` beside a source file is configuration, and the
+		// same extension under `bin/` is a tool's output.
+		if isBuildOutputDirectory(path) {
+			continue
+		}
 		if isSourceFile(filepath.Base(path)) {
 			ignored = append(ignored, path)
 		}
 	}
 	return ignored
+}
+
+// isBuildOutputDirectory reports whether a path is inside a `bin/` directory, at any depth.
+func isBuildOutputDirectory(path string) bool {
+	for _, segment := range strings.Split(filepath.ToSlash(path), "/") {
+		if segment == "bin" {
+			return true
+		}
+	}
+	return false
 }
 
 // isSourceFile reports whether a file is source, as opposed to a build output or a generated

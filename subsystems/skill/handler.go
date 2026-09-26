@@ -85,7 +85,7 @@ func (s *Service) FindSkill(
 	}
 	only := strings.TrimSpace(request.Msg.GetCatalog())
 
-	catalogs, err := s.catalogs(ctx)
+	catalogs, err := s.integratedCatalogs(ctx)
 	if err != nil {
 		return nil, connectFailure(err)
 	}
@@ -118,17 +118,17 @@ func (s *Service) FindSkill(
 	}
 
 	for _, catalog := range catalogs {
-		if only != "" && catalog.GetId() != only {
+		if only != "" && catalog.ID() != only {
 			continue
 		}
-		client, err := s.directory.Catalog(ctx, catalog.GetId())
+		client, err := s.directory.Catalog(ctx, catalog.ID())
 		if err != nil {
 			return nil, connectFailure(err)
 		}
 		response, err := callCatalog(ctx, client, "search for "+query,
 			func(ctx context.Context) (*connect.Response[skillv1.FindSkillsResponse], error) {
 				return client.FindSkills(ctx, connect.NewRequest(&skillv1.FindSkillsRequest{
-					Catalog:  catalog.GetId(),
+					Catalog:  catalog.ID(),
 					Query:    query,
 					PageSize: request.Msg.GetPageSize(),
 				}))
@@ -137,18 +137,18 @@ func (s *Service) FindSkill(
 			return nil, connectFailure(err)
 		}
 		if !response.GetSearchable() {
-			unsearchable = append(unsearchable, catalog.GetId())
+			unsearchable = append(unsearchable, catalog.ID())
 			continue
 		}
 		for _, match := range response.GetSkills() {
-			reference := skills.Reference{Catalog: catalog.GetId(), Name: match.GetName()}
+			reference := skills.Reference{Catalog: catalog.ID(), Name: match.GetName()}
 			found = append(found, &skillv1skill.ProjectSkill{
 				Ref: &skillv1.SkillRef{
-					Catalog: catalog.GetId(), Name: match.GetName(), Description: match.GetDescription(),
+					Catalog: catalog.ID(), Name: match.GetName(), Description: match.GetDescription(),
 				},
 				Uri:         reference.URI(),
 				Description: match.GetDescription(),
-				Catalog:     catalog.GetId(),
+				Catalog:     catalog.ID(),
 			})
 		}
 	}
@@ -232,7 +232,10 @@ func (s *Service) ReadSkillFile(
 func (s *Service) ListCatalogs(
 	ctx context.Context, _ *connect.Request[skillv1skill.ListCatalogsRequest],
 ) (*connect.Response[skillv1skill.ListCatalogsResponse], error) {
-	integrated, err := s.catalogs(ctx)
+	// What each catalog says about itself is the provider's own answer, carried through rather
+	// than asked for again. Whether a catalog can be written to is the catalog's fact, and
+	// re-asking would be one fact translated twice with nothing to catch a disagreement.
+	integrated, err := s.integratedCatalogs(ctx)
 	if err != nil {
 		return nil, connectFailure(err)
 	}
@@ -246,7 +249,9 @@ func (s *Service) ListCatalogs(
 		Writable: false,
 		Location: s.local.Location(),
 	})
-	listed = append(listed, integrated...)
+	for _, catalog := range integrated {
+		listed = append(listed, catalog.Info)
+	}
 	return connect.NewResponse(&skillv1skill.ListCatalogsResponse{Catalogs: listed}), nil
 }
 
@@ -512,38 +517,6 @@ func (s *Service) pinFile() string {
 		return ""
 	}
 	return s.pins.Path()
-}
-
-func (s *Service) catalogs(ctx context.Context) ([]*skillv1.CatalogInfo, error) {
-	if s.directory == nil {
-		return nil, nil
-	}
-	providers, err := s.directory.Catalogs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	listed := make([]*skillv1.CatalogInfo, 0, len(providers))
-	for _, provider := range providers {
-		// What a catalog says about itself is asked for rather than read off the provider
-		// record, because whether a catalog can be written to is the catalog's own fact. A
-		// provider record that claimed otherwise would make a write look like it would
-		// succeed.
-		client, err := s.directory.Catalog(ctx, provider.ID)
-		if err != nil {
-			return nil, err
-		}
-		response, err := callCatalog(ctx, client, "describe itself",
-			func(ctx context.Context) (*connect.Response[skillv1.DescribeCatalogResponse], error) {
-				return client.DescribeCatalog(ctx, connect.NewRequest(&skillv1.DescribeCatalogRequest{
-					Catalog: provider.ID,
-				}))
-			})
-		if err != nil {
-			return nil, err
-		}
-		listed = append(listed, response.GetInfo())
-	}
-	return listed, nil
 }
 
 func invalidSkill(reference skills.Reference, err error) *skillv1skill.InvalidSkillRef {

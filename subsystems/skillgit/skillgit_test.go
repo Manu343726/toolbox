@@ -88,11 +88,11 @@ func TestARegistrationOutlivesTheProcess(t *testing.T) {
 	// A second service over the same data directory, as a restart would be.
 	second, err := NewService(Options{DataDir: dataDir, Git: git})
 	require.NoError(t, err)
-	listed, err := second.ListCatalogs(t.Context(), connect.NewRequest(&skillgitv1.ListCatalogsRequest{}))
+	listed, err := second.ListCheckouts(t.Context(), connect.NewRequest(&skillgitv1.ListCheckoutsRequest{}))
 	require.NoError(t, err)
-	require.Len(t, listed.Msg.GetCatalogs(), 1)
-	assert.Equal(t, "team", listed.Msg.GetCatalogs()[0].GetId())
-	assert.Equal(t, int32(1), listed.Msg.GetCatalogs()[0].GetSkills())
+	require.Len(t, listed.Msg.GetCheckouts(), 1)
+	assert.Equal(t, "team", listed.Msg.GetCheckouts()[0].GetId())
+	assert.Equal(t, int32(1), listed.Msg.GetCheckouts()[0].GetSkills())
 }
 
 // A name means one catalog. Two checkouts of one repository are both allowed under different
@@ -161,9 +161,9 @@ func TestACatalogThisDeploymentCreatedIsWritable(t *testing.T) {
 		Seed: &skillgitv1.SkillSeed{Name: "review", Description: "Use this when reviewing."},
 	}))
 	require.NoError(t, err)
-	assert.True(t, created.Msg.GetCatalog().GetReadOnly() == false,
+	assert.True(t, created.Msg.GetCheckout().GetReadOnly() == false,
 		"a catalog created here is one this deployment owns")
-	assert.False(t, created.Msg.GetCatalog().GetSyncable(),
+	assert.False(t, created.Msg.GetCheckout().GetSyncable(),
 		"and it has no remote, so it is served from this machine's copy")
 
 	described, err := provider.DescribeCatalog(t.Context(),
@@ -181,8 +181,8 @@ func TestCreatingACatalogNeedsNoAccount(t *testing.T) {
 		Seed: &skillgitv1.SkillSeed{Name: "review", Description: "Use this when reviewing."},
 	}))
 	require.NoError(t, err)
-	assert.Empty(t, created.Msg.GetCatalog().GetRemote())
-	assert.False(t, created.Msg.GetCatalog().GetSyncable())
+	assert.Empty(t, created.Msg.GetCheckout().GetRemote())
+	assert.False(t, created.Msg.GetCheckout().GetSyncable())
 
 	// And it serves its seeded skill straight away.
 	listed, err := provider.ListSkills(t.Context(), connect.NewRequest(&skillv1.ListSkillsRequest{
@@ -578,8 +578,8 @@ func TestARepositoryWithNoRecognisableSkillsIsReportedNotFailed(t *testing.T) {
 		connect.NewRequest(&skillgitv1.RegisterCatalogRequest{Id: "empty", Remote: remote}))
 	require.NoError(t, err, "the clone succeeded and the catalog is registered")
 	assert.Equal(t, int32(0), registered.Msg.GetSkills())
-	assert.NotEmpty(t, registered.Msg.GetCatalog().GetNote())
-	assert.Contains(t, registered.Msg.GetCatalog().GetNote(), "no skills this framework can see")
+	assert.NotEmpty(t, registered.Msg.GetCheckout().GetNote())
+	assert.Contains(t, registered.Msg.GetCheckout().GetNote(), "no skills this framework can see")
 }
 
 // A remote may carry a token in its URL, and a catalog's location is shown to a person
@@ -647,7 +647,7 @@ func TestASyncBringsInWhatTheRemoteHas(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	assert.True(t, synced.Msg.GetChanged())
-	assert.Equal(t, int32(2), synced.Msg.GetCatalog().GetSkills())
+	assert.Equal(t, int32(2), synced.Msg.GetCheckout().GetSkills())
 
 	listed, err := provider.ListSkills(t.Context(), connect.NewRequest(&skillv1.ListSkillsRequest{
 		Catalog: "team",

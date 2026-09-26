@@ -19,8 +19,16 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/skillgit/skillgitv
 // removes a checkout, which is the only operation here that destroys anything.
 service SkillGitService {
   // @toolbox.side-effects read_only
-  // ListCatalogs returns the catalogs this deployment has registered.
-  rpc ListCatalogs(ListCatalogsRequest) returns (ListCatalogsResponse);
+  // ListCheckouts returns the state of every checkout this provider holds.
+  //
+  // It is about *checkouts* rather than about catalogs, and the distinction is not
+  // cosmetic. Which catalogs are served is answered by the catalog contract, which every
+  // provider answers and which says nothing about a directory on disk. This says what this
+  // provider's own storage looks like — which commit, whether it is clean, whether it can
+  // sync — and that is a fact about a checkout rather than about a catalog as served. Two
+  // methods with the same name answering the same question in two shapes would be one fact
+  // stated twice, and a disagreement between them would be invisible.
+  rpc ListCheckouts(ListCheckoutsRequest) returns (ListCheckoutsResponse);
 
   // @toolbox.side-effects create update
   // RegisterCatalog clones a remote and serves it as a catalog under a name.
@@ -81,9 +89,9 @@ service SkillGitService {
   rpc DeleteCatalog(DeleteCatalogRequest) returns (DeleteCatalogResponse);
 }
 
-// CatalogStatus is one registered catalog, as a person deciding whether to depend on it would
-// want to see it.
-message CatalogStatus {
+// CheckoutStatus is one checkout, as a person deciding whether to depend on it would want to
+// see it.
+message CheckoutStatus {
   // The catalog identifier: the first segment of every reference and URI for a skill in it.
   string id = 1;
   // Human-readable name.
@@ -99,7 +107,8 @@ message CatalogStatus {
   string head = 5;
   // True when the checkout has changes that are not committed.
   bool dirty = 6;
-  // How many skills the checkout currently holds.
+  // How many skills the checkout currently holds, which is what tells a person whether the
+  // repository they registered publishes anything this framework can read.
   int32 skills = 7;
   // When it was registered.
   string created_at = 8;
@@ -108,7 +117,7 @@ message CatalogStatus {
   // True when the checkout has a remote to sync from. A catalog created locally does not, and
   // is served from this machine's copy.
   bool syncable = 10;
-  // What is unusual about this catalog, or empty when nothing is.
+  // What is unusual about this checkout, or empty when nothing is.
   //
   // A repository that published its skills where this framework does not look is not a
   // failure — the clone succeeded and the catalog is registered — but a person who registered
@@ -117,13 +126,13 @@ message CatalogStatus {
   string note = 11;
 }
 
-// ListCatalogsRequest asks which catalogs are registered.
-message ListCatalogsRequest {}
+// ListCheckoutsRequest asks which checkouts this provider holds.
+message ListCheckoutsRequest {}
 
-// ListCatalogsResponse is the catalogs this deployment serves.
-message ListCatalogsResponse {
-  // The catalogs, ordered by identifier.
-  repeated CatalogStatus catalogs = 1;
+// ListCheckoutsResponse is the state of this provider's checkouts.
+message ListCheckoutsResponse {
+  // The checkouts, ordered by catalog identifier.
+  repeated CheckoutStatus checkouts = 1;
 }
 
 // RegisterCatalogRequest clones a remote and serves it.
@@ -136,10 +145,10 @@ message RegisterCatalogRequest {
   bool sync = 3;
 }
 
-// RegisterCatalogResponse is the catalog that was registered.
+// RegisterCatalogResponse is the checkout that was registered.
 message RegisterCatalogResponse {
   // What was registered.
-  CatalogStatus catalog = 1;
+  CheckoutStatus checkout = 1;
   // How many skills the checkout holds, which is zero for a repository that publishes its
   // skills under none of the conventions this provider looks in.
   int32 skills = 2;
@@ -169,10 +178,10 @@ message SkillSeed {
   string body = 3;
 }
 
-// CreateCatalogResponse is the catalog that was created.
+// CreateCatalogResponse is the checkout that was created.
 message CreateCatalogResponse {
   // What was created.
-  CatalogStatus catalog = 1;
+  CheckoutStatus checkout = 1;
 }
 
 // SyncCatalogRequest updates a catalog from its remote.
@@ -183,8 +192,8 @@ message SyncCatalogRequest {
 
 // SyncCatalogResponse is what the sync did.
 message SyncCatalogResponse {
-  // The catalog after the sync.
-  CatalogStatus catalog = 1;
+  // The checkout after the sync.
+  CheckoutStatus checkout = 1;
   // The commit before and after, so a person can see that a sync actually moved anything.
   string previous_head = 2;
   string head = 3;
@@ -203,8 +212,8 @@ message PushCatalogRequest {
 
 // PushCatalogResponse is what the push did.
 message PushCatalogResponse {
-  // The catalog after the push.
-  CatalogStatus catalog = 1;
+  // The checkout after the push.
+  CheckoutStatus checkout = 1;
   // The commit that was pushed, or empty when there was nothing to push.
   string head = 2;
   // True when something was pushed.

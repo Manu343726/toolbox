@@ -255,6 +255,20 @@ func (s *Service) localEntry(reference skills.Reference) (*skillv1.SkillEntry, e
 	}, nil
 }
 
+// integratedCatalogs returns the catalogs the deployment's providers hold.
+//
+// A deployment with no catalog directory is a working deployment — one that serves its
+// project's own skills and nothing else — so the absence is an empty set rather than a
+// failure. The alternative would be to require every deployment to construct an empty
+// directory, and a deployment that had to be told "you have no catalogs" in order to have
+// none would eventually get one by accident.
+func (s *Service) integratedCatalogs(ctx context.Context) ([]Catalog, error) {
+	if s.directory == nil {
+		return nil, nil
+	}
+	return s.directory.Catalogs(ctx)
+}
+
 // catalog resolves a catalog by identifier and returns a client for it.
 func (s *Service) catalog(ctx context.Context, id string) (CatalogClient, error) {
 	if s.directory == nil {

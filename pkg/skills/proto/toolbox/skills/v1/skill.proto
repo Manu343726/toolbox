@@ -32,6 +32,20 @@ service SkillCatalogService {
   rpc DescribeCatalog(DescribeCatalogRequest) returns (DescribeCatalogResponse);
 
   // @toolbox.side-effects read_only
+  // ListCatalogs returns every catalog this provider holds, ordered by identifier.
+  //
+  // It exists because a provider is not a catalog. A provider that serves one catalog — a
+  // directory, a single repository — answers with that one. A provider that serves many, as
+  // a git-backed host does with one checkout per registered remote, answers with all of them,
+  // and the aggregator learns which is which from this rather than from assuming that a
+  // provider's own identifier is a catalog's name.
+  //
+  // Without it, a deployment with one provider holding several catalogs could resolve a
+  // reference to at most one of them, and the rest would be invisible: a project's `skills:`
+  // list would name a catalog the aggregator had no way to learn exists.
+  rpc ListCatalogs(ListCatalogsRequest) returns (ListCatalogsResponse);
+
+  // @toolbox.side-effects read_only
   // ListSkills returns every skill this catalog holds, as references.
   //
   // It returns a reference and the two fields a client selects on rather than whole entries,
@@ -172,6 +186,16 @@ message DescribeCatalogRequest {
 message DescribeCatalogResponse {
   // What the catalog is.
   CatalogInfo info = 1;
+}
+
+// ListCatalogsRequest asks a provider which catalogs it holds.
+message ListCatalogsRequest {}
+
+// ListCatalogsResponse is the catalogs one provider holds.
+message ListCatalogsResponse {
+  // The catalogs, ordered by identifier. A provider holding none answers with an empty list,
+  // which is a deployment with no catalogs of that kind rather than a failure.
+  repeated CatalogInfo catalogs = 1;
 }
 
 // ListSkillsRequest asks a catalog for its skills.
