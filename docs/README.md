@@ -15,8 +15,9 @@ This directory is the canonical project documentation for Toolbox.
 9. [MCP gateway](mcp.md) — generated MCP tools, introspection, exposure control, and deployment commands.
 10. [Policy](policy.md) — the document that decides which operations a deployment's agents may call.
 11. [Logging](logging.md) — the `slog` fanout, its backends, and per-project routing.
-12. [Deployment configuration](configuration.md) — the file, its keys, and what wins.
-13. [Architecture decisions](decisions/README.md) — accepted decisions and their consequences.
+12. [Skills](skills.md) — the skill format, the MCP extension that serves it, and what is still open.
+13. [Deployment configuration](configuration.md) — the file, its keys, and what wins.
+14. [Architecture decisions](decisions/README.md) — accepted decisions and their consequences.
 
 ## Documentation ownership
 
