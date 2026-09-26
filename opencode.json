@@ -30,6 +30,26 @@
           "catalog": 60000,
           "execution": 600000
         }
+      },
+      "playwright": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@playwright/mcp@0.0.82",
+          "--browser",
+          "chrome",
+          "--headless",
+          "--isolated",
+          "--output-dir",
+          "bin/playwright"
+        ],
+        "cwd": ".",
+        "timeout": {
+          "startup": 180000,
+          "catalog": 60000,
+          "execution": 600000
+        }
       }
     }
   },
