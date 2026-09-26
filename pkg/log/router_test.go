@@ -1,15 +1,16 @@
 package log_test
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Manu343726/toolbox/pkg/log"
 	"github.com/stretchr/testify/assert"
@@ -18,84 +19,140 @@ import (
 )
 
 // The engine's whole job is deciding where an entry goes, so almost every test here writes an
-// entry and asks which handlers saw it. The handler is a recording fake rather than a file,
-// because a test about routing should fail on routing and not on a path.
+// entry and asks which handlers saw it.
+//
+// The handlers are the standard library's own JSON handler over a buffer rather than a fake
+// that keeps records: a test then reads the lines a real sink would have written, so a routing
+// assertion and a formatting assertion are the same assertion, and nothing here has to be
+// kept in step with how slog renders a record.
 
-// recorder is a handler that keeps what it was given.
-type recorder struct {
-	name    string
-	mu      sync.Mutex
-	entries []log.Entry
-	err     error
-	closed  bool
+// captured is a buffer a sink writes to, safe to read while entries are being written.
+type captured struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
 }
 
-func (r *recorder) Name() string { return r.name }
-
-func (r *recorder) Handle(entry log.Entry) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.entries = append(r.entries, entry)
-	return r.err
+func (c *captured) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(p)
 }
 
-func (r *recorder) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	return nil
-}
-
-func (r *recorder) seen() []log.Entry {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]log.Entry(nil), r.entries...)
-}
-
-func (r *recorder) messages() []string {
-	entries := r.seen()
-	out := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, entry.Message)
+// lines returns what was written, one entry per line, as the key/value pairs a JSON sink
+// emitted.
+func (c *captured) lines(t *testing.T) []map[string]any {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(c.buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &decoded),
+			"a sink wrote %q, which is not a JSON entry", line)
+		out = append(out, decoded)
 	}
 	return out
 }
 
-// The recorders are keyed by provider, so three handlers of one provider collide. The test
-// above needs distinct recorders per handler name, which is what the provider below gives.
-type namedProvider struct {
-	mu       sync.Mutex
-	byOption map[string]*recorder
+// messages returns just the messages, which is what most routing assertions care about.
+func (c *captured) messages(t *testing.T) []string {
+	t.Helper()
+	lines := c.lines(t)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, fmt.Sprint(line["msg"]))
+	}
+	return out
 }
 
-func (p *namedProvider) ProviderID() string { return "recording" }
+// recording is a test provider handing out a JSON sink per declared handler name, so one
+// provider serves a fanout with several destinations and a test can still tell them apart.
+type recording struct {
+	mu     sync.Mutex
+	byName map[string]*captured
+	// brokenOn names the sinks that cannot write, so a test can break one destination of a
+	// fanout and leave the rest working.
+	brokenOn map[string]error
+}
 
-func (p *namedProvider) NewHandler(options map[string]any) (log.Handler, error) {
+func (p *recording) ProviderID() string { return "recording" }
+
+func (p *recording) NewHandler(options map[string]any) (slog.Handler, error) {
 	name, _ := options["name"].(string)
 	if name == "" {
 		name = "unnamed"
 	}
+	level := slog.LevelDebug
+	if options["level"] != nil {
+		parsed, err := log.LevelOf(options["level"])
+		if err != nil {
+			return nil, err
+		}
+		level = parsed
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.byOption == nil {
-		p.byOption = map[string]*recorder{}
+	if p.byName == nil {
+		p.byName = map[string]*captured{}
 	}
-	if existing, ok := p.byOption[name]; ok {
-		return existing, nil
+	sink, ok := p.byName[name]
+	if !ok {
+		sink = &captured{}
+		p.byName[name] = sink
 	}
-	handler := &recorder{name: name}
-	p.byOption[name] = handler
-	return handler, nil
+	inner := slog.NewJSONHandler(sink, &slog.HandlerOptions{Level: level})
+	if err, ok := p.brokenOn[name]; ok {
+		return brokenHandler{inner: inner, err: err}, nil
+	}
+	return slog.NewJSONHandler(sink, &slog.HandlerOptions{Level: level}), nil
 }
 
-// fanout builds a router whose handlers are individually addressable, which is what a test
-// about routing needs: a test that cannot tell two handlers apart cannot say where an entry
+// brokenHandler is a sink that cannot write. A logging backend failing is a real condition and
+// the only honest way to test what happens is to make one fail.
+type brokenHandler struct {
+	inner slog.Handler
+	err   error
+}
+
+func (h brokenHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h brokenHandler) Handle(ctx context.Context, record slog.Record) error {
+	return h.err
+}
+
+func (h brokenHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return brokenHandler{inner: h.inner.WithAttrs(attrs), err: h.err}
+}
+
+func (h brokenHandler) WithGroup(name string) slog.Handler {
+	return brokenHandler{inner: h.inner.WithGroup(name), err: h.err}
+}
+
+// fanout builds a router from YAML whose sinks are individually addressable, which is what a
+// test about routing needs: a test that cannot tell two sinks apart cannot say where an entry
 // went.
-func fanout(t *testing.T, configuration string) (*log.Router, map[string]*recorder) {
+func fanout(t *testing.T, configuration string) (*log.Router, map[string]*captured) {
 	t.Helper()
-	router := log.NewRouter()
-	provider := &namedProvider{}
-	require.NoError(t, router.RegisterProvider(provider))
+	registry, provider := recordingRegistry()
+	return build(t, registry, provider, configuration)
+}
+
+func recordingRegistry() (*log.Registry, *recording) {
+	provider := &recording{}
+	registry := log.NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		panic(err)
+	}
+	return registry, provider
+}
+
+func build(t *testing.T, registry *log.Registry, provider *recording, configuration string) (*log.Router, map[string]*captured) {
+	t.Helper()
 	cfg, err := log.ParseConfig(decodeFanout(t, configuration))
 	require.NoError(t, err)
 	// Each declared handler tells the provider its own name, so one provider serves them all
@@ -106,541 +163,774 @@ func fanout(t *testing.T, configuration string) (*log.Router, map[string]*record
 		}
 		cfg.Handlers[i].Options["name"] = cfg.Handlers[i].Name
 	}
-	require.NoError(t, router.Apply(cfg))
-	return router, provider.byOption
+	router, err := registry.Build(cfg)
+	require.NoError(t, err)
+	return router, provider.byName
 }
 
 func TestAnEntryReachesEveryHandlerItsRouteNames(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  first: {provider: recording, level: debug}
-  second: {provider: recording, level: debug}
-  unused: {provider: recording, level: debug}
+  audit:
+    provider: recording
+  file:
+    provider: recording
 routes:
-  - handlers: [first, second]
+  - name: everything
+    handlers: [audit, file]
 `)
-	require.Len(t, handlers, 3, "every declared handler is built, because a later route may name it")
 
-	router.Dispatch(log.Entry{Message: "one", Level: log.LevelInfo})
+	slog.New(router).Info("stored a source")
 
-	assert.Equal(t, []string{"one"}, handlers["first"].messages())
-	assert.Equal(t, []string{"one"}, handlers["second"].messages())
-	assert.Empty(t, handlers["unused"].messages(), "and a handler no route names receives nothing")
+	assert.Equal(t, []string{"stored a source"}, handlers["audit"].messages(t))
+	assert.Equal(t, []string{"stored a source"}, handlers["file"].messages(t))
 }
 
-// A handler's own level is independent of the router's, because "everything to the file, only
-// errors to the aggregator" is a normal thing to want.
 func TestEachHandlerHasItsOwnMinimumLevel(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  everything: {provider: recording, level: debug}
-  errors: {provider: recording, level: error}
+  file:
+    provider: recording
+  errors:
+    provider: recording
+    level: error
 routes:
-  - handlers: [everything, errors]
+  - name: everything to the file
+    handlers: [file]
+  - name: only problems to the operator
+    handlers: [errors]
 `)
-	router.Dispatch(log.Entry{Message: "a warning", Level: log.LevelWarn})
-	router.Dispatch(log.Entry{Message: "a failure", Level: log.LevelError})
 
-	assert.Equal(t, []string{"a warning", "a failure"}, handlers["everything"].messages())
-	assert.Equal(t, []string{"a failure"}, handlers["errors"].messages(),
-		"the handler that asked for errors got only errors")
+	logger := slog.New(router)
+	logger.Debug("connecting")
+	logger.Info("stored a source")
+	logger.Warn("cache is stale")
+	logger.Error("source is unreadable")
+
+	// The file took everything, the operator only the problem: the one router-wide level
+	// cannot say that, and the level is each sink's own Enabled.
+	assert.Equal(t, []string{
+		"connecting", "stored a source", "cache is stale", "source is unreadable",
+	}, handlers["file"].messages(t))
+	assert.Equal(t, []string{"source is unreadable"}, handlers["errors"].messages(t))
 }
 
-// Every matching route contributes, so a specific route and the default both receive an entry
-// that matches both. This is the difference between a fanout and a switch: an entry that is
-// both "acme's" and "a warning" reaches acme's handler and the general one, and a deployment
-// does not have to choose which of the two facts matters more.
 func TestEveryMatchingRouteContributes(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  project: {provider: recording, level: debug}
-  general: {provider: recording, level: debug}
+  file:
+    provider: recording
+  pager:
+    provider: recording
 routes:
-  - name: one-project
-    match: {workspace: acme}
-    handlers: [project]
-  - handlers: [general]
+  - name: everything to the file
+    handlers: [file]
+  - name: and problems to the operator
+    match:
+      level: error
+    handlers: [pager]
 `)
-	router.Dispatch(log.Entry{Message: "acme's", Level: log.LevelInfo, Workspace: "acme"})
-	router.Dispatch(log.Entry{Message: "another's", Level: log.LevelInfo, Workspace: "other"})
 
-	assert.Equal(t, []string{"acme's"}, handlers["project"].messages())
-	assert.Equal(t, []string{"acme's", "another's"}, handlers["general"].messages(),
-		"so the specific route and the default both received it, which is what makes this a fanout")
+	slog.New(router).Error("source is unreadable")
+
+	// Both routes match, so the entry goes to both. First-match-wins could not express
+	// "everything to the file and this project's problems also to the pager".
+	assert.Equal(t, []string{"source is unreadable"}, handlers["file"].messages(t))
+	assert.Equal(t, []string{"source is unreadable"}, handlers["pager"].messages(t))
 }
 
-// A route adds attributes, which is the whole mechanism for making one project's logs
-// findable among a machine's. The added attribute is on the entry that reaches the handler, not
-// only on the configuration.
 func TestARouteAddsAttributesToWhatItMatches(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  tagged: {provider: recording, level: debug}
+  aggregate:
+    provider: recording
 routes:
-  - name: tag-the-project
-    match: {workspace: acme}
-    add: {project: acme, tier: backend}
-    handlers: [tagged]
+  - name: the operator's view
+    match:
+      level: warn
+    handlers: [aggregate]
+    add:
+      team: platform
 `)
-	router.Dispatch(log.Entry{Message: "stored", Level: log.LevelInfo, Workspace: "acme"})
 
-	entries := handlers["tagged"].seen()
-	require.Len(t, entries, 1)
-	assert.Equal(t, "acme", entries[0].Attributes["project"],
-		"so an operator filtering by project finds it, whichever process wrote it")
-	assert.Equal(t, "backend", entries[0].Attributes["tier"])
+	slog.New(router).Info("stored a source")
+	slog.New(router).Warn("cache is stale")
+
+	lines := handlers["aggregate"].lines(t)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "WARN", lines[0]["level"])
+	assert.Equal(t, "platform", lines[0]["team"])
 }
 
-// A route may add the workspace itself, and that reaches the entry's own field as well as its
-// attributes — a backend that knows how to index a project should not have to dig for it.
 func TestARouteMayTagTheWorkspaceItMatched(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  tagged: {provider: recording, level: debug}
+  all:
+    provider: recording
+  acme:
+    provider: recording
 routes:
-  - match: {workspace: acme}
-    add: {workspace: labelled}
-    handlers: [tagged]
+  - name: everything
+    handlers: [all]
+  - name: one project's own file
+    match:
+      workspace: acme
+    handlers: [acme]
+    add:
+      project: acme
 `)
-	router.Dispatch(log.Entry{Message: "x", Level: log.LevelInfo, Workspace: "acme"})
 
-	entries := handlers["tagged"].seen()
-	require.Len(t, entries, 1)
-	assert.Equal(t, "labelled", entries[0].Workspace,
-		"the route relabels the entry, because that is what tagging a project means")
-	assert.Equal(t, "labelled", entries[0].Attributes[log.WorkspaceKey])
+	ctx := log.WithWorkspace(context.Background(), "acme")
+	slog.New(router).InfoContext(ctx, "stored a source")
+
+	// The tag is the point: on a shared machine this is how a project's lines are found, and
+	// it is attached by the route that matched, not by the caller knowing tags exist.
+	acme := handlers["acme"].lines(t)
+	require.Len(t, acme, 1)
+	assert.Equal(t, "acme", acme[0]["project"])
+	assert.Equal(t, "acme", acme[0]["workspace"])
+	assert.Len(t, handlers["all"].messages(t), 1)
 }
 
-// A route matches on any attribute, not only the workspace, because the interesting question
-// is rarely "which subsystem" alone.
 func TestARouteMatchesOnAnOrdinaryAttribute(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  slow: {provider: recording, level: debug}
-  general: {provider: recording, level: debug}
+  knowledge:
+    provider: recording
+  everything:
+    provider: recording
 routes:
-  - match: {component: database}
-    handlers: [slow]
-  - handlers: [general]
+  - name: one subsystem's own
+    match:
+      logger: knowledge
+    handlers: [knowledge]
+  - name: and everywhere
+    handlers: [everything]
 `)
-	router.Dispatch(log.Entry{Message: "a query", Level: log.LevelInfo,
-		Attributes: map[string]string{"component": "database"}})
-	router.Dispatch(log.Entry{Message: "a request", Level: log.LevelInfo,
-		Attributes: map[string]string{"component": "http"}})
 
-	assert.Equal(t, []string{"a query"}, handlers["slow"].messages())
-	assert.Equal(t, []string{"a query", "a request"}, handlers["general"].messages(),
-		"the query matched the specific route and the default, and both contributed")
+	slog.New(router).With("logger", "knowledge").Info("stored a source")
+	slog.New(router).With("logger", "workflow").Info("advanced a run")
+
+	assert.Equal(t, []string{"stored a source"}, handlers["knowledge"].messages(t))
+	assert.Equal(t, []string{"stored a source", "advanced a run"}, handlers["everything"].messages(t))
 }
 
-// A handler named by two routes receives the entry once, because two routes naming one
-// handler means one destination rather than two writes to it. Without this a line would be
-// duplicated every time a deployment added a route that overlapped, which is exactly the kind
-// of duplication nobody notices until a log is full of everything twice.
 func TestAHandlerNamedByTwoRoutesReceivesAnEntryOnce(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  shared: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - match: {workspace: acme}
-    handlers: [shared]
-  - handlers: [shared]
+  - name: everything
+    handlers: [file]
+  - name: and problems again
+    match:
+      level: error
+    handlers: [file]
 `)
-	router.Dispatch(log.Entry{Message: "once", Level: log.LevelInfo, Workspace: "acme"})
 
-	assert.Equal(t, []string{"once"}, handlers["shared"].messages())
+	slog.New(router).Error("source is unreadable")
+
+	// A line duplicated because two routes overlapped is a line nobody can count.
+	assert.Equal(t, []string{"source is unreadable"}, handlers["file"].messages(t))
 }
 
-// A route can state a minimum severity, so "only warnings from this project reach the
-// aggregator" needs no separate handler.
 func TestARouteMatchesOnSeverity(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  loud: {provider: recording, level: debug}
-  general: {provider: recording, level: debug}
+  problems:
+    provider: recording
 routes:
-  - match: {level: warn}
-    handlers: [loud]
-  - handlers: [general]
+  - name: warn and above
+    match:
+      level: warn
+    handlers: [problems]
 `)
-	router.Dispatch(log.Entry{Message: "chatter", Level: log.LevelInfo})
-	router.Dispatch(log.Entry{Message: "trouble", Level: log.LevelError})
 
-	assert.Equal(t, []string{"trouble"}, handlers["loud"].messages())
-	assert.Equal(t, []string{"chatter", "trouble"}, handlers["general"].messages(),
-		"and the error reached the general handler too, which first-match-wins could not express")
+	logger := slog.New(router)
+	logger.Debug("connecting")
+	logger.Info("stored a source")
+	logger.Warn("cache is stale")
+	logger.Error("source is unreadable")
+
+	assert.Equal(t, []string{"cache is stale", "source is unreadable"}, handlers["problems"].messages(t))
 }
 
-// The router's own level is the cheapest way to turn a deployment's logging up without editing
-// every handler.
 func TestTheRouterLevelAppliesBeforeAnyRoute(t *testing.T) {
 	router, handlers := fanout(t, `
 level: warn
 handlers:
-  everything: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - handlers: [everything]
+  - name: everything
+    handlers: [file]
 `)
-	router.Dispatch(log.Entry{Message: "chatter", Level: log.LevelInfo})
-	router.Dispatch(log.Entry{Message: "trouble", Level: log.LevelError})
 
-	assert.Equal(t, []string{"trouble"}, handlers["everything"].messages())
+	logger := slog.New(router)
+	logger.Info("stored a source")
+	logger.Warn("cache is stale")
+
+	assert.Equal(t, []string{"cache is stale"}, handlers["file"].messages(t))
 }
 
-// A handler that cannot write is counted and does not fail the caller. Logging that can break
-// the thing it is describing is worse than logging that loses lines.
 func TestAFailingHandlerDoesNotFailTheCaller(t *testing.T) {
-	router := log.NewRouter()
-	broken := &recorder{name: "broken", err: errors.New("the disk is full")}
-	require.NoError(t, router.RegisterProvider(staticProvider{handler: broken}))
-
-	require.NoError(t, router.Apply(log.Config{
-		Level:    log.LevelDebug,
-		Handlers: []log.HandlerConfig{{Name: "broken", Provider: "static", Level: log.LevelDebug}},
-		Routes:   []log.Route{{Handlers: []string{"broken"}}},
-	}))
-
-	// No panic, no error, and the failure is counted so a deployment can be told.
-	router.Dispatch(log.Entry{Message: "an entry", Level: log.LevelInfo})
-	assert.Equal(t, 1, router.Failures())
-}
-
-// staticProvider always returns one handler, for the cases a test does not need to address by
-// name.
-type staticProvider struct{ handler log.Handler }
-
-func (p staticProvider) ProviderID() string                             { return "static" }
-func (p staticProvider) NewHandler(map[string]any) (log.Handler, error) { return p.handler, nil }
-
-// A configuration naming a backend the deployment does not have is refused by name, with the
-// ones it does have listed. A typo that recorded nothing would be a line nobody could explain.
-func TestAnUnknownBackendIsRefusedWithTheOnesAvailable(t *testing.T) {
-	router := log.NewRouter()
-	require.NoError(t, router.RegisterProvider(&namedProvider{}))
-
-	err := router.Apply(log.Config{
-		Handlers: []log.HandlerConfig{{Name: "x", Provider: "syslog"}},
-		Routes:   []log.Route{{Handlers: []string{"x"}}},
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "syslog", "names what was asked for")
-	assert.Contains(t, err.Error(), "recording", "and what is available")
-}
-
-// A route naming a handler no configuration declares is refused. A route naming nothing would
-// record the entry nowhere, which is the one outcome a reader cannot diagnose.
-func TestARouteNamingNoHandlerIsRefused(t *testing.T) {
-	// Composed directly rather than through the helper, because the helper requires the
-	// application to succeed and this test is about it failing.
-	plain := log.NewRouter()
-	require.NoError(t, plain.RegisterProvider(&namedProvider{}))
-	err := plain.Apply(log.Config{
-		Handlers: []log.HandlerConfig{{Name: "only", Provider: "recording"}},
-		Routes:   []log.Route{{Handlers: []string{"only", "absent"}}},
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "absent", "and it names the handler nothing declares")
-}
-
-// A configuration is applied whole or not at all. A router half way through a new fanout
-// would route some entries by the old rules and some by the new, and an entry's destination
-// would depend on when it was written.
-func TestAConfigurationIsAppliedWholeOrNotAtAll(t *testing.T) {
-	router, _ := fanout(t, `
+	registry, provider := recordingRegistry()
+	provider.brokenOn = map[string]error{"broken": assert.AnError}
+	router, handlers := build(t, registry, provider, `
 level: debug
 handlers:
-  first: {provider: recording, level: debug}
+  broken:
+    provider: recording
+  file:
+    provider: recording
 routes:
-  - handlers: [first]
+  - name: everything
+    handlers: [broken, file]
 `)
-	before := router.Config()
 
-	require.Error(t, router.Apply(log.Config{
-		Handlers: []log.HandlerConfig{{Name: "second", Provider: "absent"}},
-		Routes:   []log.Route{{Handlers: []string{"second"}}},
-	}))
+	// A sink that cannot write must not be able to fail the thing it is describing: the
+	// answer to Log is whether the work happened, and the work happened.
+	logger := slog.New(router)
+	require.NotPanics(t, func() { logger.Info("stored a source") })
 
-	after := router.Config()
-	assert.Equal(t, before.Handlers, after.Handlers, "the failed application changed nothing")
-	assert.Equal(t, before.Routes, after.Routes)
+	// The failure is counted rather than swallowed silently, so a deployment whose logging is
+	// broken hears about it on standard error instead of by noticing an empty log.
+	assert.Equal(t, 1, router.Failures())
+	assert.Empty(t, handlers["broken"].messages(t))
+	assert.Equal(t, []string{"stored a source"}, handlers["file"].messages(t))
 }
 
-// Replacing a fanout releases the handlers it replaced, and only after the swap, so an entry
-// written during the change still reaches a handler that is open.
-func TestReplacingAFanoutClosesTheOldHandlers(t *testing.T) {
-	router := log.NewRouter()
-	provider := &trackedProvider{}
-	require.NoError(t, router.RegisterProvider(provider))
-	require.NoError(t, router.Apply(log.Config{
-		Handlers: []log.HandlerConfig{{Name: "first", Provider: "tracked"}},
-		Routes:   []log.Route{{Handlers: []string{"first"}}},
-	}))
-	first := provider.last()
-	require.False(t, first.isClosed(), "and it is open while it is the configured one")
+func TestAnUnknownBackendIsRefusedWithTheOnesAvailable(t *testing.T) {
+	registry := log.NewRegistry()
 
-	require.NoError(t, router.Apply(log.Config{
-		Handlers: []log.HandlerConfig{{Name: "second", Provider: "tracked"}},
-		Routes:   []log.Route{{Handlers: []string{"second"}}},
-	}))
-	assert.True(t, first.isClosed(), "so the replaced one is released")
-	assert.False(t, provider.last().isClosed(), "and the new one is open")
+	_, err := registry.Build(log.Config{
+		Level:    slog.LevelInfo,
+		Handlers: []log.HandlerConfig{{Name: "file", Provider: "rotatting"}},
+	})
+
+	require.Error(t, err)
+	// The available ones are listed, because a typo that recorded nothing would otherwise be
+	// a line nobody could explain.
+	assert.Contains(t, err.Error(), `no logging provider for "rotatting"`)
+	assert.Contains(t, err.Error(), "json")
+	assert.Contains(t, err.Error(), "null")
+	assert.Contains(t, err.Error(), "text")
 }
 
-// trackedProvider hands out handlers that remember whether they were closed.
-type trackedProvider struct {
-	mu      sync.Mutex
-	created []*trackedHandler
+func TestARouteNamingNoHandlerIsRefused(t *testing.T) {
+	_, err := log.NewRouter(log.RouterOptions{
+		Level:    slog.LevelInfo,
+		Handlers: map[string]slog.Handler{"file": discarding()},
+		Routes:   []log.Route{{Name: "typo", Handlers: []string{"files"}}},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"files"`)
+	assert.Contains(t, err.Error(), `the route "typo"`)
 }
 
-func (p *trackedProvider) ProviderID() string { return "tracked" }
+func TestTwoHandlersWithOneNameAreRefused(t *testing.T) {
+	registry := log.NewRegistry()
 
-func (p *trackedProvider) NewHandler(map[string]any) (log.Handler, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	handler := &trackedHandler{}
-	p.created = append(p.created, handler)
-	return handler, nil
-}
+	_, err := registry.Build(log.Config{
+		Level: slog.LevelInfo,
+		Handlers: []log.HandlerConfig{
+			{Name: "file", Provider: log.ProviderText, Options: map[string]any{}},
+			{Name: "file", Provider: log.ProviderJSON, Options: map[string]any{}},
+		},
+		Routes: []log.Route{{Handlers: []string{"file"}}},
+	})
 
-func (p *trackedProvider) last() *trackedHandler {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.created) == 0 {
-		return nil
-	}
-	return p.created[len(p.created)-1]
-}
-
-type trackedHandler struct {
-	mu     sync.Mutex
-	closed bool
+	// Two sinks with one name would make a route naming it ambiguous, and an entry going to
+	// one of them by accident is a log nobody can trust.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous")
 }
 
-func (h *trackedHandler) Name() string { return "tracked" }
-func (h *trackedHandler) Handle(log.Entry) error {
-	return nil
-}
-func (h *trackedHandler) Close() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.closed = true
-	return nil
-}
-func (h *trackedHandler) isClosed() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.closed
+func TestAConfigurationIsAppliedWholeOrNotAtAll(t *testing.T) {
+	registry, _ := recordingRegistry()
+
+	// The second handler's provider is not registered, so building must produce no router at
+	// all. A router half way through a new fanout would send some entries by the old rules
+	// and some by the new, and where a line ended up would depend on when it was written.
+	router, err := registry.Build(log.Config{
+		Level: slog.LevelInfo,
+		Handlers: []log.HandlerConfig{
+			{Name: "file", Provider: "recording"},
+			{Name: "elsewhere", Provider: "not-registered"},
+		},
+		Routes: []log.Route{{Handlers: []string{"file"}}},
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, router)
 }
 
-// Closing the router releases everything it holds, because a daemon that exits without closing
-// its log file leaves a line buffered that a reader is waiting for.
-func TestClosingTheRouterReleasesEveryHandler(t *testing.T) {
-	router := log.NewRouter()
-	provider := &trackedProvider{}
-	require.NoError(t, router.RegisterProvider(provider))
-	require.NoError(t, router.Apply(log.Config{
-		Handlers: []log.HandlerConfig{{Name: "one", Provider: "tracked"}, {Name: "two", Provider: "tracked"}},
-		Routes:   []log.Route{{Handlers: []string{"one", "two"}}},
-	}))
-	require.NoError(t, router.Close())
-	assert.True(t, provider.created[0].isClosed())
-	assert.True(t, provider.created[1].isClosed())
-}
-
-// The public Go API is slog. An entry written through a *slog.Logger reaches the fanout, with
-// its message, its attributes, and its logger name — because a deployment's logs are one
-// stream rather than one per library.
 func TestAnEntryWrittenThroughSlogReachesTheFanout(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  all: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - handlers: [all]
+  - name: everything
+    handlers: [file]
 `)
-	logger := slog.New(router.AsSlogHandler())
-	logger.With(slog.String("logger", "knowledge")).Info("stored a source", "id", "n1", "bytes", 42)
 
-	entries := handlers["all"].seen()
-	require.Len(t, entries, 1)
-	assert.Equal(t, "stored a source", entries[0].Message)
-	assert.Equal(t, "knowledge", entries[0].Attributes["logger"],
-		"the logger name is what a route matches to answer which subsystem said this")
-	assert.Equal(t, "n1", entries[0].Attributes["id"])
-	assert.Equal(t, "42", entries[0].Attributes["bytes"])
+	// The whole point of slog being the API: a caller holds a *slog.Logger and nothing here,
+	// and its entry is shaped exactly as any other slog entry is.
+	slog.New(router).Error("source is unreadable", "id", 42, "attempt", 3)
+
+	lines := handlers["file"].lines(t)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "source is unreadable", lines[0]["msg"])
+	assert.Equal(t, "ERROR", lines[0]["level"])
+	assert.Equal(t, float64(42), lines[0]["id"])
+	assert.Equal(t, float64(3), lines[0]["attempt"])
 }
 
-// A structured value is rendered rather than dropped, because dropping it loses the part of a
-// log line a caller most often wanted.
-func TestAStructuredValueIsRenderedRatherThanDropped(t *testing.T) {
+func TestAnEntryKeepsItsOwnShapeApartFromTheRoutesTags(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  all: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - handlers: [all]
+  - name: everything
+    handlers: [file]
+    add:
+      deployment: laptop
 `)
-	slog.New(router.AsSlogHandler()).Info("a group", slog.Group("request",
-		slog.String("method", "GET"), slog.Int("status", 200)))
 
-	entries := handlers["all"].seen()
-	require.Len(t, entries, 1)
-	assert.Contains(t, entries[0].Attributes["request"], "method=GET")
-	assert.Contains(t, entries[0].Attributes["request"], "status=200")
+	slog.New(router).With("subsystem", "knowledge").Info("stored a source", "id", 7)
+
+	lines := handlers["file"].lines(t)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "stored a source", lines[0]["msg"])
+	assert.Equal(t, "knowledge", lines[0]["subsystem"])
+	assert.Equal(t, float64(7), lines[0]["id"])
+	assert.Equal(t, "laptop", lines[0]["deployment"])
+	// slog renders the time itself, which is the point of using its handler: the standard
+	// library decides what a record looks like on the wire, not this package.
+	assert.NotEmpty(t, lines[0]["time"])
 }
 
-// A workspace on the context reaches the entry, so a caller deep in a call does not have to
-// thread the project through every signature to log which project it was serving.
 func TestAWorkspaceOnTheContextReachesTheEntry(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  all: {provider: recording, level: debug}
+  acme:
+    provider: recording
 routes:
-  - match: {workspace: acme}
-    handlers: [all]
+  - name: one project
+    match:
+      workspace: acme
+    handlers: [acme]
 `)
-	ctx := log.WithWorkspace(context.Background(), "acme")
-	slog.New(router.AsSlogHandler()).InfoContext(ctx, "served a request")
 
-	entries := handlers["all"].seen()
-	require.Len(t, entries, 1)
-	assert.Equal(t, "acme", entries[0].Workspace)
+	// A caller deep in a call logs which project it was serving without threading the project
+	// through every signature to do it.
+	ctx := log.WithWorkspace(context.Background(), "acme")
+	slog.New(router).InfoContext(ctx, "stored a source")
+
+	assert.Equal(t, []string{"stored a source"}, handlers["acme"].messages(t))
 }
 
-// The handler reports honestly whether an entry would be routed, so a caller does not format
-// entries that are discarded — and so the answer is about the deployment, not this handler's
-// defaults.
 func TestEnabledTellsTheTruthAboutTheDeployment(t *testing.T) {
 	router, _ := fanout(t, `
 level: warn
 handlers:
-  all: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - handlers: [all]
+  - name: everything
+    handlers: [file]
 `)
-	handler := router.AsSlogHandler()
 
-	assert.False(t, handler.Enabled(context.Background(), slog.LevelInfo),
-		"the router's level is the deployment's, and it is warn")
-	assert.True(t, handler.Enabled(context.Background(), slog.LevelError))
+	ctx := context.Background()
+	// A caller deciding whether to format an expensive attribute asks this, so a yes that
+	// then drops the entry wastes work and a no that keeps it is worse.
+	assert.False(t, router.Enabled(ctx, slog.LevelInfo))
+	assert.True(t, router.Enabled(ctx, slog.LevelWarn))
+	assert.True(t, router.Enabled(ctx, slog.LevelError))
 }
 
-// Installing makes the router the process default, so a dependency that logs through slog
-// lands in the same fanout without knowing the framework is here. The returned function puts
-// the previous default back, because a global that outlives its test changes other tests.
-func TestInstallingMakesTheRouterTheProcessDefault(t *testing.T) {
+func TestTheDefaultLoggersLogsReachTheFanout(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  all: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - handlers: [all]
+  - name: everything
+    handlers: [file]
 `)
-	before := slog.Default()
-	restore := router.Install()
-	t.Cleanup(restore)
 
-	// A caller that knows nothing about this framework, which is the whole claim: its
-	// entries land in this deployment's fanout without it knowing the framework is here.
-	slog.Info("from a dependency", "lib", "third-party")
+	// slog.SetDefault is the whole integration: a dependency the framework does not control
+	// logs through the standard library's package-level logger, and lands in this
+	// deployment's fanout, having never heard of Toolbox.
+	previous := slog.Default()
+	slog.SetDefault(slog.New(router))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	entries := handlers["all"].seen()
-	require.Len(t, entries, 1)
-	assert.Equal(t, "from a dependency", entries[0].Message)
-	assert.Equal(t, "third-party", entries[0].Attributes["lib"])
+	slog.Default().Info("a dependency said this")
+	slog.With("logger", "third-party").Info("another one")
 
-	// The previous default is put back, and it is the previous one rather than merely a
-	// different one: a global that outlives its test changes every test after it.
-	restore()
-	assert.Equal(t, before, slog.Default())
-	assert.NotEqual(t, slog.New(router.AsSlogHandler()), slog.Default())
+	lines := handlers["file"].lines(t)
+	require.Len(t, lines, 2)
+	assert.Equal(t, "a dependency said this", lines[0]["msg"])
+	assert.Equal(t, "third-party", lines[1]["logger"])
 }
 
-// A time that was not stated is stamped, so a handler never has to invent one and two entries
-// are never written with a zero time that sorts to 1970.
-func TestAnUnstampedEntryGetsTheClock(t *testing.T) {
+func TestBoundAttributesNestTheWaySlogNestsThem(t *testing.T) {
 	router, handlers := fanout(t, `
 level: debug
 handlers:
-  all: {provider: recording, level: debug}
+  file:
+    provider: recording
 routes:
-  - handlers: [all]
+  - name: everything
+    handlers: [file]
 `)
-	before := time.Now()
-	router.Dispatch(log.Entry{Message: "x", Level: log.LevelInfo})
 
-	entries := handlers["all"].seen()
-	require.Len(t, entries, 1)
-	assert.False(t, entries[0].Time.Before(before.Add(-time.Second)),
-		"the entry carries a real time")
+	// WithAttrs and WithGroup are delegated to each sink, so a slog.With nests exactly as it
+	// would with a plain JSON handler — including a group inside a group, which is the
+	// standard library's nesting and not this package's reconstruction of it.
+	slog.New(router).
+		With("subsystem", "knowledge").
+		WithGroup("source").
+		With("id", 7).
+		Info("stored a source")
+
+	lines := handlers["file"].lines(t)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "knowledge", lines[0]["subsystem"])
+	source, ok := lines[0]["source"].(map[string]any)
+	require.True(t, ok, "a group should nest as an object, got %#v", lines[0]["source"])
+	assert.Equal(t, float64(7), source["id"])
 }
 
-// The built-in providers are what a deployment has before it configures anything, and a
-// deployment must be able to log before any subsystem has started.
 func TestTheBuiltInProvidersWrite(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "toolbox.log")
+	// The two built-ins exist because a person and a collector read the output differently,
+	// and neither format is this package's to invent.
+	for _, testCase := range []struct {
+		provider string
+		contains []string
+	}{
+		{provider: log.ProviderText, contains: []string{"level=INFO", "msg=\"stored a source\"", "id=7"}},
+		{provider: log.ProviderJSON, contains: []string{`"level":"INFO"`, `"msg":"stored a source"`, `"id":7`}},
+	} {
+		t.Run(testCase.provider, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "output.log")
+			registry := log.NewRegistry()
+			router, err := registry.Build(log.Config{
+				Level: slog.LevelInfo,
+				Handlers: []log.HandlerConfig{{
+					Name:     "file",
+					Provider: testCase.provider,
+					Options:  map[string]any{"path": path},
+				}},
+				Routes: []log.Route{{Handlers: []string{"file"}}},
+			})
+			require.NoError(t, err)
 
-	router := log.NewRouter()
-	require.NoError(t, router.RegisterProvider(log.NewStderr()))
-	require.NoError(t, router.Apply(log.Config{
-		Level:    log.LevelDebug,
-		Handlers: []log.HandlerConfig{{Name: "file", Provider: "stderr", Options: map[string]any{"path": path}}},
-		Routes:   []log.Route{{Handlers: []string{"file"}}},
-	}))
+			slog.New(router).Info("stored a source", "id", 7)
 
-	fixed := time.Date(2026, 9, 26, 10, 30, 0, 0, time.UTC)
-	router.Dispatch(log.Entry{Time: fixed, Message: "a line", Level: log.LevelInfo,
-		Logger: "knowledge", Workspace: "acme",
-		Attributes: map[string]string{"id": "n1"}})
-	require.NoError(t, router.Close())
+			written, err := os.ReadFile(path)
+			require.NoError(t, err)
+			for _, want := range testCase.contains {
+				assert.Contains(t, string(written), want)
+			}
+		})
+	}
+}
 
-	written, err := os.ReadFile(path)
+func TestTheNullProviderWritesNothing(t *testing.T) {
+	registry := log.NewRegistry()
+	router, err := registry.Build(log.Config{
+		Level: slog.LevelDebug,
+		Handlers: []log.HandlerConfig{{
+			Name:     "quiet",
+			Provider: log.ProviderNull,
+		}},
+		Routes: []log.Route{{Handlers: []string{"quiet"}}},
+	})
 	require.NoError(t, err)
-	line := strings.TrimSpace(string(written))
-	assert.Contains(t, line, "2026-09-26T10:30:00.000Z", "the entry's own time, not the write's")
-	assert.Contains(t, line, "INFO")
-	assert.Contains(t, line, "knowledge")
-	assert.Contains(t, line, "a line")
-	assert.Contains(t, line, "workspace=acme")
-	assert.Contains(t, line, "id=n1")
+
+	// A configuration can name a destination and switch it off without editing the routes
+	// that reference it, which is the difference between turning one off and discovering the
+	// route pointing at it was the only reason anything was recorded.
+	logger := slog.New(router)
+	require.NotPanics(t, func() {
+		logger.Info("stored a source")
+		logger.Error("source is unreadable")
+	})
+	assert.False(t, router.Enabled(context.Background(), slog.LevelError))
 }
 
-// Attributes are sorted, so two runs of the same program produce lines a reader can diff.
-//
-// The time is fixed rather than read, because a line rendered a millisecond apart differs for
-// reasons that have nothing to do with attribute order — and a test that fails for that
-// reason is a test nobody trusts when it fails for the real one.
-func TestAttributesAreSortedSoLinesCanBeDiffed(t *testing.T) {
-	at := time.Date(2026, 9, 26, 10, 30, 0, 0, time.UTC)
-	first := log.FormatEntry(log.Entry{
-		Time: at, Level: log.LevelInfo, Message: "x",
-		Attributes: map[string]string{"zebra": "1", "alpha": "2", "middle": "3"},
-	}, nil)
-	second := log.FormatEntry(log.Entry{
-		Time: at, Level: log.LevelInfo, Message: "x",
-		Attributes: map[string]string{"alpha": "2", "middle": "3", "zebra": "1"},
-	}, nil)
-	assert.Equal(t, first, second,
-		"a line whose attribute order changed between runs is a line nobody can compare")
-	assert.Contains(t, first, "alpha=2 middle=3 zebra=1", "and the order is the sorted one")
+func TestARelativePathResolvesAgainstTheDeclaringConfigDirectory(t *testing.T) {
+	project := t.TempDir()
+	registry := log.NewRegistry()
+	registry.BaseDir = project
+
+	router, err := registry.Build(log.Config{
+		Level: slog.LevelInfo,
+		Handlers: []log.HandlerConfig{{
+			Name:     "project",
+			Provider: log.ProviderJSON,
+			Options:  map[string]any{"path": "logs/project.log"},
+		}},
+		Routes: []log.Route{{Handlers: []string{"project"}}},
+	})
+	require.NoError(t, err)
+
+	slog.New(router).Info("stored a source")
+
+	// "A file local to the project" means a path relative to the file that declared it, not
+	// to wherever the process happened to start.
+	written, err := os.ReadFile(filepath.Join(project, "logs", "project.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(written), "stored a source")
 }
 
-// decodeFanout reads the fanout a test writes as YAML, through the same reader a
-// configuration file goes through, so the parser under test is the one being exercised rather
-// than a map built to suit it.
+func TestTheSinkLevelReachesTheProvidersOwnOptions(t *testing.T) {
+	registry, provider := recordingRegistry()
+	router, handlers := build(t, registry, provider, `
+level: debug
+handlers:
+  file:
+    provider: recording
+    level: error
+    options:
+      level: warn
+routes:
+  - name: everything
+    handlers: [file]
+`)
+
+	// An option the provider's own configuration set wins over the handler's level, because
+	// an explicit per-handler option is the more specific statement.
+	logger := slog.New(router)
+	logger.Info("stored a source")
+	logger.Warn("cache is stale")
+	logger.Error("source is unreadable")
+
+	assert.Equal(t, []string{"cache is stale", "source is unreadable"}, handlers["file"].messages(t))
+}
+
+func TestConcurrentEntriesReachEveryRoute(t *testing.T) {
+	router, handlers := fanout(t, `
+level: debug
+handlers:
+  file:
+    provider: recording
+  acme:
+    provider: recording
+routes:
+  - name: everything
+    handlers: [file]
+  - name: one project
+    match:
+      workspace: acme
+    handlers: [acme]
+`)
+
+	const writers, each = 8, 25
+	var wg sync.WaitGroup
+	for writer := 0; writer < writers; writer++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			logger := slog.New(router).With("subsystem", "knowledge")
+			for i := 0; i < each; i++ {
+				logger.Info("stored a source")
+				// A bound router and the one it came from are used at once, because that is
+				// what slog.With in a long-lived component does.
+				slog.New(router.WithAttrs([]slog.Attr{slog.String("logger", "plain")})).Info("plain entry")
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Len(t, handlers["file"].messages(t), writers*each*2)
+}
+
+func TestAnUnknownSettingIsRefusedByName(t *testing.T) {
+	registry := log.NewRegistry()
+
+	_, err := registry.Build(log.Config{
+		Level: slog.LevelInfo,
+		Handlers: []log.HandlerConfig{{
+			Name:     "file",
+			Provider: log.ProviderJSON,
+			Options:  map[string]any{"rotation": "daily"},
+		}},
+		Routes: []log.Route{{Handlers: []string{"file"}}},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no setting "rotation"`)
+}
+
+func TestAParseLevelRefusesAnythingElse(t *testing.T) {
+	for _, name := range []string{"debug", "info", "warn", "warning", "error", " INFO "} {
+		_, err := log.ParseLevel(name)
+		assert.NoError(t, err, "%q is a level", name)
+	}
+	for _, name := range []string{"trace", "critical", "3", "off"} {
+		_, err := log.ParseLevel(name)
+		// A sink configured with a misspelled level would silently record everything or
+		// nothing, and both are worse than a configuration that will not load.
+		assert.Error(t, err, "%q is not a level", name)
+	}
+}
+
+func TestAnUnknownConfigurationKeyIsRefused(t *testing.T) {
+	_, err := log.ParseConfig(decodeFanout(t, `
+level: info
+handlers:
+  file:
+    provider: text
+routs:
+  - handlers: [file]
+`))
+
+	// A misspelled key that is ignored is a fanout quietly not being the one that was
+	// written, with nothing to say so.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown setting "routs"`)
+	assert.Contains(t, err.Error(), "handlers, level, routes")
+}
+
+func TestAHandlerWithoutAProviderIsRefused(t *testing.T) {
+	_, err := log.ParseConfig(decodeFanout(t, `
+level: info
+handlers:
+  file:
+    level: info
+`))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `the "file" handler needs a provider`)
+}
+
+func TestARouteWithoutHandlersIsRefused(t *testing.T) {
+	_, err := log.ParseConfig(decodeFanout(t, `
+level: info
+handlers:
+  file:
+    provider: text
+routes:
+  - name: nowhere
+`))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "route 0 must name the handlers")
+}
+
+func TestAMatchComposes(t *testing.T) {
+	// Conditions compose without a caller rebuilding the map, and the result is the question
+	// the route asks.
+	match := log.AtLeast(slog.LevelWarn).With("logger", "knowledge").With("subsystem", "knowledge")
+
+	assert.False(t, match.Empty())
+	require.NotNil(t, match.Level)
+	assert.Equal(t, slog.LevelWarn, *match.Level)
+	assert.Equal(t, map[string]string{"logger": "knowledge", "subsystem": "knowledge"}, match.Attributes)
+	// A route that said no conditions is the default one, and a route that said "at least
+	// info" has a condition, even though slog.LevelInfo is the zero value of a level.
+	assert.True(t, log.Match{}.Empty())
+	assert.False(t, log.AtLeast(slog.LevelInfo).Empty())
+	assert.False(t, log.Workspace("acme").Empty())
+}
+
+func TestARouterIsNotMutatedBySlogWith(t *testing.T) {
+	router, handlers := fanout(t, `
+level: debug
+handlers:
+  file:
+    provider: recording
+routes:
+  - name: everything
+    handlers: [file]
+`)
+
+	// slog handlers are immutable — WithAttrs returns a new one — so a component holding a
+	// bound logger must not change what every other component's entries look like.
+	bound := slog.New(router).With("subsystem", "knowledge")
+	slog.New(router).Info("unbound entry")
+	bound.Info("bound entry")
+
+	lines := handlers["file"].lines(t)
+	require.Len(t, lines, 2)
+	_, firstIsBound := lines[0]["subsystem"]
+	assert.False(t, firstIsBound, "the unbound logger must not pick up the bound attributes")
+	assert.Equal(t, "knowledge", lines[1]["subsystem"])
+}
+
+func TestARouteWithNoIntroducedHandlerRoutesNothing(t *testing.T) {
+	router, handlers := fanout(t, `
+level: debug
+handlers:
+  file:
+    provider: recording
+routes:
+  - name: everything
+    handlers: [file]
+  - name: the same file again
+    match:
+      level: debug
+    handlers: [file]
+  - name: and nothing of its own
+    handlers: [file]
+`)
+
+	slog.New(router).Info("stored a source")
+
+	assert.Equal(t, []string{"stored a source"}, handlers["file"].messages(t))
+}
+
+func TestASinkNoRouteNamesReceivesNothing(t *testing.T) {
+	router, handlers := fanout(t, `
+level: debug
+handlers:
+  used:
+    provider: recording
+  unused:
+    provider: recording
+routes:
+  - name: the fanout as configured
+    handlers: [used]
+`)
+
+	// A sink that no route names is not part of the fanout, whatever it is — a deployment
+	// cannot say where its entries go and find one destination nobody asked for.
+	slog.New(router).Info("stored a source")
+
+	assert.Equal(t, []string{"stored a source"}, handlers["used"].messages(t))
+	assert.Empty(t, handlers["unused"].messages(t))
+}
+
 func decodeFanout(t *testing.T, fanout string) map[string]any {
 	t.Helper()
 	var decoded map[string]any
 	require.NoError(t, yaml.Unmarshal([]byte(fanout), &decoded), "the test's own fanout is valid YAML")
 	return decoded
 }
+
+func discarding() slog.Handler {
+	return slog.NewTextHandler(discard{}, &slog.HandlerOptions{Level: slog.LevelDebug})
+}
+
+type discard struct{}
+
+func (discard) Write(p []byte) (int, error) { return len(p), nil }

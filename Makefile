@@ -26,8 +26,10 @@ proto: $(FRAMEWORK_PROTO)
 build:
 	@mkdir -p $(BIN_DIR)
 	@for subsystem in $(SUBSYSTEMS); do \
-		$(MAKE) -C subsystems/$$subsystem build; \
-		cp subsystems/$$subsystem/bin/$$subsystem $(BIN_DIR)/$$subsystem; \
+		if [ -d subsystems/$$subsystem/cmd ]; then \
+			$(MAKE) -C subsystems/$$subsystem build; \
+			cp subsystems/$$subsystem/bin/$$subsystem $(BIN_DIR)/$$subsystem; \
+		fi; \
 	done
 	@$(MAKE) -C cmd/toolbox build
 	@cp cmd/toolbox/bin/toolbox $(BIN_DIR)/toolbox
