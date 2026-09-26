@@ -8,11 +8,11 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/logger/loggerv1;lo
 // this process, so an agent or a service it started can send entries
 // through the same routes the rest of the deployment uses.
 //
-// The fanout itself is not configurable here for a running deployment. The
-// sinks a deployment has and the routes between them belong to its
-// configuration file; this service reads that file, reports it, and
-// accepts entries. What an entry reaches is decided by the deployment,
-// not by the caller.
+// The deployment's own fanout is the configuration file's, and no request
+// here changes it. What a caller may configure is the fanout for entries
+// carrying its own workspace, which is scoped to that workspace and is what
+// SetConfig is for. What an entry reaches is then decided by the routes that
+// apply to it — the deployment's, its project's, or its own.
 service LoggerService {
   // @toolbox.side-effects read_only
   // GetConfig returns the deployment's fanout as it is currently
@@ -20,7 +20,7 @@ service LoggerService {
   // them, and which project the answers are about.
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
 
-  // @toolbox.side-effects writes_state
+  // @toolbox.side-effects update
   // SetConfig declares the project a caller is acting for, and optionally
   // the fanout for the entries it sends as that project.
   //
@@ -38,7 +38,7 @@ service LoggerService {
   // what a caller with a project but no opinions about its routing wants.
   rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 
-  // @toolbox.side-effects writes_state
+  // @toolbox.side-effects create
   // Log records one entry.
   //
   // The entry reaches every route that matches it, which is the same

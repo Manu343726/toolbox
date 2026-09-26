@@ -523,20 +523,30 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 // its two siblings — so a format or a transport is claimed by whoever implements
 // it, and adding one is a change to that subsystem rather than to anything that
 // has to recognize it.
+//
+// A subsystem that did not start contributes nothing. Its records would otherwise be
+// registered with an empty endpoint, and a provider with no endpoint is a claim the deployment
+// cannot keep: a call that reaches for one falls back to resolving it from the catalog, finds
+// nothing, and fails with a message about a provider the operator never asked for. Worse, the
+// failure appears on a call to a service that *is* running, which is the least helpful place
+// for a missing component to be discovered.
 func providerRecords(h *host.Host) []api.Provider {
 	endpoints := make(map[string]string, len(h.Servers()))
 	for name, server := range h.Servers() {
 		endpoints[name] = server.Endpoint()
 	}
+	claims := map[string][]api.Provider{
+		"apigrpc":    apigrpc.Providers(endpoints["apigrpc"]),
+		"apiopenapi": apiopenapi.Providers(endpoints["apiopenapi"]),
+		"apimcp":     apimcp.Providers(endpoints["apimcp"]),
+	}
 	records := make([]api.Provider, 0, 9)
-	for _, provider := range apigrpc.Providers(endpoints["apigrpc"]) {
-		records = append(records, provider)
-	}
-	for _, provider := range apiopenapi.Providers(endpoints["apiopenapi"]) {
-		records = append(records, provider)
-	}
-	for _, provider := range apimcp.Providers(endpoints["apimcp"]) {
-		records = append(records, provider)
+	for subsystem, provided := range claims {
+		if endpoints[subsystem] == "" {
+			// Not started, so it holds no formats and reaches no transports.
+			continue
+		}
+		records = append(records, provided...)
 	}
 	return records
 }

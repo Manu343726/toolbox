@@ -2,6 +2,7 @@ package discovery_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,10 +10,15 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	// Imported for its contract documentation. pkg/api owns the registration of the framework's
+	// .proto, because it is the package that *is* the extension contract; apiv1 is only its
+	// generated form and cannot import pkg/api without a cycle. So a caller that documents this
+	// contract imports pkg/api, which is what a blank import here is saying.
+	_ "github.com/Manu343726/toolbox/pkg/api"
+	"github.com/Manu343726/toolbox/pkg/api/apiv1"
+	apiv1connect "github.com/Manu343726/toolbox/pkg/api/apiv1/apiv1connect"
 	"github.com/Manu343726/toolbox/pkg/discovery"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
-	"github.com/Manu343726/toolbox/subsystems/testecho/echov1"
-	"github.com/Manu343726/toolbox/subsystems/testecho/echov1/echov1connect"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -22,27 +28,37 @@ import (
 // found. Both halves are tested here against a real server over a real socket, because the
 // whole point of reflection is that nothing in this file knows the contract ahead of time, and
 // a fake responder would test the fake.
+//
+// The contract is the framework's own, from this module. A foundation package whose test
+// depends on a subsystem module makes every module that depends on this one resolve a module it
+// does not own — and the published copy of a subsystem carries no generated code, so that
+// resolution fails for reasons that have nothing to do with the package under test. It cost
+// sixteen modules' standalone builds before it was noticed.
 
-// serve runs a real subsystem serving the echo service, and a client pointed at it.
+const (
+	invokerService = "toolbox.api.v1.ApiInvokerService"
+	invokeMethod   = "InvokeApi"
+	// echoed is what the fixture's operation returns, so a caller can tell its own answer
+	// from the transport's.
+	echoed = "hello"
+)
+
+// serve runs a real subsystem serving the invoker service, and a client pointed at it.
 //
 // A subsystem server rather than a hand-built mux, because reflection is mounted by the server
 // and a test that served its own reflection would be testing a responder it wrote itself.
-func serve(t *testing.T) (endpoint string, client *discovery.Client, echo *testEcho) {
+func serve(t *testing.T) (endpoint string, client *discovery.Client, fixture *testInvoker) {
 	t.Helper()
-	echo = &testEcho{}
-	path, handler := echov1connect.NewEchoServiceHandler(echo)
+	fixture = &testInvoker{}
+	path, handler := apiv1connect.NewApiInvokerServiceHandler(fixture)
 	server, err := subsystem.NewServer(subsystem.Config{
-		Name: "testecho",
-		Services: []subsystem.Service{{
-			Name:    "toolbox.testecho.v1.EchoService",
-			Path:    path,
-			Handler: handler,
-		}},
+		Name:     "apigrpc",
+		Services: []subsystem.Service{{Name: invokerService, Path: path, Handler: handler}},
 	})
 	require.NoError(t, err)
 	require.NoError(t, server.Start(t.Context()))
 	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
-	return server.Endpoint(), discovery.New(server.Endpoint()), echo
+	return server.Endpoint(), discovery.New(server.Endpoint()), fixture
 }
 
 func TestAReflectedClientCanReadAContractItWasNeverTold(t *testing.T) {
@@ -51,23 +67,23 @@ func TestAReflectedClientCanReadAContractItWasNeverTold(t *testing.T) {
 	services, err := client.ListServices(context.Background())
 
 	require.NoError(t, err)
-	// The only service on the wire is the echo service, and the client found it by asking.
-	assert.Contains(t, services, "toolbox.testecho.v1.EchoService")
+	// The only service on the wire is the invoker service, and the client found it by asking.
+	assert.Contains(t, services, invokerService)
 }
 
 func TestTheSchemaCarriesWhatACallerNeedsToBuildARequest(t *testing.T) {
 	_, client, _ := serve(t)
 
-	schema, err := client.DescribeService(context.Background(), "toolbox.testecho.v1.EchoService")
+	schema, err := client.DescribeService(context.Background(), invokerService)
 	require.NoError(t, err)
 
 	require.NotNil(t, schema)
-	assert.Equal(t, "toolbox.testecho.v1.EchoService", schema.Name)
+	assert.Equal(t, invokerService, schema.Name)
 	require.NotEmpty(t, schema.Methods)
 
 	var found bool
 	for _, method := range schema.Methods {
-		if method.Name != "Echo" {
+		if method.Name != invokeMethod {
 			continue
 		}
 		found = true
@@ -75,19 +91,32 @@ func TestTheSchemaCarriesWhatACallerNeedsToBuildARequest(t *testing.T) {
 		// with no output descriptor cannot read the answer. Either is a schema that cannot be
 		// called, and both are what a dynamic caller depends on.
 		require.NotNil(t, method.Input)
-		assert.Equal(t, "toolbox.testecho.v1.EchoRequest", string(method.Input.FullName()))
+		assert.Equal(t, "toolbox.api.v1.InvokeApiRequest", string(method.Input.FullName()))
 		require.NotNil(t, method.Output)
-		assert.Equal(t, "toolbox.testecho.v1.EchoResponse", string(method.Output.FullName()))
+		assert.Equal(t, "toolbox.api.v1.InvokeApiResponse", string(method.Output.FullName()))
 		assert.False(t, method.ClientStreaming, "the fixture's method is unary")
 		assert.False(t, method.ServerStreaming, "the fixture's method is unary")
 	}
-	assert.True(t, found, "the echo method was not in the schema")
+	assert.True(t, found, "the invoke method was not in the schema")
+}
+
+func TestTheSchemaCarriesTheDocumentationTheContractDeclared(t *testing.T) {
+	_, client, _ := serve(t)
+
+	schema, err := client.DescribeService(context.Background(), invokerService)
+	require.NoError(t, err)
+	require.NotNil(t, schema.Documentation)
+
+	// The description comes from the .proto, and a schema that reached a caller without it
+	// would be a contract nobody can read before calling.
+	assert.NotEmpty(t, schema.Documentation.Description)
+	assert.Contains(t, schema.Documentation.Description, "invoker")
 }
 
 func TestDescribingAnUnknownServiceIsRefused(t *testing.T) {
 	_, client, _ := serve(t)
 
-	_, err := client.DescribeService(context.Background(), "toolbox.testecho.v1.NoSuchService")
+	_, err := client.DescribeService(context.Background(), "toolbox.api.v1.NoSuchService")
 
 	// A caller that asked for a contract the endpoint does not serve must be told, rather than
 	// handed an empty schema it would then try to call.
@@ -112,9 +141,8 @@ func TestAnEndpointWithNoReflectionIsReportedNotSilentlyEmpty(t *testing.T) {
 func TestATypedCallIsRoutedByTheReflectedContract(t *testing.T) {
 	_, client, _ := serve(t)
 
-	answer, err := client.Invoke(context.Background(),
-		"toolbox.testecho.v1.EchoService", "Echo",
-		&echov1.EchoRequest{Message: "hello"})
+	answer, err := client.Invoke(context.Background(), invokerService, invokeMethod,
+		&apiv1.InvokeApiRequest{OperationId: "api/getThing"})
 
 	require.NoError(t, err)
 	// The answer comes back as a dynamic message, because the client built the response type
@@ -123,28 +151,42 @@ func TestATypedCallIsRoutedByTheReflectedContract(t *testing.T) {
 	// is the caller's one step, and it is the step that makes a dynamic call usable.
 	raw, err := proto.Marshal(answer)
 	require.NoError(t, err)
-	typed := &echov1.EchoResponse{}
+	typed := &apiv1.InvokeApiResponse{}
 	require.NoError(t, proto.Unmarshal(raw, typed))
-	assert.Equal(t, "hello", typed.GetMessage())
+	// The body is whatever the operation returned, and a dynamic caller sees exactly the bytes
+	// the transport produced.
+	assert.Equal(t, `{"message":"`+echoed+`"}`, string(typed.GetBodyJson()))
+	assert.Equal(t, int32(200), typed.GetStatus())
 }
 
 func TestAJSONCallRoundTripsThroughTheReflectedPath(t *testing.T) {
 	_, client, _ := serve(t)
 
-	answer, err := client.InvokeJSON(context.Background(),
-		"toolbox.testecho.v1.EchoService", "Echo", []byte(`{"message":"from json"}`))
+	answer, err := client.InvokeJSON(context.Background(), invokerService, invokeMethod,
+		[]byte(`{"operationId":"api/getThing"}`))
 
 	require.NoError(t, err)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(answer, &decoded))
-	assert.Equal(t, "from json", decoded["message"])
+	// The JSON path answers in protobuf JSON, so the field names are the contract's own
+	// snake_case and a bytes field arrives base64-encoded. A caller reaching for the operation's
+	// body has to decode it, and that is a fact about the wire format rather than a defect —
+	// but it is the fact a caller of this path needs to be told by a test rather than by
+	// discovering it.
+	assert.Equal(t, "application/json", decoded["content_type"])
+	assert.Equal(t, float64(200), decoded["status"])
+	encoded, ok := decoded["body_json"].(string)
+	require.True(t, ok, "the body should arrive as an encoded string, got %#v", decoded["body_json"])
+	body, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"message":"`+echoed+`"}`, string(body))
 }
 
 func TestACallToAnUnknownMethodIsRefused(t *testing.T) {
 	_, client, _ := serve(t)
 
-	_, err := client.Invoke(context.Background(),
-		"toolbox.testecho.v1.EchoService", "NoSuchMethod", &echov1.EchoRequest{})
+	_, err := client.Invoke(context.Background(), invokerService, "NoSuchMethod",
+		&apiv1.InvokeApiRequest{})
 
 	// Silently calling nothing and reporting success would be the worst outcome, because the
 	// caller has a typed response and no idea it is empty.
@@ -154,8 +196,8 @@ func TestACallToAnUnknownMethodIsRefused(t *testing.T) {
 func TestACallToAnUnknownServiceIsRefused(t *testing.T) {
 	_, client, _ := serve(t)
 
-	_, err := client.Invoke(context.Background(),
-		"toolbox.testecho.v1.NoSuchService", "Echo", &echov1.EchoRequest{})
+	_, err := client.Invoke(context.Background(), "toolbox.api.v1.NoSuchService", invokeMethod,
+		&apiv1.InvokeApiRequest{})
 
 	require.Error(t, err)
 }
@@ -192,13 +234,13 @@ func TestAnEndpointIsTrimmedAndNotOtherwiseRewritten(t *testing.T) {
 func TestAReflectedSchemaIsACopyTheCallerCannotCorrupt(t *testing.T) {
 	_, client, _ := serve(t)
 
-	first, err := client.DescribeService(context.Background(), "toolbox.testecho.v1.EchoService")
+	first, err := client.DescribeService(context.Background(), invokerService)
 	require.NoError(t, err)
 	require.NotEmpty(t, first.Methods)
 	original := first.Methods[0].Name
 	first.Methods[0].Name = "corrupted"
 
-	second, err := client.DescribeService(context.Background(), "toolbox.testecho.v1.EchoService")
+	second, err := client.DescribeService(context.Background(), invokerService)
 	require.NoError(t, err)
 
 	// The schema is cached, and a cache handing out its own entries would let one caller's
@@ -214,7 +256,7 @@ func TestConcurrentDescriptionIsSafe(t *testing.T) {
 	done := make(chan error, 12)
 	for i := 0; i < 12; i++ {
 		go func() {
-			_, err := client.DescribeService(context.Background(), "toolbox.testecho.v1.EchoService")
+			_, err := client.DescribeService(context.Background(), invokerService)
 			done <- err
 		}()
 	}
@@ -252,42 +294,38 @@ func TestAnUnreachableEndpointIsReported(t *testing.T) {
 }
 
 func TestAHeaderIsCarriedOntoTheWire(t *testing.T) {
-	_, client, echo := serve(t)
+	_, client, fixture := serve(t)
 
 	header := http.Header{}
 	header.Set("X-Toolbox-Policy", "strict")
-	_, err := client.InvokeJSONWithHeaders(context.Background(),
-		"toolbox.testecho.v1.EchoService", "Echo", []byte(`{"message":"hi"}`), header)
+	_, err := client.InvokeJSONWithHeaders(context.Background(), invokerService, invokeMethod,
+		[]byte(`{"operationId":"api/getThing"}`), header)
 
 	// The gateway forwards a policy on a call it makes on an agent's behalf, and a client that
 	// dropped the header would make every authorised call look unauthorised to the subsystem
-	// — with the failure reported as a policy denial rather than as a lost header.
+	// — with the failure reported as a policy denial rather than as a lost header. This is
+	// asserted against a real service, because the client resolves the schema over reflection
+	// before it calls, and a fake that answered the call directly would have tested something
+	// that cannot happen.
 	require.NoError(t, err)
-	assert.Equal(t, "strict", echo.seen.Get("X-Toolbox-Policy"))
+	assert.Equal(t, "strict", fixture.seen.Get("X-Toolbox-Policy"))
 }
 
-// testEcho is the fixture handler, recording the metadata each call arrived with.
-type testEcho struct {
+// testInvoker is the fixture handler, recording the metadata each call arrived with.
+type testInvoker struct {
 	// seen is the metadata of the most recent call, so a test can assert what reached the
 	// server rather than what the client intended to send.
 	seen http.Header
 }
 
-// Echo implements the reflected service's unary method.
-func (e *testEcho) Echo(
-	ctx context.Context, req *connect.Request[echov1.EchoRequest],
-) (*connect.Response[echov1.EchoResponse], error) {
-	e.seen = req.Header().Clone()
-	return connect.NewResponse(&echov1.EchoResponse{Message: req.Msg.GetMessage()}), nil
-}
-
-// StreamEcho implements the fixture's server-streaming method, which exists so a client can be
-// shown refusing it. The generated handler interface requires it, so it is implemented here
-// rather than by embedding an unimplemented base — a test that reads a contract blind should
-// not depend on the framework to fill in a method it is about to assert on.
-func (e *testEcho) StreamEcho(
-	ctx context.Context, req *connect.Request[echov1.EchoRequest],
-	stream *connect.ServerStream[echov1.EchoResponse],
-) error {
-	return stream.Send(&echov1.EchoResponse{Message: req.Msg.GetMessage()})
+// InvokeApi implements the reflected service's method.
+func (f *testInvoker) InvokeApi(
+	_ context.Context, req *connect.Request[apiv1.InvokeApiRequest],
+) (*connect.Response[apiv1.InvokeApiResponse], error) {
+	f.seen = req.Header().Clone()
+	return connect.NewResponse(&apiv1.InvokeApiResponse{
+		Status:      200,
+		ContentType: "application/json",
+		BodyJson:    []byte(`{"message":"` + echoed + `"}`),
+	}), nil
 }

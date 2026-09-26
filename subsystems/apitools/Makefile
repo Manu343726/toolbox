@@ -29,7 +29,7 @@ proto: $(PROTO_SRCS)
 	@command -v protoc >/dev/null || (echo "protoc is required" >&2; exit 1)
 	@command -v protoc-gen-go >/dev/null || (echo "run 'make proto-tools' first" >&2; exit 1)
 	@command -v protoc-gen-connect-go >/dev/null || (echo "run 'make proto-tools' first" >&2; exit 1)
-	protoc --proto_path=. --proto_path=$(FRAMEWORK_PROTO_DIR) --go_out=. --go_opt=module=$(MODULE) --connect-go_out=. --connect-go_opt=module=$(MODULE) --descriptor_set_out=proto/$(NAME).pb --include_imports --include_source_info $(PROTO_SRCS)
+	protoc --proto_path=. --proto_path=$(FRAMEWORK_PROTO_DIR) --go_out=. --go_opt=module=$(MODULE) --connect-go_out=. --connect-go_opt=module=$(MODULE) $(PROTO_SRCS)
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -name '*.pb.go' -not -name '*.connect.go')

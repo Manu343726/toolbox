@@ -127,17 +127,38 @@ func TestDescriptorMarksStreamingWithoutInvokingIt(t *testing.T) {
 	assert.True(t, stream.Streaming.Streaming())
 }
 
-func TestDescriptorStatesWhatAContractSaysAndNothingElse(t *testing.T) {
+func TestDescriptorInventsNoSideEffectWhereTheContractDeclaresNone(t *testing.T) {
 	// A contract says what invoking a method does, and a contract says nothing
 	// about who may invoke it. A reader must not invent the second from the first:
 	// the policy answers that question, from the deployment.
-	parsed := parseForTest(t, contractDescriptorSet(t))
+	//
+	// The fixture is a hand-built contract that declares no effects at all, rather than the
+	// framework's own — which does declare them, and which the tunnel below now reads from
+	// its .proto. Using it here would have made this test assert the opposite of its name.
+	parsed := parseForTest(t, streamingDescriptorSet(t))
 	for _, service := range parsed.Services {
 		for _, operation := range service.Operations {
 			assert.Empty(t, operation.SideEffects,
 				"this fixture's contract declares none, so its operations are unclassified")
 		}
 	}
+}
+
+func TestDescriptorCarriesTheSideEffectsTheContractDeclares(t *testing.T) {
+	// The other half of the same rule: what a contract does declare must survive, or every
+	// operation is unclassified and a policy naming read or write covers none of them.
+	parsed := parseForTest(t, contractDescriptorSet(t))
+
+	declared := 0
+	for _, service := range parsed.Services {
+		for _, operation := range service.Operations {
+			if len(operation.SideEffects) > 0 {
+				declared++
+			}
+		}
+	}
+	assert.NotZero(t, declared,
+		"the framework's contract declares side effects and none of them reached the descriptor")
 }
 
 func TestDescriptorRejectsUnusableInput(t *testing.T) {

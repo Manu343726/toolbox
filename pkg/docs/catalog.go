@@ -195,6 +195,15 @@ func ExtractServiceDocumentation(service protoreflect.ServiceDescriptor) *Servic
 	if service == nil {
 		return nil
 	}
+	// The documentation is read from a descriptor compiled from the original .proto, when this
+	// process has it. A generated descriptor has the structure and none of the prose, and the
+	// prose carries the annotations — so reading it from the generated descriptor loses a
+	// service's side-effect declaration as well as its description, and an operation nobody
+	// classified is the one state a policy cannot grant by naming read or write.
+	documented := documentedService(service)
+	if documented != nil {
+		service = documented
+	}
 	file := service.ParentFile()
 	prose, annotations := ParseAnnotations(commentAt(file, servicePath(service)))
 	doc := &Service{
@@ -232,6 +241,20 @@ const (
 	fieldNested  = int32(3)
 	fieldField   = int32(2)
 )
+
+// documentedService returns the same service as it was declared, read from the original
+// source, or nil when this process does not have that source or the two disagree.
+func documentedService(service protoreflect.ServiceDescriptor) protoreflect.ServiceDescriptor {
+	file := service.ParentFile()
+	if file == nil {
+		return nil
+	}
+	compiled := documentedFile(file)
+	if compiled == nil || compiled == file {
+		return nil
+	}
+	return compiled.Services().ByName(service.Name())
+}
 
 func servicePath(service protoreflect.ServiceDescriptor) protoreflect.SourcePath {
 	return protoreflect.SourcePath{fieldService, int32(service.Index())}

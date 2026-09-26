@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Manu343726/toolbox/pkg/api"
@@ -16,10 +17,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
-	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
@@ -54,11 +53,15 @@ const (
 	reflectionMethodName   = "ServerReflectionInfo"
 )
 
-// descriptorSetPath is the framework's own embedded descriptor set, relative to this
-// package. It carries source information, so the documentation the generator reads is
-// the documentation a caller sees.
-func descriptorSetPath() string {
-	return filepath.Join("..", "api", "proto", "toolbox", "api", "v1", "api.pb")
+// frameworkProtoPath is the framework's own contract, relative to this package.
+//
+// The generator is tested against the original .proto rather than a descriptor set, because
+// that is where the documentation now comes from: the generated descriptor has the structure
+// and none of the prose, and the prose is what every generated summary and flag description is
+// taken from. A fixture built from a descriptor set would pass while testing a path the
+// framework no longer takes.
+func frameworkProtoPath() string {
+	return filepath.Join("..", "api", "proto", "toolbox", "api", "v1", "api.proto")
 }
 
 // testSource is a discovery source over the framework's own contract. It records what it
@@ -108,16 +111,19 @@ func (s *testSource) DescribeService(_ context.Context, name string) (*discovery
 	if !ok {
 		return nil, &notAServiceError{name: name}
 	}
-	documentation, err := docs.DefaultCatalog().Get(name)
-	if err != nil {
-		// A service with no embedded documentation is a real state, and the generator
-		// has to cope with it rather than assume comments exist.
-		documentation = docs.Service{Name: name}
+	// The documentation comes from the .proto, through the same call a subsystem server makes
+	// when it mounts a service. Reading it from the process-wide catalog instead would test a
+	// path that only worked while descriptor sets were embedded.
+	documentation := docs.ExtractServiceDocumentation(service)
+	if documentation == nil {
+		// A service with no source is a real state, and the generator has to cope with it
+		// rather than assume comments exist.
+		documentation = &docs.Service{Name: name}
 	}
 	schema := &discovery.ServiceSchema{
 		Name:          name,
 		Descriptor:    service,
-		Documentation: &documentation,
+		Documentation: documentation,
 		Methods:       make([]discovery.MethodSchema, 0, service.Methods().Len()),
 	}
 	for i := 0; i < service.Methods().Len(); i++ {
@@ -193,14 +199,33 @@ type notAServiceError struct{ name string }
 
 func (e *notAServiceError) Error() string { return e.name + " is not a service" }
 
+// The fixture is registered and compiled once, because a path may only be registered once and
+// every test in this package needs the same contract. A fresh registry is built per test, since
+// that is per-test state and registering a file into a shared one would be a data race.
+var (
+	fixtureOnce sync.Once
+	fixtureFile protoreflect.FileDescriptor
+	fixtureErr  error
+)
+
 func newTestSource(t *testing.T) *testSource {
 	t.Helper()
-	raw, err := os.ReadFile(descriptorSetPath())
-	require.NoError(t, err, "the framework's descriptor set is the fixture these CLI tests need")
-	set := &descriptorpb.FileDescriptorSet{}
-	require.NoError(t, proto.Unmarshal(raw, set))
-	files, err := protodesc.NewFiles(set)
-	require.NoError(t, err)
+	fixtureOnce.Do(func() {
+		source, err := os.ReadFile(frameworkProtoPath())
+		if err != nil {
+			fixtureErr = err
+			return
+		}
+		if err := docs.RegisterProtoSource("cli-test/api.proto", source); err != nil {
+			fixtureErr = err
+			return
+		}
+		fixtureFile, fixtureErr = docs.CompileProtoSource("cli-test/api.proto")
+	})
+	require.NoError(t, fixtureErr,
+		"the framework's contract is the fixture these CLI tests need, and it must compile")
+	files := new(protoregistry.Files)
+	require.NoError(t, files.RegisterFile(fixtureFile))
 	return &testSource{files: files}
 }
 

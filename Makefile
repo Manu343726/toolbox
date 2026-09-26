@@ -20,7 +20,7 @@ proto: $(FRAMEWORK_PROTO)
 	@command -v protoc >/dev/null || (echo "protoc is required" >&2; exit 1)
 	@command -v protoc-gen-go >/dev/null || (echo "run 'make proto-tools' first" >&2; exit 1)
 	@command -v protoc-gen-connect-go >/dev/null || (echo "run 'make proto-tools' first" >&2; exit 1)
-	protoc --proto_path=$(FRAMEWORK_PROTO_DIR) --go_out=. --go_opt=module=$(MODULE) --connect-go_out=. --connect-go_opt=module=$(MODULE) --descriptor_set_out=$(FRAMEWORK_PROTO_DIR)/toolbox/api/v1/api.pb --include_imports --include_source_info toolbox/api/v1/api.proto
+	protoc --proto_path=$(FRAMEWORK_PROTO_DIR) --go_out=. --go_opt=module=$(MODULE) --connect-go_out=. --connect-go_opt=module=$(MODULE) toolbox/api/v1/api.proto
 
 # Build each independent subsystem through its own Makefile.
 build:

@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
-	shareddocs "github.com/Manu343726/toolbox/pkg/docs"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
 	echov1 "github.com/Manu343726/toolbox/subsystems/testecho/echov1"
 	"github.com/Manu343726/toolbox/subsystems/testecho/echov1/echov1connect"
@@ -37,9 +36,8 @@ func NewHandler() *Handler { return &Handler{} }
 
 // New is the programmatic in-process entrypoint for the test service.
 func New(options Options) (*subsystem.Server, error) {
-	if err := shareddocs.RegisterEmbeddedFile(echoDescriptorSet); err != nil {
-		return nil, err
-	}
+	// The contract's source is registered by this package's init, once; registering it per
+	// server would be a second registration of the same path and would fail.
 	version := options.Version
 	if version == "" {
 		version = Version
