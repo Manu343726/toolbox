@@ -308,7 +308,7 @@ func (s *Service) status(ctx context.Context, registration Registration) (*skill
 	status := &skillgitv1.CheckoutStatus{
 		Id:        registration.ID,
 		Name:      registration.ID,
-		Remote:    describeRemote(registration.Remote),
+		Remote:    CredentialFreeRemote(registration.Remote),
 		Location:  path,
 		ReadOnly:  registration.ReadOnly,
 		CreatedAt: registration.CreatedAt,

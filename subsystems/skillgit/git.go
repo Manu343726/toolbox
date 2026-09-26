@@ -365,33 +365,3 @@ func looksLikeRemote(named string) bool {
 	host, _, found := strings.Cut(named, "/")
 	return !found || strings.Contains(host, ".")
 }
-
-// describeRemote renders a remote for a person, without a credential in it.
-//
-// A remote may carry a token in its URL, and a catalog's location is shown to a person
-// deciding whether to depend on the content. The userinfo is replaced rather than dropped so
-// the message still says *which* host, which is the part a person needs.
-func describeRemote(remote string) string {
-	trimmed := strings.TrimSpace(remote)
-	for _, scheme := range []string{"https://", "http://", "ssh://", "git://"} {
-		rest, found := strings.CutPrefix(trimmed, scheme)
-		if !found {
-			continue
-		}
-		if at := strings.Index(rest, "@"); at >= 0 {
-			slash := strings.Index(rest, "/")
-			if slash < 0 || at < slash {
-				host := rest[slash+1:]
-				host, _, _ = strings.Cut(host, "/")
-				return scheme + host
-			}
-		}
-		return trimmed
-	}
-	if _, rest, found := strings.Cut(trimmed, "@"); found {
-		if colon := strings.Index(rest, ":"); colon >= 0 {
-			return rest[colon+1:]
-		}
-	}
-	return trimmed
-}

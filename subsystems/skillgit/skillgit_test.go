@@ -699,3 +699,103 @@ func structOf(t *testing.T, document map[string]any) *structpb.Struct {
 	require.NoError(t, err)
 	return converted
 }
+
+// A credential belongs in the machine's own mechanisms, not in a file a person reads. This
+// asserts the file holds none, and says what that does and does not achieve — because a
+// guarantee that is over-read is worse than none, and the obvious over-reading is that the
+// checkout has none either.
+func TestNoCredentialIsWrittenToTheRegistrationFile(t *testing.T) {
+	const secret = "s3cret-token-value"
+	git := testGit(t)
+	remote := origin(t, git, map[string]string{
+		".claude/skills/review/SKILL.md": document("review", "Use this when reviewing."),
+	})
+
+	provider := service(t)
+	_, err := provider.RegisterCatalog(t.Context(), connect.NewRequest(&skillgitv1.RegisterCatalogRequest{
+		// A URL carrying a credential, which is a mistake a caller can make and this
+		// framework records about without repeating.
+		Id:     "private",
+		Remote: "https://" + secret + "@example.invalid/private/skills.git",
+	}))
+	// The clone cannot reach an invalid host, which is fine: the point is what was recorded
+	// on the way in, and a failed clone records nothing at all.
+	if err == nil {
+		t.Fatal("cloning an invalid host should have failed")
+	}
+
+	// Registered by a path, which is the form a contributor can use after fetching with a
+	// credential of its own.
+	_, err = provider.RegisterCatalog(t.Context(), connect.NewRequest(&skillgitv1.RegisterCatalogRequest{
+		Id: "fetched", Remote: remote,
+	}))
+	require.NoError(t, err)
+
+	recorded, err := os.ReadFile(filepath.Join(provider.registry.DataDir(), RegistrationsFile))
+	require.NoError(t, err, "a registration is recorded, so the file exists")
+	assert.NotContains(t, string(recorded), secret,
+		"the registration file is readable, is often committed, and is frequently pasted into "+
+			"a bug report, so a credential is never written to it")
+
+	t.Run("and a remote is recorded in the form a person reads", func(t *testing.T) {
+		// The recorded form drops the userinfo and keeps everything that identifies the
+		// repository, so the file still says what a catalog is and where it came from.
+		provider, err := NewService(Options{DataDir: t.TempDir(), Git: git})
+		require.NoError(t, err)
+		_, err = provider.RegisterCatalog(t.Context(),
+			connect.NewRequest(&skillgitv1.RegisterCatalogRequest{
+				Id: "private", Remote: "https://" + secret + "@github.com/owner/repo.git",
+			}))
+		// The clone fails for want of a host, so the record is written directly: what is
+		// under test is the form the record takes, not whether git can be reached.
+		require.NoError(t, provider.registry.Add(Registration{
+			ID: "private", Directory: "private", Auth: AuthCheckout,
+			Remote: CredentialFreeRemote("https://" + secret + "@github.com/owner/repo.git"),
+		}))
+		require.NoError(t, provider.registry.Save())
+
+		recorded, err := os.ReadFile(filepath.Join(provider.registry.DataDir(), RegistrationsFile))
+		require.NoError(t, err)
+		assert.Contains(t, string(recorded), "https://github.com/owner/repo.git",
+			"the host and the path are what a person needs to see, and they are kept")
+		assert.NotContains(t, string(recorded), secret)
+		assert.Contains(t, string(recorded), "auth: checkout",
+			"what is kept about a credential is the fact that one was involved, because a "+
+				"catalog reaching a private repository is not the same thing to depend on")
+	})
+}
+
+// A scp-style remote's `user@` is a username and not a credential, so it is kept. Stripping it
+// would turn a working remote into a broken one in exchange for hiding nothing — which is the
+// over-redaction that makes a guarantee look careful and be wrong.
+func TestAScpStyleRemoteKeepsItsUsername(t *testing.T) {
+	for _, named := range []string{
+		"git@github.com:owner/repo.git",
+		"ssh://git@github.com/owner/repo.git",
+	} {
+		t.Run(named, func(t *testing.T) {
+			assert.False(t, HasCredential(named),
+				"a username in a remote is not a secret, and treating it as one would strip it")
+			assert.Equal(t, named, CredentialFreeRemote(named))
+		})
+	}
+
+	// And a password alongside it is a credential, in either spelling.
+	for _, named := range []string{
+		"https://user:password@github.com/owner/repo.git",
+		"https://token@github.com/owner/repo.git",
+	} {
+		t.Run(named, func(t *testing.T) {
+			assert.True(t, HasCredential(named))
+			assert.NotContains(t, CredentialFreeRemote(named), "@")
+		})
+	}
+}
+
+// An `@` in a path is not userinfo, and a remote whose repository name contains one is a real
+// remote rather than one carrying a credential.
+func TestAnAtSignInThePathIsNotACredential(t *testing.T) {
+	const named = "https://github.com/owner/repo@2.1.git"
+	assert.False(t, HasCredential(named))
+	assert.Equal(t, named, CredentialFreeRemote(named))
+}

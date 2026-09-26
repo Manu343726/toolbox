@@ -19,14 +19,36 @@ import (
 // list must never be in.
 const RegistrationsFile = "catalogs.yaml"
 
+// The file holds no credential and this is the file's guarantee. It is readable, is often
+// committed, and is frequently pasted into a bug report, so a remote is recorded in the form
+// a person needs to read it and never in the form git was handed. What is recorded *about* a
+// credential is that one was involved, because a catalog that reaches a private repository
+// and one that reaches a public one are not the same thing to depend on. See `Auth` for what
+// that does and does not achieve — the short version is that git keeps the remote it was
+// cloned from in the checkout's own config, and this framework neither writes nor reads that.
+
 // Registration is one catalog this deployment serves.
 type Registration struct {
 	// ID is the catalog identifier: the first segment of every reference and URI for a skill
 	// in it, and the name a project writes in `skills:`.
 	ID string `yaml:"id"`
-	// Remote is where it came from, as the deployment named it. Empty for a catalog created
-	// locally and never given a remote.
+	// Remote is where it came from, **without any credential in it**. Empty for a catalog
+	// created locally and never given a remote.
+	//
+	// This file is readable, is often committed, and is frequently pasted into a bug report.
+	// A remote recorded as named would write a token into all three, while the display path
+	// redacting it would make the file look safe. The credential is held by whatever reached
+	// the remote — the machine's agent or helper, or a contributor at start — and is recorded
+	// only as the fact that it did.
 	Remote string `yaml:"remote,omitempty"`
+	// Auth states how this catalog authenticates, which is a fact about the machine rather
+	// than about the repository and the only part of the answer worth keeping.
+	//
+	// It is recorded so that "this catalog reaches a private repository" and "this one
+	// reaches a public one" are both readable from the file, and so a catalog whose
+	// authentication went away is visible rather than failing later at a `git pull` in
+	// git's own words.
+	Auth Auth `yaml:"auth,omitempty"`
 	// Directory is the checkout, relative to the provider's data directory. It is recorded
 	// rather than derived so that moving a deployment's data directory moves every catalog
 	// with it, and so that a person can see where the content they are being served is.

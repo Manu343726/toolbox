@@ -59,8 +59,13 @@ func (s *Service) RegisterCatalog(
 	}
 	remote := RemoteURL(named)
 	registration := Registration{
-		ID:        id,
-		Remote:    remote,
+		ID: id,
+		// Recorded without the credential, because this file is readable, is often
+		// committed, and is frequently pasted into a bug report. What is kept is the fact
+		// that a credential was involved, because a remote with one and a remote without one
+		// are different things to depend on.
+		Remote:    CredentialFreeRemote(remote),
+		Auth:      authFor(remote),
 		Directory: id,
 		CreatedAt: stamp(s.now),
 		// A catalog registered from a remote is one this deployment found, and a deployment
@@ -135,10 +140,14 @@ func (s *Service) CreateCatalog(
 		ReadOnly: false,
 	}
 	if named := strings.TrimSpace(request.Msg.GetRemote()); named != "" {
-		if err := s.git.Remote(ctx, directory, RemoteURL(named)); err != nil {
+		remote := RemoteURL(named)
+		if err := s.git.Remote(ctx, directory, remote); err != nil {
 			return nil, connectFailure(err)
 		}
-		registration.Remote = RemoteURL(named)
+		// git holds the remote as given, in the checkout's own config; the registration
+		// holds it without a credential, because the registration is a file a person reads.
+		registration.Remote = CredentialFreeRemote(remote)
+		registration.Auth = authFor(remote)
 	}
 	if err := s.registry.Add(registration); err != nil {
 		return nil, connectFailure(err)
