@@ -145,21 +145,62 @@ The first targets are the common cases:
 | **Codex** | *Not verified — see below* |
 | **VS Code Copilot** | *Not verified — see below* |
 
-**Not yet decided, and it is the substance of this phase:** what distillation *does*.
-For each target it has to be stated what is preserved, what is dropped, and what is
-rewritten — and the answer is a property of the client, not a preference. Three
-questions carry most of it:
+**The client says which it is.** The identity comes from the connection — what the
+client reports when it initialises — and not from configuration, because a distillation
+that guessed wrong hands a client content it cannot use, and nothing in the result
+would reveal the guess.
 
-- **Selection.** `name` and `description` are the only fields the standard requires,
-  and they are what a host reads to decide whether to load a skill. Does distillation
-  rewrite the description to mention the tools this client has, or is the description
-  the author's and left alone?
-- **Supporting files.** The manifest is complete on the wire whatever the client can
-  do with it. Does a client that will not follow a reference into `references/` get a
-  manifest without it, or the whole skill with the file present and unread?
-- **Executable content.** A `scripts/` file is text either way. Is it in the manifest
-  for a client that cannot run it, and does `allowed-tools` — ignored, per *Security* —
-  leave any trace at all in the distilled output?
+### What distillation does
+
+Two things, and neither is a rewrite:
+
+- **It removes what the client does not support.** The manifest that comes back is
+  built for the client that asked: a file this client cannot use is not in it. This is
+  the substance — the served surface is what the client can actually act on, rather than
+  the whole skill with the client left to discard what it cannot reach.
+- **It substitutes what it removes.** Where a feature is missing and the skill depends
+  on it, the distillation can add instructions that tell the model how to achieve the
+  same thing by other means. The author's `description` is **never** rewritten: it
+  reaches the model as written, because two clients reading different descriptions of
+  one skill means the model is reasoning about something the author did not write.
+
+Toolbox's own frontmatter extension is **kept on the template and not carried into the
+output**. The served frontmatter is the standard's fields, so another reader gets a
+skill it recognises, and a property about how *this* deployment treats a skill stays on
+the template where it belongs.
+
+**Not yet decided, and it is the sharpest question in the feature:** a manifest built
+by removing files is *incomplete*, and the specification says an array manifest
+**MUST** be complete — every file of the skill, each exactly once. Distillation and that
+rule do not obviously coexist. See *Distillation and manifest completeness* below.
+
+### Distillation and manifest completeness
+
+The specification is unambiguous:
+
+> When `resources` is an array, it **MUST** be complete. It lists every file of the
+> skill, each exactly once, including an entry whose `uri` equals the skill's top-level
+> `uri`.
+
+A manifest with a file removed is not that. So distillation as described needs one of
+these to be true, and the choice is a conformance decision rather than a preference:
+
+1. **A distilled skill is a different skill.** It has its own URI, its own complete
+   manifest of exactly what it contains, and its own digests. Completeness holds, because
+   the served artifact is complete *for what it is*. The cost is that the same
+   `code-review` has several identities depending on who asks, and a client's approval
+   of one does not carry to another.
+2. **The manifest is marked `"dynamic"`.** The specification's stated escape hatch, for
+   content "generated such that stable digests cannot be published". We *do* have
+   stable digests, so this is honest only if a distilled skill genuinely has no stable
+   identity — which is close to true, since it varies by client. It also forfeits
+   content verification for every client, which is a real loss.
+3. **An incomplete manifest is served and the deviation is recorded.** Simplest, and a
+   documented departure from a MUST that clients may rely on for approval binding.
+
+**Not yet decided.** This is the question to settle before the distillation code is
+written, because the answer changes the shape of the entry, the digests, and what an
+approval means.
 
 ### What a Toolbox extension may add
 
