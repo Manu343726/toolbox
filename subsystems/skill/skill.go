@@ -1,19 +1,54 @@
-// Package skill implements an independent, versioned skill service.
+// Package skill aggregates every source of agent skills a deployment has into one surface, and
+// serves that surface to the Model Context Protocol endpoint.
+//
+// A skill is a body of instructions for carrying out a task, written once and served to an
+// agent that needs it. It is a *domain resource* like a workflow or a prompt, and what makes it
+// different is that its content is not a field in a message: a skill is a directory of files,
+// and this subsystem has to know what its files are, what they hash to, and which client it is
+// serving them to.
+//
+// # What this subsystem is
+//
+// The **aggregator**. It holds the catalogs a deployment has integrated, resolves a qualified
+// reference to the one that owns it, and presents every catalog's skills as one surface, so a
+// project can reach a skill from any integrated catalog without knowing which subsystem provides
+// it.
+//
+// That is the same shape as the API layer's provider resolution, and for the same reason:
+// several implementations of one contract, selected at the point of use, with a deployment
+// deciding which are present. The consequence to carry through is the one that applies to every
+// provider here — resolution is by **identifier**, not by contract name, because several
+// providers serve the same contract on purpose.
+//
+// # Three things it does, and why one subsystem does them
+//
+//  1. **Aggregates.** It resolves `<catalog>.<name>` to the catalog that owns it.
+//  2. **Serves over MCP.** It is the deployment's `io.modelcontextprotocol/skills` endpoint, so a
+//     skill reaches an agent through the same client that already sees the deployment's tools.
+//  3. **Offers the tools that change what a project has.** It is how an agent finds a skill, adds
+//     one, enables one and disables one.
+//
+// # What it is not
+//
+// It is not a store of skills. The catalogs own storage — a directory, a checkout, a download —
+// and this subsystem never writes to one. Its only write is to a **project's configuration
+// file**, adding a reference to the project's `skills:` list, and that write is proposed before
+// it is made because a person writes and reviews that file. See AGENTS.md rule 17 and
+// docs/skills.md.
+//
+// The versioned in-memory catalogue of skill metadata this subsystem used to hold is gone: it
+// had no notion of a catalog, of a skill directory, of files or of digests, and none of those
+// are things this subsystem can do without.
 package skill
 
 import (
 	"context"
-	"fmt"
-	"sort"
-	"strings"
-	"sync"
 
-	"connectrpc.com/connect"
+	"github.com/Manu343726/toolbox/pkg/api"
+	"github.com/Manu343726/toolbox/pkg/skills"
+	catalogv1 "github.com/Manu343726/toolbox/pkg/skills/skillv1/skillv1connect"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
-	versions "github.com/Manu343726/toolbox/pkg/version"
-	skillv1 "github.com/Manu343726/toolbox/subsystems/skill/skillv1"
 	"github.com/Manu343726/toolbox/subsystems/skill/skillv1/skillv1connect"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -21,126 +56,69 @@ const (
 	Name = "skill"
 	// Version is the reference implementation version.
 	Version = "0.1.0"
+	// Description is what a catalog reports this subsystem as.
+	Description = "Aggregates agent skills from every integrated catalog and serves them over " +
+		"the Model Context Protocol skills extension."
 )
 
-// Options configures the skill subsystem.
+// Options configures the skills subsystem.
 type Options struct {
-	// Store optionally supplies an existing skill store.
-	Store *Store
+	// Directory finds the catalogs available in the deployment.
+	//
+	// A deployment with no integrated catalogs beyond the implicit local one is a working
+	// deployment, so this may be nil — and then only the project's own skills are served.
+	Directory CatalogDirectory
+	// ProjectDir is the project's `.toolbox` directory: where the local catalog and the
+	// project's `skills:` list live.
+	//
+	// It is a directory rather than a configuration file because a person may configure a
+	// project before its skills directory exists, and a local catalog with no directory is a
+	// project that offers nothing rather than a project that failed to start.
+	ProjectDir string
+	// Config is the resolved project configuration, from which the `skills:` list is read and
+	// to which the write tools write. It may be nil for a deployment serving only a
+	// deployment's own configuration, in which case the project's skills are the local ones.
+	Config ConfigSource
+	// ExposedTools reports which tools the deployment exposes, so a skill's declared
+	// requirements can be checked rather than granted. It may be nil, in which case no
+	// requirement is reported unmet — a deployment that does not know its own surface cannot
+	// tell a reader that a dependency is missing, and guessing would be worse.
+	ExposedTools ExposedTools
 	// ListenAddress defaults to 127.0.0.1:0.
 	ListenAddress string
 	// Version overrides the implementation version.
 	Version string
 }
 
-// Store is a concurrency-safe skill store.
-type Store struct {
-	mu     sync.RWMutex
-	skills map[string]*skillv1.Skill
+// ExposedTools reports the tool names a deployment exposes.
+//
+// It exists so a skill's declared requirements can be *checked*. A dependency is a statement of
+// need, and this framework honours the statement by reporting whether the deployment has what
+// the skill says it needs — never by granting it, and never by pretending.
+type ExposedTools interface {
+	// ExposedTools returns the names of the tools this deployment currently exposes.
+	ExposedTools(context.Context) ([]string, error)
 }
 
-// NewStore creates an empty skill store.
-func NewStore() *Store { return &Store{skills: make(map[string]*skillv1.Skill)} }
+// Providers describes this subsystem to a catalog's provider directory.
+//
+// It implements no provider contract. A catalog is a *source* of skills, and this subsystem
+// aggregates sources rather than being one: a deployment that reached its own project directory
+// through the provider mechanism would be a deployment that had to have a subsystem running in
+// order to read the skills a person put in their project.
+func Providers(string) []api.Provider { return nil }
 
-func skillKey(id, version string) string { return id + "\x00" + version }
-
-// Put stores a skill.
-func (s *Store) Put(value *skillv1.Skill, failIfExists bool) (*skillv1.Skill, error) {
-	if err := validateSkill(value); err != nil {
+// New builds the subsystem's server.
+func New(options Options) (*subsystem.Server, error) {
+	service, err := NewService(options)
+	if err != nil {
 		return nil, err
 	}
-	key := skillKey(value.GetId(), value.GetVersion())
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.skills[key]; exists && failIfExists {
-		return nil, fmt.Errorf("skill %s@%s already exists", value.GetId(), value.GetVersion())
-	}
-	copy := proto.Clone(value).(*skillv1.Skill)
-	s.skills[key] = copy
-	return proto.Clone(copy).(*skillv1.Skill), nil
-}
-
-// Get returns a skill by identifier and optional version.
-func (s *Store) Get(id, version string) (*skillv1.Skill, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if version != "" {
-		value, ok := s.skills[skillKey(id, version)]
-		if !ok {
-			return nil, fmt.Errorf("skill %s@%s not found", id, version)
-		}
-		return proto.Clone(value).(*skillv1.Skill), nil
-	}
-	var latest *skillv1.Skill
-	for _, value := range s.skills {
-		if value.GetId() == id && (latest == nil || versions.Compare(value.GetVersion(), latest.GetVersion()) > 0) {
-			latest = value
-		}
-	}
-	if latest == nil {
-		return nil, fmt.Errorf("skill %s not found", id)
-	}
-	return proto.Clone(latest).(*skillv1.Skill), nil
-}
-
-// List returns skills sorted by identifier and version.
-func (s *Store) List(prefix string) []*skillv1.Skill {
-	s.mu.RLock()
-	result := make([]*skillv1.Skill, 0)
-	for _, value := range s.skills {
-		if prefix == "" || strings.HasPrefix(value.GetId(), prefix) {
-			result = append(result, proto.Clone(value).(*skillv1.Skill))
-		}
-	}
-	s.mu.RUnlock()
-	// Versions of one resource are ordered by value rather than as text, so a
-	// listing reads oldest to newest instead of putting the tenth ahead of the
-	// second. A client reading a listing is deciding which to ask for.
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].GetId() == result[j].GetId() {
-			return versions.Compare(result[i].GetVersion(), result[j].GetVersion()) < 0
-		}
-		return result[i].GetId() < result[j].GetId()
-	})
-	return result
-}
-
-func validateSkill(value *skillv1.Skill) error {
-	if value == nil {
-		return fmt.Errorf("skill is required")
-	}
-	if strings.TrimSpace(value.GetId()) == "" || strings.TrimSpace(value.GetVersion()) == "" || strings.TrimSpace(value.GetName()) == "" || strings.TrimSpace(value.GetInstructions()) == "" {
-		return fmt.Errorf("id, name, version, and instructions are required")
-	}
-	return nil
-}
-
-// Handler implements SkillService.
-type Handler struct{ store *Store }
-
-// NewHandler creates a skill handler.
-func NewHandler(store *Store) *Handler {
-	if store == nil {
-		store = NewStore()
-	}
-	return &Handler{store: store}
-}
-
-// New is the programmatic in-process entrypoint for the skill subsystem.
-func New(options Options) (*subsystem.Server, error) {
-	store := options.Store
-	if store == nil {
-		store = NewStore()
-	}
-	version := options.Version
-	if version == "" {
-		version = Version
-	}
-	path, handler := skillv1connect.NewSkillServiceHandler(NewHandler(store))
+	path, handler := skillv1connect.NewSkillServiceHandler(service)
 	return subsystem.NewServer(subsystem.Config{
 		Name:          Name,
-		Version:       version,
-		Description:   "Stores reusable, versioned agent skills.",
+		Version:       service.version,
+		Description:   Description,
 		ListenAddress: options.ListenAddress,
 		Services: []subsystem.Service{{
 			Name:    skillv1connect.SkillServiceName,
@@ -150,35 +128,13 @@ func New(options Options) (*subsystem.Server, error) {
 	})
 }
 
-// PutSkill stores a skill.
-func (h *Handler) PutSkill(_ context.Context, req *connect.Request[skillv1.PutSkillRequest]) (*connect.Response[skillv1.PutSkillResponse], error) {
-	if req == nil || req.Msg == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("request is required"))
-	}
-	value, err := h.store.Put(req.Msg.GetSkill(), req.Msg.GetFailIfExists())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	return connect.NewResponse(&skillv1.PutSkillResponse{Skill: value}), nil
-}
+// ServiceName is the contract this subsystem serves.
+const ServiceName = skillv1connect.SkillServiceName
 
-// GetSkill returns one skill.
-func (h *Handler) GetSkill(_ context.Context, req *connect.Request[skillv1.GetSkillRequest]) (*connect.Response[skillv1.GetSkillResponse], error) {
-	if req == nil || req.Msg == nil || strings.TrimSpace(req.Msg.GetId()) == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id is required"))
-	}
-	value, err := h.store.Get(req.Msg.GetId(), req.Msg.GetVersion())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
-	}
-	return connect.NewResponse(&skillv1.GetSkillResponse{Skill: value}), nil
-}
+// CatalogServiceName is the contract a catalog provider serves, and this subsystem resolves to
+// rather than serving it.
+const CatalogServiceName = catalogv1.SkillCatalogServiceName
 
-// ListSkills returns stored skills.
-func (h *Handler) ListSkills(_ context.Context, req *connect.Request[skillv1.ListSkillsRequest]) (*connect.Response[skillv1.ListSkillsResponse], error) {
-	prefix := ""
-	if req != nil && req.Msg != nil {
-		prefix = req.Msg.GetIdPrefix()
-	}
-	return connect.NewResponse(&skillv1.ListSkillsResponse{Skills: h.store.List(prefix)}), nil
-}
+// ProviderRole is the role a catalog provider plays, re-exported so a deployment registering one
+// does not have to import the root package to learn the role's name.
+const ProviderRole = skills.ProviderRole

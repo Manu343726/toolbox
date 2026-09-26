@@ -323,6 +323,21 @@ func digest(content []byte) string {
 	return DigestPrefix + hex.EncodeToString(sum[:])
 }
 
+// NewFile returns a manifest entry for some content, digesting it.
+//
+// It is exported because a manifest entry is the one thing two places must agree on: the reader
+// that walks a directory, and the check that verifies what a catalog published. A caller that
+// wrote its own digest computation would be a second statement of the same fact, and a
+// mismatch between them would look exactly like tampering.
+func NewFile(relative string, content []byte) File {
+	return File{
+		Path:     relative,
+		Size:     int64(len(content)),
+		Digest:   digest(content),
+		MIMEType: MIMETypeFor(relative),
+	}
+}
+
 // mimeTypeFor names what a file is served as.
 //
 // The table is small and stated rather than detected, because a content sniffer would serve
@@ -493,13 +508,7 @@ func manifestFromDir(dir string) ([]File, error) {
 		if readErr != nil {
 			return readErr
 		}
-		slashed := filepath.ToSlash(relative)
-		files = append(files, File{
-			Path:     slashed,
-			Size:     int64(len(content)),
-			Digest:   digest(content),
-			MIMEType: MIMETypeFor(slashed),
-		})
+		files = append(files, NewFile(filepath.ToSlash(relative), content))
 		return nil
 	})
 	if err != nil {

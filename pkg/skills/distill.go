@@ -321,9 +321,7 @@ func serveManifest(files []File, content []byte) []File {
 	served := copyManifest(files)
 	for index := range served {
 		if served[index].Path == SkillFileName {
-			served[index].Size = int64(len(content))
-			served[index].Digest = digest(content)
-			served[index].MIMEType = MIMETypeFor(SkillFileName)
+			served[index] = NewFile(SkillFileName, content)
 			return served
 		}
 	}

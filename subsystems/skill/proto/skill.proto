@@ -2,77 +2,326 @@ syntax = "proto3";
 
 package toolbox.skill.v1;
 
+import "toolbox/skills/v1/skill.proto";
+
 option go_package = "github.com/Manu343726/toolbox/subsystems/skill/skillv1;skillv1";
 
-// SkillService stores reusable, versioned skills and prompt resources.
+// SkillService is the deployment's view of its skills: every catalog's skills as one surface,
+// and the operations that change which of them the project has.
+//
+// It is read-only over the skills themselves. A write RPC here that did not write a catalog
+// would misreport where a skill lives, and the write the framework does perform — adding,
+// enabling and disabling a skill — is a write to the *project's configuration file*, not to
+// any catalog. That is the reconciliation the design rests on: "adding a skill to the project"
+// means naming it, and naming is a configuration change, so it is here and it says so.
 service SkillService {
-  // @toolbox.side-effects create update
-  // PutSkill creates or replaces a skill.
-  rpc PutSkill(PutSkillRequest) returns (PutSkillResponse);
   // @toolbox.side-effects read_only
-  // GetSkill returns one skill.
-  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
-  // @toolbox.side-effects read_only
-  // ListSkills returns stored skills.
+  // ListSkills returns every skill the project may use, from every integrated catalog.
+  //
+  // A project's effective set is every skill in the local catalog plus every reference it
+  // names. Local skills are included implicitly, so they are not listed in the project's
+  // configuration and cannot be forgotten there.
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // @toolbox.side-effects read_only
+  // GetSkill returns one skill with the manifest as this project would be served it.
+  //
+  // What is returned is a template: the portable artefact, and the thing a project's pin is
+  // taken against. What a particular client receives is a distillation of it, which the
+  // Model Context Protocol endpoint serves rather than this method.
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+
+  // @toolbox.side-effects read_only
+  // FindSkill searches the integrated catalogs for skills matching what a caller wants.
+  //
+  // The query is pushed down to each catalog, so a large catalog is not shipped here to be
+  // filtered. A catalog that cannot search is reported as having returned nothing, rather than
+  // returning everything and leaving the caller to notice.
+  rpc FindSkill(FindSkillRequest) returns (FindSkillResponse);
+
+  // @toolbox.side-effects read_only
+  // ReadSkillFile returns one file of a skill, with the digest and size its manifest gave for
+  // it, so a caller can verify what it fetched.
+  rpc ReadSkillFile(ReadSkillFileRequest) returns (ReadSkillFileResponse);
+
+  // @toolbox.side-effects read_only
+  // ListCatalogs returns the catalogs this deployment has integrated, and whether each can be
+  // written to.
+  //
+  // A write against a read-only catalog is refused with a reason, and this is where a caller
+  // learns the catalog is read-only before it fetches anything.
+  rpc ListCatalogs(ListCatalogsRequest) returns (ListCatalogsResponse);
+
+  // @toolbox.side-effects read_only
+  // CheckPins reports which of the project's named skills have changed underneath it.
+  //
+  // A named skill is pinned by its manifest, and a catalog is live, so the content behind a
+  // name can change under a project that never asked it to. Drift is reported and the skill
+  // is still served: the pin is the agreement, and nothing is blocked behind the user's back.
+  rpc CheckPins(CheckPinsRequest) returns (CheckPinsResponse);
+
+  // @toolbox.side-effects read_only
+  // Validate checks every skill the project may use, and fails a deployment at start rather
+  // than at first use.
+  //
+  // It is read-only and earns its place for that reason: a skill with a frontmatter this
+  // framework cannot read is a deployment that will serve a broken skill to the first model
+  // that asks for it, and a person would rather hear at start.
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+
+  // @toolbox.side-effects create update
+  // AddSkill adds a qualified reference to the project's skills.
+  //
+  // It writes the project's configuration file and nothing else, and it does so only when the
+  // caller confirms: the response states the file and the change, and the write happens on a
+  // second call. A change to a project's configuration is the user's to confirm — AGENTS.md
+  // rule 17 — and that rule is implemented as a value the agent relays and the user answers,
+  // rather than as a prompt, because a rule that only held where the transport can ask would
+  // not be a framework rule.
+  rpc AddSkill(AddSkillRequest) returns (AddSkillResponse);
+
+  // @toolbox.side-effects create update
+  // EnableSkill adds a reference that is known to the project but not included.
+  //
+  // It is the same write as AddSkill under a name that says what a caller means by it, because
+  // a tool whose name says "enable" and whose effect is not obvious from the name is a tool
+  // nobody can use safely.
+  rpc EnableSkill(EnableSkillRequest) returns (EnableSkillResponse);
+
+  // @toolbox.side-effects delete
+  // DisableSkill removes a reference from the project's skills.
+  //
+  // It is `delete` rather than `update` because removing a skill from a project is a different
+  // consequence from changing one, and a deployment may reasonably allow the second without the
+  // first. It writes the project's configuration file, subject to the same confirmation.
+  rpc DisableSkill(DisableSkillRequest) returns (DisableSkillResponse);
 }
 
-// Skill is a reusable instruction and capability contract.
-message Skill {
-  // Stable skill identifier.
-  string id = 1;
-  // Skill version.
-  string version = 2;
-  // Human-readable name.
-  string name = 3;
-  // Human-readable description.
-  string description = 4;
-  // Instruction body or a reference to a packaged instruction.
-  string instructions = 5;
-  // Names the skill requires, such as the tools it calls. They are the
-  // deployment's own identifiers: this framework does not define a vocabulary
-  // here, so a skill names what it needs and a deployment decides what that means.
-  repeated string required_capabilities = 6;
-  // Policy references required by the skill.
-  repeated string policy_refs = 7;
+// ProjectSkill is one skill of a project's effective set, as the project has it.
+message ProjectSkill {
+  // The reference, as the project's configuration writes it.
+  toolbox.skills.v1.SkillRef ref = 1;
+  // Resource URI of the SKILL.md.
+  string uri = 2;
+  // Description, which is the field a model selects the skill on.
+  string description = 3;
+  // Catalog identifier.
+  string catalog = 4;
+  // Whether the project's configuration names this skill.
+  //
+  // A skill in the local catalog is part of the project without being named, so this is false
+  // for every local skill and true for every remote one. It is reported rather than implied,
+  // because "this project depends on somebody else's content" is a fact a person reviewing a
+  // configuration file wants to be able to read off the answer.
+  bool declared = 5;
+  // Whether the skill's manifest has changed since the project pinned it.
+  bool outdated = 6;
 }
 
-// PutSkillRequest stores a skill.
-message PutSkillRequest {
-  // Skill to store.
-  Skill skill = 1;
-  // Reject replacement when true and the skill already exists.
-  bool fail_if_exists = 2;
-}
-
-// PutSkillResponse returns the stored skill.
-message PutSkillResponse {
-  // Stored skill.
-  Skill skill = 1;
-}
-
-// GetSkillRequest identifies a skill version.
-message GetSkillRequest {
-  // Skill identifier.
-  string id = 1;
-  // Optional version. Empty returns the latest version.
-  string version = 2;
-}
-
-// GetSkillResponse contains one skill.
-message GetSkillResponse {
-  // Matching skill.
-  Skill skill = 1;
-}
-
-// ListSkillsRequest filters stored skills.
+// ListSkillsRequest asks for a project's skills.
 message ListSkillsRequest {
-  // Optional identifier prefix.
-  string id_prefix = 1;
+  // Optional catalog identifier, to list one catalog's contribution rather than all of them.
+  string catalog = 1;
+  // Optional page size. Zero means the server's own default.
+  int32 page_size = 2;
+  // Optional page token from a previous response.
+  string page_token = 3;
 }
 
-// ListSkillsResponse contains stored skills.
+// ListSkillsResponse is a page of a project's skills.
 message ListSkillsResponse {
-  // Skills sorted by identifier and version.
-  repeated Skill skills = 1;
+  // The skills, ordered by qualified name so a listing is reproducible.
+  repeated ProjectSkill skills = 1;
+  // Token for the next page, or empty when there is no more.
+  string next_page_token = 2;
+}
+
+// GetSkillRequest asks for one skill.
+message GetSkillRequest {
+  // Qualified reference, "<catalog>.<name>".
+  string ref = 1;
+}
+
+// GetSkillResponse is one skill, as a template.
+message GetSkillResponse {
+  // The skill, with the manifest a pin is taken against.
+  toolbox.skills.v1.SkillEntry entry = 1;
+  // The project file, when one was read, so a caller can show a person where the pin lives.
+  string pinned_in = 2;
+  // Whether the skill's manifest differs from the pin.
+  bool outdated = 3;
+  // The requirements this deployment cannot provide, so a caller can report a dependency that
+  // is missing rather than silently treating it as met.
+  repeated toolbox.skills.v1.SkillRef unmet = 4;
+}
+
+// FindSkillRequest searches the integrated catalogs.
+message FindSkillRequest {
+  // What to look for, matched against a skill's name and description.
+  string query = 1;
+  // Optional catalog identifier, to search one catalog rather than all of them.
+  string catalog = 2;
+  // Optional page size. Zero means the server's own default.
+  int32 page_size = 3;
+  // Optional page token from a previous response.
+  string page_token = 4;
+}
+
+// FindSkillResponse is what the catalogs found.
+message FindSkillResponse {
+  // The matching skills, ordered by qualified name.
+  repeated ProjectSkill skills = 1;
+  // Token for the next page, or empty when there is no more.
+  string next_page_token = 2;
+  // Catalogs that could not search, so a caller is not left believing the result is complete.
+  repeated string unsearchable_catalogs = 3;
+}
+
+// ReadSkillFileRequest asks for one file of a skill.
+message ReadSkillFileRequest {
+  // Qualified reference, "<catalog>.<name>".
+  string ref = 1;
+  // Path within the skill, slash-separated, relative to the skill directory.
+  string path = 2;
+}
+
+// ReadSkillFileResponse is one file of a skill.
+message ReadSkillFileResponse {
+  // The file's path, as it was asked for.
+  string path = 1;
+  // The raw bytes.
+  bytes content = 2;
+  // SHA-256 of the bytes, in the manifest's form.
+  string digest = 3;
+  // Byte length of the bytes.
+  int64 size = 4;
+  // Media type to serve the file as.
+  string mime_type = 5;
+}
+
+// ListCatalogsRequest asks which catalogs are integrated.
+message ListCatalogsRequest {}
+
+// ListCatalogsResponse is the catalogs this deployment has integrated.
+message ListCatalogsResponse {
+  // The catalogs, ordered by identifier.
+  repeated toolbox.skills.v1.CatalogInfo catalogs = 1;
+}
+
+// CheckPinsRequest asks whether any named skill has changed.
+message CheckPinsRequest {
+  // References to check. Empty means every skill the project names.
+  repeated string refs = 1;
+}
+
+// CheckPinsResponse reports drift.
+message CheckPinsResponse {
+  // The skills whose manifest no longer matches the pin.
+  repeated ProjectSkill outdated = 1;
+  // Skills that are named but no longer resolve, which is a different failure from drift: a
+  // catalog that was unregistered leaves a project's reference pointing at nothing.
+  repeated MissingSkillRef missing = 2;
+  // The project file the pins are in, or empty when the project has no configuration file.
+  string pinned_in = 3;
+}
+
+// MissingSkillRef is a reference the project names that resolves to nothing.
+//
+// It is reported separately from drift, because the two are different failures: drift is a
+// skill whose content changed, and this is a reference whose catalog is gone. A deployment
+// that unregistered a catalog leaves a project's list naming something that resolves to
+// nothing, and a person needs to hear that rather than be shown an empty result.
+message MissingSkillRef {
+  // The reference as the project writes it.
+  string ref = 1;
+  // Why it does not resolve.
+  string reason = 2;
+}
+
+// ValidateRequest asks for every skill the project may use to be checked.
+message ValidateRequest {
+  // Optional catalog identifier, to check one catalog rather than all of them.
+  string catalog = 1;
+}
+
+// ValidateResponse is what was checked.
+message ValidateResponse {
+  // How many skills were checked.
+  int32 checked = 1;
+  // The skills that are wrong, each naming what is wrong with it.
+  repeated InvalidSkillRef invalid = 2;
+}
+
+// InvalidSkillRef is a skill this framework cannot serve, and why.
+message InvalidSkillRef {
+  // The reference.
+  string ref = 1;
+  // What is wrong, in terms its author can act on.
+  string reason = 2;
+  // The error's classification, so a caller can tell a broken skill from an unreachable one.
+  string kind = 3;
+}
+
+// AddSkillRequest adds a qualified reference to the project's skills.
+message AddSkillRequest {
+  // Qualified reference, "<catalog>.<name>".
+  string ref = 1;
+  // Write the change. False returns what would change and changes nothing.
+  //
+  // This is the configuration-confirmation rule, and it is a field rather than a separate
+  // call so that the two cannot be reordered: a caller that has not been told what the change
+  // is cannot have set this.
+  bool confirm = 2;
+}
+
+// AddSkillResponse is what adding a skill would do, or did.
+message AddSkillResponse {
+  // The change, naming the file and the change, for a person to confirm.
+  string summary = 1;
+  // The project's configuration file the change applies to.
+  string file = 2;
+  // True when the change was written.
+  bool applied = 3;
+  // The project's skills as they now are.
+  repeated string skills = 4;
+}
+
+// EnableSkillRequest adds a reference that is known to the project but not included.
+message EnableSkillRequest {
+  // Qualified reference, "<catalog>.<name>".
+  string ref = 1;
+  // Write the change. False returns what would change and changes nothing.
+  bool confirm = 2;
+}
+
+// EnableSkillResponse is what enabling a skill would do, or did.
+message EnableSkillResponse {
+  // The change, naming the file and the change, for a person to confirm.
+  string summary = 1;
+  // The project's configuration file the change applies to.
+  string file = 2;
+  // True when the change was written.
+  bool applied = 3;
+  // The project's skills as they now are.
+  repeated string skills = 4;
+}
+
+// DisableSkillRequest removes a reference from the project's skills.
+message DisableSkillRequest {
+  // Qualified reference, "<catalog>.<name>".
+  string ref = 1;
+  // Write the change. False returns what would change and changes nothing.
+  bool confirm = 2;
+}
+
+// DisableSkillResponse is what disabling a skill would do, or did.
+message DisableSkillResponse {
+  // The change, naming the file and the change, for a person to confirm.
+  string summary = 1;
+  // The project's configuration file the change applies to.
+  string file = 2;
+  // True when the change was written.
+  bool applied = 3;
+  // The project's skills as they now are.
+  repeated string skills = 4;
 }

@@ -703,3 +703,28 @@ func unmarshalYAML(data []byte) (map[string]any, error) {
 	}
 	return document, nil
 }
+
+// SkillFromFrontmatter reads a frontmatter document into the typed skill, for a caller that
+// holds a document rather than a file.
+//
+// A catalog returns a skill's frontmatter as a parsed object, and the aggregator needs the typed
+// reading of it — the requirements to check, the enabled flag to honour, the model-invocation
+// fact to spell per client. It is the same reader the file path uses, so a skill's features are
+// read one way whether they arrived as bytes or as a value.
+func SkillFromFrontmatter(document map[string]any) (Frontmatter, error) {
+	return parseFrontmatter(document)
+}
+
+// SkillFromFrontmatterTyped is SkillFromFrontmatter reduced to what a caller usually wants: the
+// typed skill.
+//
+// It reports a disagreement between two sources the same way the file path does, because a
+// template that states one fact twice with two values is refused whether it was read from bytes
+// or from a value.
+func SkillFromFrontmatterTyped(document map[string]any) (Skill, error) {
+	front, err := parseFrontmatter(document)
+	if err != nil {
+		return Skill{}, err
+	}
+	return front.Skill, nil
+}
