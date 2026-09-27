@@ -89,7 +89,7 @@ correctly is most of the work.
 |---|---|---|---|
 | **What it is** | What people wrote: architecture notes, runbooks, decisions, policies | What the system derived from it and from conversation: facts, entities, observations, models | Readable documents rendered from the engine's current beliefs |
 | **Who writes it** | People, in files, reviewed by other people | The system, from retained content | The system, on a refresh |
-| **Stored as** | Markdown in a Git repository | The memory backend's indexes | Backend pages, and a markdown export of them |
+| **Stored as** | Markdown in a Git repository | The memory backend's indexes | Backend pages, and a markdown export of them — see the whole-wiki view in §5.8, which puts all three layers in one tree |
 | **What makes it trustworthy** | Authorship and review. A named person wrote it and someone accepted it | Evidence. Every fact traces to a document, every observation to its facts | Nothing on its own. It is what the system believes *now* |
 | **If deleted** | Nothing to rebuild from — this is the loss | **Rebuilt in full from the corpus** | Rebuilt from the engine |
 | **What it cannot do** | Notice that a decision was reversed last month | Show you the sentence someone wrote **if the deployment turned raw-text persistence off**, which no default is stated for | Be quoted as authority |
@@ -290,6 +290,24 @@ person owns. See §5 for the design.
 | W-19 | **Reconcile runs on merged content, not on every local edit.** An uncommitted or unreviewed change is not knowledge the deployment should believe. (W) |
 | W-20 | **The projection never flows back into the corpus.** Generated pages are not reconciled as authored content, so the system cannot accumulate its own output as input. (U) |
 | W-21 | **Contradictions between two authored documents are preserved, not resolved.** An ADR that supersedes another is the corpus's own statement about which holds, and the reconcile passes both through with that metadata intact rather than picking one. (W) |
+
+### The whole-wiki view
+
+A base is two halves. Read one half and you have a documentation set or a set of
+generated documents; read both as one thing and you have what a person actually
+wants when they ask a system what it knows. See §5.8.
+
+| # | Requirement |
+|---|---|
+| X-1 | **A base projects to a single markdown tree spanning both halves.** An authored corpus file and a derived page sit in the same tree, in the same index, because a reader should not have to know which half produced a file to read it. (U) |
+| X-2 | **Every projected file states its origin in frontmatter**, so "was this written by a person or generated?" is answered by opening the file rather than by knowing where it sits. (U) |
+| X-3 | **An authored file is projected verbatim** — the bytes the reconcile ingested, not a re-rendering. Re-rendering a reviewed document produces a *different* document, and a diff between what was reviewed and what is published is a question nobody asked. (W) |
+| X-4 | **A derived page is projected from the backend's own page bundle**, not rendered a second time by this framework. The bundle already exists, and rendering it ourselves would be a second translation of one artifact — which framework rule 11 exists to prevent. §12.2. (H) |
+| X-5 | **One index at the root**, in tree order, linking every projected file. The index is generated and is never part of the corpus. (U) |
+| X-6 | **The projection is derived and regenerable in full.** A file in it is not a source, an edit to it is discarded by the next projection rather than applied, and deleting the whole tree costs nothing. (W) |
+| X-7 | **A caller can project a subtree, one origin, or everything.** A base with three thousand files must be readable one page at a time without exporting three thousand. (U) |
+| X-8 | **A projection records what it was taken from** — the base, the corpus commit it reflects, and the backend's answer on whether any page in it is stale — so a reader can tell a current view from an out-of-date one. (W) |
+| X-9 | **The projection is never a reconcile input.** The whole-wiki view is the one artifact in this system that looks exactly like a corpus and is not one, so this is stated as a requirement rather than left to W-20 to cover. (U) |
 
 ### The memory half — ingestion
 
@@ -888,6 +906,40 @@ answered a question nobody asked, and the observation is the thing a person then
 has to unpick. This is why the reconcile reports rather than resolves (W-21), and
 why the tags carry `status` and `kind` through rather than flattening them.
 
+### 5.8 The whole-wiki view
+
+A base is two halves, and until now this document has described them as two
+things to be read — corpus files through `GetContent`, pages through
+`GetContentTree` and `GetContent`. What a person actually wants when they ask a
+system what it knows is *one* body of documentation they can browse. X-1 is that
+view, and it is the one feature here that neither half provides alone.
+
+**The shape.** One directory, mirroring `GetContentTree`. Authored files sit
+where the corpus puts them. Derived pages sit where their folder tree puts them.
+A generated `index.md` at the root lists everything in tree order, and each file
+carries its origin in frontmatter, so a reader can tell a reviewed runbook from
+a rendered page by opening it rather than by knowing the base.
+
+**The two halves are handled differently, on purpose.** An authored file is
+copied verbatim (X-3) — the bytes the reconcile ingested. A derived page comes
+from the backend's own page bundle (X-4). The asymmetry is the point: a
+re-rendered authored file would differ from the reviewed original, and a diff
+between them is a question nobody asked, whereas the backend's pages *are* a
+rendering and their canonical form is whatever the backend says it is.
+
+**This is not a corpus, and that is the thing most likely to be got wrong.** The
+view is byte-for-byte shaped like a wiki, which makes it the one artifact in this
+system that a well-meaning agent could feed back into a reconcile. X-6 and X-9
+say it is derived and regenerable, and that reconcile never reads it. The
+generated `index.md` in particular must never be ingested: it is the one file
+that describes the whole tree and is therefore the one that could make the
+second generation reason from the first.
+
+**Not a filesystem mount.** Hindsight ships `hindsight fs mount`, which mirrors a
+bank's page tree to disk and keeps it current. It is the right tool at a
+terminal and the wrong one here — it is a long-running process around an export
+endpoint this subsystem can call directly, and it projects pages only. §12.2 has
+the details and the line where its coverage stops.
 
 ## 6. The contract
 
@@ -900,7 +952,7 @@ to decide who may call it and what the MCP gateway checks before exposing it.
 
 | Service | RPCs |
 |---|---|
-| `ContentService` | `ListContent`, `GetContent`, `WriteContent`, `CurateContent`, `DeleteContent`, `GetContentTree`, `ListContentChunks`, `ReprocessContent` |
+| `ContentService` | `ListContent`, `GetContent`, `WriteContent`, `CurateContent`, `DeleteContent`, `GetContentTree`, `ListContentChunks`, `ReprocessContent`, `ExportWiki` |
 | `QueryService` | `Search`, `Recall`, `Reflect`, `ListTags`, `PreviewExtraction`, `PreviewPrompts` |
 | `CorpusService` | `PlanReconcile`, `ApplyReconcile`, `GetCorpusStatus`, `ReadCorpusFile`, `RebuildCorpus` |
 | `KnowledgeBaseService` | `ListBases`, `GetBase`, `CreateBase`, `UpdateBase`, `DeleteBase`, `ResetBaseConfig`, `GetBaseConfig`, `UpdateBaseConfig`, `GetBaseStats`, `GetBaseIngestionSeries`, `ListBaseAliases`, `AddBaseAlias`, `SetPrimaryBaseAlias`, `RemoveBaseAlias` |
@@ -930,6 +982,12 @@ Three rows differ from what the backend offers, and the differences are the poin
   reading a fact and reading the document it came from are different questions at
   different fidelities. `Recall` became `QueryService.Recall` because it is a
   query, not a storage concern.
+
+`ExportWiki` is on `ContentService` and not on `PageService` because it spans
+both halves, and a service named for pages cannot return a tree containing
+authored files. It returns the same `{path, content}` bundle shape as
+`ExportPageBundle`, which is the backend's own shape and is the reason the two
+can be composed without a second translation (X-4, §12.2).
 
 `CorpusService` exists at all because reconcile is not a content operation: it
 is a comparison between a directory and a base, and the answer is a plan.
@@ -1377,21 +1435,65 @@ only as a pseudo-version pinned to a commit. Three consequences, all deliberate:
    lands in the module cache and never in our binary, because nothing imports
    it, but it is roughly 30 MB of download for anyone building the provider.
 
-### 12.2 One translation, one implementation — the export question
+### 12.2 The page half is the backend's export; the composition is ours
 
-The client has `ExportKnowledgeBase` and `ImportDocuments`, and the schema
-behind them includes a knowledge-page *bundle* of files. §5.1 describes the
-projection as a markdown export of the pages, and this specification also wants
-the corpus projected from the engine (§10.3).
+**The backend already projects a base to markdown files, and the engine half of
+the whole-wiki view is therefore free.** `GET /knowledge-base/export` returns
+`KnowledgePageBundleResponse` — a flat list of `{path, content}`, comprising a
+nested `index.md`, one `<id>.md` per page, and a `<id>.log.md` refresh history
+for pages that have been rebuilt. Each file carries YAML frontmatter (`type:
+"index"`, `type: "log"`, and an `id`). The client exposes it as
+`ExportKnowledgeBase`, so it is one call.
 
-If Hindsight can already emit the page tree as files, then there are two
-translations of one artifact — Hindsight's export, and ours — and framework rule
-11 says two translations that agree by accident stop agreeing the first time one
-of them changes. This is therefore an open question rather than a decision, and
-it is **question 9** in §15: do we project through Hindsight's own export, or do
-we render pages ourselves from the page reads, and what makes a test assert the
-two agree? The first is less code and inherits Hindsight's format decisions; the
-second is provider-neutral, which is what the rest of this design is for.
+There is also a CLI around it:
+
+> The CLI can mirror a bank's knowledge base onto disk: `hindsight fs mount
+> --bank my-bank`. The folder tree becomes real directories, each page a real
+> markdown file with YAML frontmatter, kept current by a background refresh loop.
+> […] No SDK, no API client, no new vocabulary. **The same content is available
+> as a portable markdown bundle over the API**, for exporting or […]
+
+We do not need the mount, and it is worth being clear about why: **the mount is
+a long-running CLI process, and what it mirrors is the export endpoint we already
+call.** `ExportKnowledgeBase` returns the same bundle with no polling loop and no
+supervision. The mount is the right tool for a person at a terminal; a subsystem
+that has to serve this over ConnectRPC wants the bundle.
+
+**So the engine half is free, and here is the line where it stops.** The mount
+projects *the knowledge base* — the page tree. It does not project the corpus,
+and it cannot, for two independent reasons:
+
+1. **The corpus is a document in the backend, not a page.** Once reconciled, a
+   reviewed wiki file is a retained Hindsight *document*. Documents are exported
+   by a different endpoint entirely — `POST /document-transfer/export` — and that
+   is a **transfer ZIP of extracted facts, entity names, causal links and
+   chunks**, explicitly excluding embeddings and database ids, built for
+   *migration* (re-embed with the target model, re-resolve entities, no LLM
+   extraction). It is a machine archive. It is not a wiki view, and anyone who
+   finds it looking for one will get a ZIP of vectors' upstream.
+2. **The backend cannot tell which documents were authored.** Nothing on a
+   retained document records that it came from a reviewed file with
+   `authority: normative`, `status: accepted` and a `reviewed` date, and nothing
+   records the `supersedes` chain or the commit. The mount has no way to
+   distinguish a reviewed runbook from a fact extracted out of a chat transcript.
+   Projecting the corpus through it would **relabel authored material as
+   derived** — which is the one thing a projection must never do, and which X-2
+   and X-3 exist to prevent.
+
+**Therefore: the page half is the backend's export, reused as-is (X-4), and the
+composition — one index, one tree, both origins, origin stated per file — is
+ours.** That is the whole-wiki view in §3 and §5.8, and it is a small amount of
+code over two reads: `ExportKnowledgeBase` for the pages, and the corpus
+directory this subsystem already walks for reconcile.
+
+**One thing deliberately not relied upon.** The mount is described as a mirror
+kept current by a background refresh loop, with no write-back path documented,
+and the sibling `hindsight-admin export-bank` is explicitly labelled *"Read-only
+— safe to run against a live instance."* Whether write-back is impossible or
+merely undocumented, this design does not depend on the answer: W-15 forbids a
+corpus write path through this API whatever the backend would accept, and X-6
+makes the projection regenerable so that a two-way filesystem would be a
+convenience rather than a capability.
 
 ## 13. Failure and degradation
 
@@ -1441,6 +1543,15 @@ listed this as a question and proposed `WriteCorpusFile`; both are gone.
 a move would then be a delete and a create and every fact would be orphaned. The
 reconciler reports a moved file with no declared identity rather than treating it
 as two files, so the omission is visible.
+
+**Settled — the page projection reuses the backend's own export** (§12.2). It
+exports the page tree as a markdown bundle in one call, and a CLI mount exists
+around it. Rendering pages ourselves would be a second translation of one
+artifact, which framework rule 11 exists to prevent. What the export cannot do
+is project the *corpus* — it has no way to know which documents were authored —
+so the whole-wiki view composes the export with the corpus walk rather than
+replacing either. The CLI mount is not used: it is a long-running process around
+the same endpoint, and this subsystem needs the bundle.
 
 **Settled — the backend client is the official Go one** (§12.1). The previous
 revision said it would be hand-written. The stated reason conflated two things:
@@ -1493,16 +1604,6 @@ track the backend by hand for every one of the following twelve.
    file is where this framework puts authored material. If they merge, importing
    a template becomes a rule-17 operation on the project's configuration file,
    which is a stronger reason to confirm than §5.5 already gives.
-9. **Do we project the page tree through the backend's own export, or do we
-   render it?** The client exposes `ExportKnowledgeBase` over a bundle-of-files
-   schema, and §5.1 already wanted a markdown export. Rule 11 says one artifact
-   gets one translation, so the two cannot both be allowed to exist without a
-   test that asserts they agree. The backend's export is less code and inherits
-   Hindsight's format decisions — including any it has not documented yet.
-   Rendering it ourselves from `GetKnowledgePage` and `GetKnowledgeBaseTree` is
-   provider-neutral, costs a file, and makes the format ours. This is question 9
-   rather than a decision because the answer depends on what the export actually
-   produces, which §12.2 records as unverified.
 
 ## 16. What a change would touch
 
@@ -1552,8 +1653,16 @@ real use.
   concept pages behind the arguments are
   [`/developer/knowledge-pages`](https://hindsight.vectorize.io/developer/knowledge-pages),
   [`/developer/observations`](https://hindsight.vectorize.io/developer/observations),
-  [`/developer/retrieval`](https://hindsight.vectorize.io/developer/retrieval)
-  and [`/developer/mental-models`](https://hindsight.vectorize.io/developer/mental-models).
+  [`/developer/retrieval`](https://hindsight.vectorize.io/developer/retrieval),
+  [`/developer/mental-models`](https://hindsight.vectorize.io/developer/mental-models)
+  and [`/developer/admin-cli`](https://hindsight.vectorize.io/developer/admin-cli).
+  The `fs mount` quotes in §5.8 and §12.2 are from the *Projected as Real Files*
+  section of `/developer/knowledge-pages`; the read-only labelling of
+  `hindsight-admin export-bank` is from `/developer/admin-cli`. §12.2 also rests
+  on the two export schemas read directly out of the description:
+  `KnowledgePageBundleResponse` (markdown files: `index.md`, `<id>.md`,
+  `<id>.log.md`) and `DocumentExportSubmitResponse` (a transfer ZIP of facts,
+  entity names, causal links and chunks, with no embeddings or database ids).
   Where the description and the prose disagree, this document says which it used;
   see §5.1 for the one place it matters most.
 
