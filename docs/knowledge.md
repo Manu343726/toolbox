@@ -4,7 +4,7 @@
 knowledge base subsystem that does not exist yet, replacing the placeholder that
 was removed in the same change. Where it states a decision it is a decision this
 document makes and a later change is expected to follow; where it states an open
-question it is listed in §14 rather than answered.
+question it is listed in §15 rather than answered.
 
 The investigation that led here — the Hindsight API survey, the reasoning about
 preloading, and the three placement options — is kept in
@@ -16,48 +16,100 @@ This document supersedes it where they differ.
 ## 1. What this subsystem is for
 
 An assistant that forgets everything between sessions is limited to whatever
-context the caller pastes in. The alternative is a **knowledge base**: a
-governed body of knowledge an assistant can search, cite and reason over, and
-which outlives any one conversation.
+context the caller pastes in. A person holding the institutional memory of a
+project is limited to whatever they remember to open. **This subsystem is the
+system that both of them work from**: the knowledge, the memory, and the
+documentation, in one place, reachable by both.
 
-Three things make that hard, and this subsystem exists because of all three.
+### 1.1 The two halves
+
+There are two kinds of knowledge, they are made differently, and they are not
+alternatives to each other.
+
+|  | The memory half | The documentation half |
+|---|---|---|
+| **What it is** | What the system has learned: extracted facts, consolidated observations, synthesized models | What people have written: architecture notes, runbooks, decisions, glossaries |
+| **Who writes it** | Assistants, from conversation, and imports | People, in files, reviewed like code |
+| **How it is stored** | The memory backend, which indexes, links, consolidates and reranks | A directory of markdown in a repository |
+| **What makes it trustworthy** | Evidence: every fact traces to a document, every observation to its facts | Authorship: a named person wrote it and a reviewer accepted it |
+| **What it cannot do** | Show you the sentence someone wrote | Notice that a decision was reversed last month |
+
+Neither substitutes for the other and a base that has only one of them is
+deficient in a way its users can feel. Documentation that is never reconciled
+lies. Memory that was never written down is a conversation nobody had again.
+
+### 1.2 Why they coexist in one base
+
+They share a base because the questions people and assistants ask cross the
+line constantly. *"Why is the retry count three?"* is answered by a runbook
+somebody wrote and by something an assistant learned during an incident. A
+knowledge base that keeps those in two stores answers half of it twice and the
+other half not at all.
+
+So a base holds both, and **provenance** — whether a piece of knowledge was
+authored, retained, or derived — is a filter rather than a partition. §4 is the
+type that makes this possible.
+
+### 1.3 One surface, not two
+
+The half of the system a person uses and the half an assistant uses are **the
+same API**, and that is the requirement, not a convenience.
+
+- A consumer does not branch on where knowledge came from in order to **read**
+  it. It searches, it gets results, and origin is an attribute on each one it
+  can filter or group by.
+- Both can **write**. An assistant retains; a person writes a file; a person can
+  also retain through the CLI, and an assistant can also correct a fact. Neither
+  audience is restricted to its own half.
+- Both can **edit what the other wrote**. A person curates a fact the system
+  extracted. An assistant corrects a document it read. A person promotes a
+  derived observation into the authored record by writing the file that states
+  it (§5.6), and the reconcile makes their version the one that holds.
+
+§10 states where this homogeneity stops, because it does stop, and pretending
+otherwise would be the easier mistake.
+
+### 1.4 What makes this hard
 
 1. **Recall has to be selective.** A base holds more than fits in a context
    window, so retrieval has to find the relevant part and cite it. Substring
    matching does not do this; a reader looking for a specific term and a reader
    asking "why do we do it this way" need different searches.
-2. **The corpus outlives the tool.** Reference material is written and reviewed
-   by people, in files, over months. A base that only knows what an LLM
-   extracted cannot show a person the sentence they wrote, and a base that
+2. **The authored corpus outlives any tool.** A base that only knows what a
+   model extracted cannot show a person the sentence they wrote, and a base that
    rewrites its own prose cannot be reviewed at all.
-3. **Derived knowledge is worth having.** What an assistant learns across
+3. **Derived knowledge is worth keeping.** What an assistant learns across
    sessions — a preference, a decision, a correction — is knowledge no file
-   contains. Keeping it in the same base as the reference material is what makes
-   the base *the* place an assistant looks.
-
-The design that answers all three is the one in §4: a markdown wiki a person
-owns is the source of truth about what was written, and a memory base is the
-reconciled, retrievable, accumulating projection of it.
+   contains.
+4. **A single surface over two substrates is easy to fake.** The temptation is to
+   expose the backend's pages and the wiki as two resource families and call
+   that one API. §4 and §10 are about not doing that.
 
 ## 2. Terminology
 
-Vocabulary is load-bearing here, because the backend and the file corpus are
-different kinds of thing and the difference is the whole design.
+Vocabulary is load-bearing here, because the two halves are different kinds of
+thing and the difference is the whole design.
 
 | Term | Meaning |
 |---|---|
-| **knowledge base** | A named, isolated body of knowledge. The unit of separation between subjects, projects or tenants. |
+| **knowledge base** | A named, isolated body of knowledge, holding both halves. The unit of separation between subjects, projects or tenants. |
 | **base** | Short form. The contract's word, not the backend's. |
-| **document** | A container for retained content and the unit of provenance. A fact traces to the document and chunk it came from. |
+| **content** | The one addressable, readable unit of knowledge. A wiki file, a retained document, and a derived page are all content. §4. |
+| **origin** | How a piece of content came to exist: authored by a person, retained from a source, or derived by the system. An attribute, never a separate type. |
+| **location** | Where content is addressable: a path in the corpus, a document identifier, or a position in the page tree. |
+| **provenance** | The record of what produced content and what it is derived from. Queryable, not decorative. |
+| **memory** | The half the system maintains: facts, observations, mental models, pages. |
+| **documentation** | The half people maintain: the authored corpus, and the pages rendered from the other half. |
+| **document** | A container for retained content and the unit a fact traces to. One origin of content. |
 | **chunk** | The segment a document was split into before extraction. Holds the text that produced a fact. |
 | **fact** | One extracted statement. A world fact (objective) or an experience fact (the base's own actions). |
-| **observation** | A consolidated, deduplicated, evidence-bearing belief synthesised from facts. A base's settled view. |
+| **observation** | A consolidated, deduplicated, evidence-bearing belief synthesised from facts. |
 | **mental model** | A synthesized document answering one question, rebuilt when its scope changes. |
-| **page** | A mental model configured as a living document in a folder tree. The unit an agent browses. |
+| **page** | A mental model configured as a living document in a folder tree. The unit an assistant browses. |
 | **directive** | A hand-authored rule the reasoning step must follow. Never rewritten. |
-| **wiki** | The directory of markdown a project owns. The authoritative corpus. |
-| **ingest** | Reconciling a wiki into a base. |
-| **reconcile** | An ingest that reports differences and applies them, rather than writing unconditionally. |
+| **wiki** | The directory of markdown a project owns. The authored corpus, and the source of truth about what was written. |
+| **corpus** | The wiki, read as a whole. The input to a reconcile. |
+| **reconcile** | Bringing the corpus and a base into agreement: report the differences, then apply the confirmed ones. |
 | **base template** | A versioned manifest configuring a base and defining its directives and mental models. |
 | **operation** | A unit of asynchronous work the backend reports on: extraction, consolidation, a refresh. |
 
@@ -66,33 +118,94 @@ vocabulary into a provider-neutral contract: *bank* (a base is a base),
 *observation scope*, *TEMPR*, *reranker*, *consolidation strategy*, *disposition
 trait*, *entity*, *proof count*, *premise*, *dedup*.
 
+Two words the framework uses elsewhere that this document uses narrowly, and
+says so rather than assuming: **document**, which is one origin of content and
+not the word for content in general; and **page**, which is one origin of
+content and not a synonym for documentation.
+
 ## 3. Requirements
 
 Numbered so a change can be traced to what it satisfied. "H" marks a capability
-the Hindsight backend provides directly; "W" marks one the wiki integration adds
-on top.
+the memory backend provides directly, "W" one the corpus integration adds, and
+"U" one the unified surface requires regardless of which half produced it.
 
 ### Bases
 
 | # | Requirement |
 |---|---|
-| B-1 | Named bases, isolated from one another: separate content, separate configuration, separate directives. (H) |
+| B-1 | Named bases, isolated from one another: separate content, separate configuration, separate directives, separate corpora. (H) |
 | B-2 | Create, inspect, update and delete a base. A delete is explicit and reports what it destroyed. (H) |
 | B-3 | Aliases, so a deployment can address a base by a friendly name; one alias may be primary for display. (H) |
 | B-4 | Per-base configuration, readable and writable: missions, disposition traits, retrieval arms, entity vocabulary, consolidation behaviour, token budgets, feature flags. (H) |
 | B-5 | Configuration is **reset-able** to the server's defaults, distinct from being overwritten with something. (H) |
 | B-6 | Statistics, and an ingestion time-series, so an operator can see a base is growing and when it last changed. (H) |
-| B-7 | Clearing a base's derived knowledge is distinct from deleting the base. (H) |
+| B-7 | Clearing a base's derived knowledge is distinct from deleting the base, and distinct from unlinking the corpus. (H) |
+| B-8 | A base names the corpus it reconciles from, so two bases over one directory are distinguishable and independently reconcilable. (U) |
 
-### Ingestion
+### The unified surface
+
+The thesis of this document, as testable statements. Each is something a test
+can fail.
+
+| # | Requirement |
+|---|---|
+| U-1 | **One content type.** Authored corpus, retained content and derived pages are the same message with different `origin` and `location`, not three resource families. §4. (U) |
+| U-2 | **One search.** A single query spans content, pages and facts, and every result carries its origin. There is no "search the wiki" versus "search the memory" that a consumer has to choose between before it knows what it is looking for. (U) |
+| U-3 | **One read shape.** A consumer reads content without first asking where it came from, and learns the origin from the content. (U) |
+| U-4 | **One browse.** A tree over the base shows authored and derived content in the same walk, each labelled. A person sees their documentation; an assistant sees the pages. (U) |
+| U-5 | **Both audiences may write.** An assistant retains; a person writes a file; a person may also retain through the CLI or the API, and an assistant may also write a document. Neither is confined to its own half. (U) |
+| U-6 | **Both audiences may edit the other's work.** A person curates an extracted fact; an assistant corrects a document; a person promotes a derived observation into the authored record by writing the file that states it, and their version then holds. §5.6. (U) |
+| U-7 | **Origin is a filter, not a partition.** A caller can ask for the authored corpus alone, the accumulated memory alone, or both, and every filtering and search option works the same either way. (U) |
+| U-8 | **A citation states its origin.** A result says whether it came from a file somebody wrote, a document somebody retained, or the system's own reasoning — because a citation that cannot tell a written decision from an inferred one is worth much less. (U) |
+| U-9 | **The same read surface for a person and an assistant.** The generated CLI and the generated MCP tools are the same generator over the same contract, so a capability cannot exist for one audience and not the other. (U) |
+| U-10 | **The corpus is addressable through the API, not only through the filesystem.** A person can list, read and write corpus content without leaving the tool, and an assistant can read documentation the same way it reads anything else. (U) |
+
+### Content
+
+| # | Requirement |
+|---|---|
+| C-1 | Content has an id, a title, a body, tags, an origin, a location, provenance and a revision. (U) |
+| C-2 | `origin` is an enum: authored, retained, derived. It is set by how the content came to exist and is not chosen by a caller. (U) |
+| C-3 | `location` discriminates: a path relative to the corpus root, a document identifier, or a position in the page tree with a backing model. One field, three shapes, because "where is it" is one question. (U) |
+| C-4 | `provenance` records what produced the content and what it was derived from, and is returned on read. (U) |
+| C-5 | `revision` carries a content digest and timestamps, so a consumer can tell whether it has seen a version. (U) |
+| C-6 | **Mutability is declared and differs by origin**: authored content is edited at its source and reconciled in, retained content is curated, derived content is regenerated. The contract states the rule per origin rather than leaving a write that will be overwritten to be discovered. (U) |
+| C-7 | Deleting content is distinct from unlinking it: a derived page can be deleted and will re-project, an authored file's content is removed by editing the file, and a retained document is deleted outright. (U) |
+
+### The documentation half
+
+The corpus is not an input to be consumed once. It is a body of documentation
+that is read, browsed, searched, edited and reconciled, and it is the half a
+person owns. See §5 for the design.
+
+| # | Requirement |
+|---|---|
+| W-1 | A project names one or more directories of markdown as the corpus for a base. (W) |
+| W-2 | Corpus content is listed and read through the API with the same calls as any other content, so documentation is a first-class thing and not a filesystem an API consumer has to be given separately. (U) |
+| W-3 | The corpus is browsable as a tree, and its tree sits in the same walk as derived pages. (U) |
+| W-4 | **Reconcile is the unit of work**: plan what would change, report it, and apply only what the user confirmed. There is no unconditional write. (W) |
+| W-5 | A file's identity is a pure function of the base and its relative path, so an edit is an update, a rename is a delete and a create, and no state outside the base is required. (W) |
+| W-6 | An unchanged file costs nothing: the plan compares digests against the content's recorded digest. (W) |
+| W-7 | Each reconcile records which content it owns, and a prune only removes content that owner recorded. Two reconciles over one base cannot delete each other's work. (W) |
+| W-8 | Frontmatter becomes tags — path segments, dates, and the author's own tags — so scope is a filter retrieval already supports rather than a directory convention the API must learn. (W) |
+| W-9 | Authored text is ingested with entity resolution off, because a person writing a name means the name. (W) |
+| W-10 | Files with no event time are ingested as timeless. (W) |
+| W-11 | The plan names every file it would create, change, leave alone and delete, with digests, so the user reads what is about to happen. (W) |
+| W-12 | Application is asynchronous, batched, and idempotent per batch, because a large corpus is thousands of extractions and cannot be a synchronous call. (W) |
+| W-13 | Binary files under the corpus are ingested through the binary path. (W) |
+| W-14 | **The corpus remains the source of truth.** Deleting a base deletes derived knowledge, not the files. Deleting a page deletes a projection. Nothing in the base is the only copy of anything a person wrote. (W) |
+| W-15 | **A person may write corpus content through the API**, and the change lands in the file the corpus is, so the repository stays the copy a reviewer reads. A write that only existed in the base would be a second source of truth. (U) |
+| W-16 | **A reconcile reports drift in the other direction too**: derived knowledge a person has contradicted, so that a base's beliefs are visibly wrong when the documentation says otherwise. (U) |
+
+### The memory half — ingestion
 
 | # | Requirement |
 |---|---|
 | I-1 | Retain arbitrary content, synchronously or queued, with a caller-supplied idempotency key so a lost acknowledgement is retried without duplicating work. (H) |
 | I-2 | Content is a string **or** an ordered list of blocks, so an image or attachment sits inline where it actually appears. (H) |
 | I-3 | A document identifier groups items into one document; re-retaining replaces it, or appends to it. (H) |
-| I-4 | Per-item provenance metadata, and a document-level metadata object. (H) |
-| I-5 | Event time is settable, and **explicitly unsettable** for timeless reference material — a specification has no date. (H) |
+| I-4 | Per-item metadata, and a document-level metadata object. (H) |
+| I-5 | Event time is settable, and **explicitly unsettable** for timeless material — a specification has no date. (H) |
 | I-6 | Author-supplied entity names, with a mode that takes them literally rather than resolving them against existing entities. (H) |
 | I-7 | Tags on every item, with five match modes and compound boolean expressions. (H) |
 | I-8 | Binary files are ingested through a multipart path that reports an operation, not through a text field. (H) |
@@ -100,7 +213,7 @@ on top.
 | I-10 | Previewing the prompts themselves, with no model call at all. (H) |
 | I-11 | Bulk import and export of documents as an archive, asynchronously. (H) |
 
-### Documents
+### The memory half — documents
 
 | # | Requirement |
 |---|---|
@@ -112,37 +225,7 @@ on top.
 | D-6 | Reprocess a document on demand. (H) |
 | D-7 | Delete a document and every fact extracted from it, reporting the count. (H) |
 
-### Retrieval
-
-| # | Requirement |
-|---|---|
-| R-1 | Search by meaning, not only by substring. (H) |
-| R-2 | Exact-term search, so a product name, an error string, or an identifier finds what the user typed. (H) |
-| R-3 | Relational search through the entity graph, so an indirect connection is findable. (H) |
-| R-4 | Temporal search, both from dates in the query and from an explicit window supplied by the caller. (H) |
-| R-5 | The four arms run together and their results fused, rather than the caller choosing one and losing the others. (H) |
-| R-6 | A budget scale, not a token count, so a caller asks for "enough" and the deployment decides what that is. (H) |
-| R-7 | Optional per-stage score floors, distinguished between the stages that rank and the stages that filter, so a caller can abstain deliberately. (H) |
-| R-8 | A query-time anchor, so "what did we decide last month" is answerable relative to a stated moment. (H) |
-| R-9 | Results carry provenance: the document, the chunk, the context, the entities, the timestamps, the per-stage scores, and the facts an observation was consolidated from. (H) |
-| R-10 | Optionally return raw chunk text with the facts, for surrounding context. (H) |
-| R-11 | Optional attachments, with their placeholders kept in the text. (H) |
-| R-12 | Prefer consolidated observations over the raw facts they supersede, without losing result count. (H) |
-| R-13 | An execution trace, so a retrieval that returned the wrong thing can be diagnosed. (H) |
-
-### Reasoning
-
-| # | Requirement |
-|---|---|
-| S-1 | Answer a question in prose from the base's contents, rather than returning passages for the caller to assemble. (H) |
-| S-2 | The answer reports which facts it used. (H) |
-| S-3 | A mission shapes how the answer is reasoned, and directives constrain it; neither affects retrieval. (H) |
-| S-4 | Structured output against a caller-supplied JSON Schema, with a stated reason when it could not be produced — distinct from an answer that held nothing matching. (H) |
-| S-5 | Tagged directives are scoped; untagged ones are global. (H) |
-| S-6 | A mission, a question and its options are separately overridable per call. (H) |
-| S-7 | An execution trace of tool and model calls, on request. (H) |
-
-### Facts and curation
+### The memory half — facts and curation
 
 | # | Requirement |
 |---|---|
@@ -154,8 +237,9 @@ on top.
 | F-6 | Delete every observation derived from one fact and re-queue it. (H) |
 | F-7 | A memory graph for visualisation, filterable by type and scope. (H) |
 | F-8 | List and inspect entities, and an entity co-occurrence graph. (H) |
+| F-9 | A fact cites the content it came from, so a person correcting a wrong answer is handed the file to fix rather than a flag to raise. (U) |
 
-### Observations
+### The memory half — observations
 
 | # | Requirement |
 |---|---|
@@ -166,8 +250,9 @@ on top.
 | O-5 | Recover a failed consolidation. (H) |
 | O-6 | Clear all observations while keeping facts. (H) |
 | O-7 | A base can disable observation consolidation entirely. (H) |
+| O-8 | An observation names the facts it was consolidated from, so a belief can be checked against its evidence and a superseded fact's removal reaches the observation that cited it. (H) |
 
-### Pages
+### The memory half — pages
 
 | # | Requirement |
 |---|---|
@@ -182,6 +267,35 @@ on top.
 | P-9 | Export the whole base as a portable markdown bundle, with a refresh log per page. (H) |
 | P-10 | A page's tags **scope** what it is built from rather than labelling it, and the contract says so, because a tag invented at creation time to describe the topic will match nothing. (H) |
 | P-11 | Deleting a page loses nothing: it re-projects from memory. (H) |
+| P-12 | A page is content of origin `derived`, and is therefore readable through the same call as anything else rather than through a page-only read. (U) |
+
+### Querying both halves
+
+| # | Requirement |
+|---|---|
+| R-1 | Search by meaning, not only by substring. (H) |
+| R-2 | Exact-term search, so a product name, an error string, or an identifier finds what the user typed. (H) |
+| R-3 | Relational search through the entity graph, so an indirect connection is findable. (H) |
+| R-4 | Temporal search, both from dates in the query and from an explicit window supplied by the caller. (H) |
+| R-5 | The four arms run together and their results fused, rather than the caller choosing one and losing the others. (H) |
+| R-6 | A budget scale, not a token count, so a caller asks for "enough" and the deployment decides what that is. (H) |
+| R-7 | Optional per-stage score floors, distinguished between the stages that rank and the stages that filter, so a caller can abstain deliberately. (H) |
+| R-8 | A query-time anchor, so "what did we decide last month" is answerable relative to a stated moment. (H) |
+| R-9 | Results carry provenance: the content, the chunk, the context, the entities, the timestamps, the per-stage scores, and the facts an observation was consolidated from. (H) |
+| R-10 | Optionally return raw chunk text with the facts, for surrounding context. (H) |
+| R-11 | Optional attachments, with their placeholders kept in the text. (H) |
+| R-12 | Prefer consolidated observations over the raw facts they supersede, without losing result count. (H) |
+| R-13 | An execution trace, so a retrieval that returned the wrong thing can be diagnosed. (H) |
+| R-14 | **One query spans both halves.** A single search returns authored content, retained content and derived pages together, and origin filters narrow it. (U) |
+| R-15 | Results are ordered by relevance across origins, not grouped by origin, so a caller asking one question gets its best answer whatever produced it. (U) |
+| S-1 | Answer a question in prose from the base's contents, rather than returning passages for the caller to assemble. (H) |
+| S-2 | The answer reports which facts it used, and which of them came from authored documentation. (H) |
+| S-3 | A mission shapes how the answer is reasoned, and directives constrain it; neither affects retrieval. (H) |
+| S-4 | Structured output against a caller-supplied JSON Schema, with a stated reason when it could not be produced — distinct from an answer that held nothing matching. (H) |
+| S-5 | Tagged directives are scoped; untagged ones are global. (H) |
+| S-6 | A mission, a question and its options are separately overridable per call. (H) |
+| S-7 | An execution trace of tool and model calls, on request. (H) |
+| S-8 | **Reasoning spans both halves**, and a caller can require that an answer be grounded in authored documentation only — for the question where "the system believes it" is not good enough and "we wrote it down" is. (U) |
 
 ### Templates
 
@@ -195,6 +309,7 @@ on top.
 | T-6 | Export and import round-trip. (H) |
 | T-7 | The manifest version is forward-compatible: older versions upgrade, newer-than-server is refused naming the upgrade. (H) |
 | T-8 | Export a whole base, import one, and clone one, all asynchronously. (H) |
+| T-9 | A template is documentation about a base, and is exportable as content so it can be read, reviewed and diffed like anything else in the system. (U) |
 
 ### Operations
 
@@ -205,25 +320,6 @@ on top.
 | A-3 | Cancel a pending or running operation; retry a failed one; delete a terminal one. (H) |
 | A-4 | An operation reports its type, progress, retry count, next attempt and error, so a failed backlog is diagnosable. (H) |
 | A-5 | A client-supplied identifier makes a resubmission return the original operation, and a mismatched reuse is refused. (H) |
-
-### The authoritative wiki
-
-| # | Requirement |
-|---|---|
-| W-1 | A project names one or more directories of markdown as the authoritative corpus for a base. (new) |
-| W-2 | **Reconcile is the unit of work**: plan what would change, report it, and apply only what the user confirmed. There is no unconditional write. (new) |
-| W-3 | A file's identity is a pure function of the base and its relative path, so an edit is an update, a rename is a delete and a create, and no state outside the base is required. (new) |
-| W-4 | An unchanged file costs nothing: the plan compares digests against the documents' recorded content digests. (new) |
-| W-5 | Each ingest records which documents it owns, and a prune only removes documents that owner recorded. Two ingests over one base cannot delete each other's work. (new) |
-| W-6 | Frontmatter becomes tags — path segments, dates, and the author's own tags — so scope is a filter the retrieval already supports rather than a directory convention the API must learn. (new) |
-| W-7 | Authored text is ingested with entity resolution off, because a person writing a name means the name. (new) |
-| W-8 | Files with no event time are ingested as timeless. (new) |
-| W-9 | The plan names every file it would create, change, leave alone and delete, with digests, so the user reads what is about to happen. (new) |
-| W-10 | Application is asynchronous, batched, and idempotent per batch, because a large corpus is thousands of extractions and cannot be a synchronous call. (new) |
-| W-11 | Binary files under the wiki are ingested through the binary path. (new) |
-| W-12 | **The wiki remains the source of truth.** Deleting the base deletes derived knowledge, not the files. Deleting a page deletes a projection. Nothing in the base is the only copy of anything a person wrote. (new) |
-| W-13 | Agent-written knowledge and wiki-derived knowledge are distinguishable on retrieval, by a provenance tag every ingest and every agent write is tagged with. (new) |
-| W-14 | Provenance is a filter, not a decoration: a caller can ask for the wiki alone, or for what the assistants learned alone. (new) |
 
 ### Boundaries and the framework
 
@@ -239,15 +335,158 @@ on top.
 | N-8 | The attachment endpoint's indistinguishability of "absent" and "invisible" is preserved; a provider must not reintroduce a probe. (new) |
 | N-9 | Streaming: there is none. Every operation is unary, and adding one would be the only streaming contract in the tree. (new) |
 | N-10 | The provider declares one record, not one per base, and a deployment running two backends distinguishes them by identifier. (new) |
+| N-11 | **Origin-specific behaviour is stated in the contract, not discovered.** A caller can tell from the contract what a write will do to each origin, because "edits are applied at the source and reconciled in" is a promise and a silent overwrite is a bug. (U) |
 
-## 4. The authoritative wiki
 
-This is the part that is not a port, so it is worth being explicit about why it
-looks the way it does.
+## 4. The content model
 
-### 4.1 The two directions, and why one of them is not the answer
+This is the type that makes one surface possible. If the two halves were two
+resource families, "one API" would be a claim rather than a fact.
 
-The Hindsight backend projects a base onto a folder of markdown files, and keeps
+```proto
+// Content is the one addressable, readable unit of knowledge in a base.
+//
+// Authored documentation, retained content and derived pages are all Content.
+// They differ in `origin` and in where `location` points, and in nothing else a
+// reader has to branch on — which is what lets a consumer read a person's
+// runbook and a synthesized page through the same call.
+message Content {
+  // Stable identifier within the base.
+  string id = 1;
+  // Base this content belongs to.
+  string base_id = 2;
+
+  // How this content came to exist. Set by the operation that created it, and
+  // never chosen by a caller.
+  Origin origin = 3;
+
+  // Human-readable title, used in listings and as a fallback for a missing body.
+  string title = 4;
+
+  // The content itself, as markdown. Empty for content whose text the
+  // deployment does not retain; `has_body` says so rather than a caller
+  // guessing from an empty string.
+  string body = 5;
+  bool has_body = 6;
+
+  // Tags. Their meaning is the filter's, not the content's: this is what
+  // retrieval scopes by, and what makes a directory convention a scope without
+  // the retrieval side learning anything about directories.
+  repeated string tags = 7;
+
+  // Where the content is addressable. One question, three shapes.
+  Location location = 8;
+
+  // What produced this content, and what it was derived from.
+  Provenance provenance = 9;
+
+  // Digest and timestamps, so a consumer can tell whether it has seen a version.
+  Revision revision = 10;
+
+  // How this origin may be changed. See C-6 and §10.2.
+  Mutability mutability = 11;
+}
+```
+
+### 4.1 Origin
+
+```proto
+enum Origin {
+  ORIGIN_UNSPECIFIED = 0;
+  // Written by a person in the corpus, and edited there.
+  ORIGIN_AUTHORED = 1;
+  // Retained from a source: a conversation, an import, an attachment.
+  ORIGIN_RETAINED = 2;
+  // Synthesized and maintained by the system from other content.
+  ORIGIN_DERIVED = 3;
+}
+```
+
+Three values, and the point of the enum is what it is *not*: it is not a type
+hierarchy. A caller does not hold an `AuthoredContent` and a `DerivedContent` and
+have to know which one it got. It holds `Content` and reads `origin`.
+
+The value is never settable by a caller. A person cannot mark their runbook as
+derived, and an assistant cannot launder an inference into documentation. The
+only way content becomes `AUTHORED` is a person writing it in the corpus.
+
+### 4.2 Location
+
+The field that makes one type work, because "where is this" has three honest
+answers, and pretending otherwise would either lose the path or lose the tree.
+
+```proto
+message Location {
+  // What kind of place this is.
+  LocationKind kind = 1;
+
+  // AUTHORED: a path relative to the corpus root. RETAINED: the document
+  // identifier.
+  string path = 2;
+
+  // DERIVED: the folder path, the page name, and the identifier of the model
+  // that maintains the body.
+  string tree_path = 3;
+  string page_id = 4;
+  string backing_model_id = 5;
+}
+```
+
+A consumer that wants to open a person's file gets a path it can show them. A
+consumer that wants to know where a synthesized page sits in the tree gets a
+tree path. Neither has to ask first.
+
+### 4.3 Provenance
+
+The record that makes a citation worth something, and that makes the two halves
+distinguishable at query time.
+
+```proto
+message Provenance {
+  // Which half produced this, as a value in the framework's reserved tag
+  // namespace. A caller filters on it, and a deployment cannot collide with it
+  // because the prefix belongs to the framework.
+  string origin_tag = 1;
+
+  // For RETAINED: the source. For AUTHORED: the file, and the revision it was
+  // reconciled from.
+  string source = 2;
+  string source_revision = 3;
+
+  // What this was derived from: the document, the facts, the backing model.
+  repeated string derived_from = 4;
+}
+```
+
+`origin_tag` and `derived_from` are what W-7 and F-9 need, and they are one
+mechanism rather than two: ownership is a provenance tag, so pruning and
+provenance cannot disagree.
+
+### 4.4 Why one type, concretely
+
+"One surface" is worth testing rather than asserting. Three consumers, one
+content type:
+
+| Consumer | Wants | Has to know origin? |
+|---|---|---|
+| An assistant answering "how do we deploy" | The runbook a person wrote, and what the system learned about deploying | No. It gets both, ordered by relevance, with origin on each result. |
+| A person browsing the base | Their own documentation, and the pages the system maintains | Only to label what they are looking at. |
+| A person fixing a wrong answer | The file to edit | Yes — and it is one field on the result, not a different search. |
+
+The alternative shape, a corpus service and a memory service with their own
+reads, fails the first row immediately and fails it in the way that matters: the
+assistant would have to run two searches and merge them, with no shared ranking
+and no way to say "only what we wrote down".
+
+## 5. The documentation half
+
+The corpus is not an input to be consumed once. It is a body of documentation
+that is read, browsed, searched, edited and reconciled, and it is the half a
+person owns.
+
+### 5.1 The one direction that is not available
+
+The memory backend projects a base onto a folder of markdown files, and keeps
 that folder current. That direction is memory → disk, and it exists so a person
 can `ls`, `grep` and edit. Its own documentation is clear that the projection is
 derived:
@@ -279,7 +518,7 @@ was said; the pages built from the facts extracted out of it are the reconciled
 truth about what holds. That is the same division the backend already insists on
 for the direction it does support.
 
-### 4.2 What the wiki looks like
+### 5.2 What the corpus looks like
 
 A directory tree of markdown, in a repository, reviewed like code:
 
@@ -289,127 +528,175 @@ docs/
 ├── architecture/
 │   ├── overview.md
 │   └── decisions/
-│       └── 0001-one-way-wiki-sync.md
+│       └── 0001-one-way-corpus-sync.md
 ├── runbooks/
 │   └── restore-a-base.md
 └── glossary.md
 ```
 
-Frontmatter is optional and, where present, becomes tags (W-6). The path becomes
+Frontmatter is optional and, where present, becomes tags (W-8). The path becomes
 tags. Nothing about the format is required: a file with no frontmatter is
-ingested, and the path alone scopes it.
+reconciled, and the path alone scopes it.
 
-What the wiki deliberately is **not**: a place to store derived knowledge.
-Observations, mental models and pages are the base's, and writing them by hand
-would be writing into a projection that the next refresh would edit. If a person
-wants to state something as fact, they write it in the wiki, and the base
-reconciles it like anything else.
+What the corpus deliberately is **not**: a place to store derived knowledge.
+Observations and pages are the system's, and writing them by hand would be
+writing into a projection the next refresh would edit. If a person wants to state
+something as fact, they write it in the corpus, and the base reconciles it like
+anything else — which is §5.6.
 
-### 4.3 Reconcile
+### 5.3 The corpus is content, not a side channel
 
-`PlanIngest` walks the configured roots, computes each file's document identity
-and digest, compares against what the base already holds, and returns four
-lists. It reads and it never writes. `ApplyIngest` takes the plan, a confirmation
-value, and does the work asynchronously.
+The requirement that makes this half a peer rather than a feeder (U-2, U-3,
+U-10, W-2, W-3):
+
+- Corpus files are `Content` with `origin = AUTHORED` and a path in their
+  `location`. They are listed and read by the same calls that read a retained
+  document or a derived page.
+- The corpus tree appears in the same browse walk as the page tree, labelled by
+  origin, so a person sees their documentation and the pages the system maintains
+  in one place (U-4).
+- A person can write corpus content **through the API** (W-15), and the change
+  lands in the file. This matters more than it looks: a write that only existed
+  in the base would be a second source of truth, and the next reconcile would
+  silently delete it — the exact failure this half exists to prevent. So the API
+  write is a file write, and the file stays the copy a reviewer reads.
+- An assistant reads documentation through the same `ReadContent` it reads
+  anything else through. There is no documentation-only read, and no reason for
+  one.
+
+### 5.4 Reconcile
+
+`PlanReconcile` walks the configured roots, computes each file's identity and
+digest, compares against what the base already holds, and returns four lists. It
+reads and it never writes. `ApplyReconcile` takes the plan, a confirmation value,
+and does the work asynchronously.
 
 | | Files | Cost |
 |---|---|---|
 | `created` | not in the base | extraction, embedding, consolidation |
-| `updated` | present, digest differs | extraction, embedding, consolidation; derived observations re-derived |
+| `updated` | present, digest differs | extraction, embedding, consolidation; dependent observations re-derived |
 | `unchanged` | present, digest matches | nothing |
 | `deleted` | recorded by this owner, no longer on disk | fact removal; dependent observations re-derived |
 
 Four decisions inside that, each of which is a choice rather than a detail:
 
-**Identity is a pure function of the base and the relative path.** W-3. This is
-what makes the reconcile stateless. The alternative — an index file, as the
+**Identity is a pure function of the base and the relative path.** W-5. This is
+what makes the reconcile stateless. The alternative — an index file, as a
 reference implementation for a different corpus keeps outside the synced tree —
-introduces a second thing that can be lost, and two indexers that can disagree.
+introduces a second thing that can be lost and two indexers that can disagree.
 Deriving identity from the path means a lost index costs nothing: the next plan
 recomputes it, and a digest comparison tells it what is unchanged.
 
-**Diffing is by content digest, never by timestamp.** W-4. Filesystems lie about
-timestamps; digests do not, and the documents already carry one.
+**Diffing is by content digest, never by timestamp.** W-6. Filesystems lie about
+timestamps; digests do not, and the content already carries one.
 
-**Ownership is recorded, and pruning respects it.** W-5. Each ingest writes its
-own marker into the document metadata it creates. A prune removes a document
-only if that marker names the owner doing the pruning. Without this, ingesting a
-second directory into a base would delete the first one's corpus — which is the
-failure mode a two-ingester deployment discovers by losing data.
+**Ownership is recorded, and pruning respects it.** W-7. Each reconcile writes
+its own marker into the content metadata it creates, and a prune removes content
+only if that marker names the owner doing the pruning. Without this, reconciling
+a second directory into a base would delete the first one's documentation — the
+failure mode a two-reconciler deployment discovers by losing data.
 
-**Frontmatter and path become tags.** W-6, W-7, W-8. Tags are what retrieval
+**Frontmatter and path become tags.** W-8, W-9, W-10. Tags are what retrieval
 already filters on, so a directory convention becomes a scope without the
-retrieval side learning anything about directories. And the author's own
-`tags:` are carried through rather than flattened into one namespace, because a
+retrieval side learning anything about directories. The author's own `tags:` are
+carried through rather than flattened into the framework's namespace, because a
 person's taxonomy and the framework's are different vocabularies.
 
-### 4.4 Confirmation, and why it is a field
+### 5.5 Confirmation, and why it is a field
 
-`PlanIngest` returns a plan. A person reads it. The agent relays the decision
-back as a value on `ApplyIngest`.
+`PlanReconcile` returns a plan. A person reads it. The agent relays the decision
+back as a value on `ApplyReconcile`.
 
-Three rules converge on this shape, and it is worth naming all three:
+Three rules converge on this shape, and all three are worth naming:
 
 - **A change to what a project says about itself is the user's to confirm**
   (AGENTS.md rule 17). A corpus is not a configuration file, but the reasoning
-  carries over: ingesting a thousand files changes what every assistant in the
+  carries over: reconciling a thousand files changes what every assistant in the
   deployment believes, and a person should see that happening.
 - **A rule that must reach a human has to work on any transport** (rule 18). The
-  HTTP MCP endpoint is stateless and cannot elicit. So a prompt would be a rule
-  that holds only where the transport can ask, which is not a framework rule. A
-  value the agent relays and the user answers works everywhere.
+  HTTP MCP endpoint is stateless and cannot elicit. A prompt would therefore be a
+  rule that holds only where the transport can ask, which is not a framework
+  rule. A value the agent relays and the user answers works everywhere.
 - **It has to be a field, not a two-call handshake**, so the proposal and the
-  approval cannot be reordered. This is the same shape `AddSkill` already uses
-  and for the same reason.
+  approval cannot be reordered. The same shape `AddSkill` already uses, for the
+  same reason.
 
-The same applies to `ImportTemplate` (T-4), for the same reasons.
+The same applies to `ImportTemplate` (T-4) and to any API write that lands in a
+person's file (W-15), for the same reasons.
 
-### 4.5 Provenance, and what it is for
+### 5.6 Promotion: how the human loop closes
 
-Every fact, document and observation carries a provenance tag: whether it came
-from the wiki, from a conversation, or from the base's own reasoning. W-13, W-14.
+The half that makes this a system rather than two stores. A person reads
+something the system inferred, and wants it to be authoritative. Three ways, in
+increasing order of ceremony:
 
-The framework reserves a prefix for tags it assigns, so a corpus ingest cannot
-collide with tags a person wrote, and so the distinction survives anyone editing
-a file.
+1. **They correct the fact.** `CurateMemory` (F-3). The fact's text changes and
+   everything derived from it re-derives. The correction lives in the base and
+   nowhere else.
+2. **They write the file.** They add a page to the corpus stating it. The next
+   reconcile ingests it as `AUTHORED`, and from then on the base can cite a
+   person for the claim rather than an inference. The derived version is not
+   deleted — it is superseded, and F-9 means a reader can see that the
+   authoritative version now exists.
+3. **They do nothing.** The inference stays, and stays labelled as one.
 
-This buys three things, none of which are decoration:
+The direction matters and is not symmetric: **the corpus wins.** An authored file
+that contradicts a derived observation is not a conflict to be resolved
+symmetrically; the documentation is the record of what the people decided, and a
+model's belief about the same thing is a hypothesis about a document it has read.
+That is why W-16 asks a reconcile to report derived knowledge the corpus
+contradicts — the drift a person most wants to know about is the base believing
+something their own documentation says otherwise.
 
-- A caller can ask for the authoritative corpus alone — "what does our
-  documentation actually say", with nothing the assistants inferred mixed in.
-- A caller can ask for the accumulated knowledge alone.
-- A citation can say which it was. A citation that cannot distinguish a written
-  decision from an inferred one is worth much less.
 
-It is also what makes W-5 enforceable in principle: ownership is a provenance
-tag, so pruning and provenance are the same mechanism rather than two.
+## 6. The contract
 
-## 5. The contract
+### 6.1 Services
 
-### 5.1 Services
-
-Grouped by concern. Every RPC declares its side effects; that is not a
-formality, because the declaration is what a policy author reads and what the
-MCP gateway gates on.
+Ordered so the unified surface comes before the machinery behind it, because
+that is the order a consumer meets them in. Every RPC declares its side effects;
+that is not a formality, because the declaration is what a policy author reads
+and what the MCP gateway gates on.
 
 | Service | RPCs |
 |---|---|
-| `KnowledgeBaseService` | `ListBases`, `GetBase`, `CreateBase`, `UpdateBase`, `DeleteBase`, `ResetBaseConfig`, `GetBaseConfig`, `UpdateBaseConfig`, `GetBaseStats`, `GetBaseIngestionSeries`, `ListBaseAliases`, `AddBaseAlias`, `SetPrimaryBaseAlias`, `RemoveBaseAlias`, `ClearBaseObservations` |
-| `MemoryService` | `Retain`, `Recall`, `Reflect`, `ListMemories`, `GetMemory`, `CurateMemory`, `GetMemoryHistory`, `GetMemoryGraph`, `ListTags`, `PreviewExtraction`, `PreviewPrompts` |
-| `DocumentService` | `ListDocuments`, `GetDocument`, `UpdateDocument`, `DeleteDocument`, `ListDocumentChunks`, `GetDocumentChunk`, `ReprocessDocument` |
-| `PageService` | `GetPageTree`, `CreatePageFolder`, `CreatePage`, `GetPage`, `SearchPages`, `UpdatePageNode`, `DeletePageNode`, `ExportPageBundle` |
-| `MentalModelService` | `ListMentalModels`, `CreateMentalModel`, `GetMentalModel`, `UpdateMentalModel`, `DeleteMentalModel`, `GetMentalModelHistory`, `RefreshMentalModel`, `PreviewMentalModelRefresh`, `ClearMentalModel` |
+| `ContentService` | `ListContent`, `GetContent`, `WriteContent`, `CurateContent`, `DeleteContent`, `GetContentTree`, `ListContentChunks`, `ReprocessContent` |
+| `QueryService` | `Search`, `Recall`, `Reflect`, `ListTags`, `PreviewExtraction`, `PreviewPrompts` |
+| `CorpusService` | `PlanReconcile`, `ApplyReconcile`, `GetCorpusStatus`, `ReadCorpusFile`, `WriteCorpusFile` |
+| `KnowledgeBaseService` | `ListBases`, `GetBase`, `CreateBase`, `UpdateBase`, `DeleteBase`, `ResetBaseConfig`, `GetBaseConfig`, `UpdateBaseConfig`, `GetBaseStats`, `GetBaseIngestionSeries`, `ListBaseAliases`, `AddBaseAlias`, `SetPrimaryBaseAlias`, `RemoveBaseAlias` |
+| `MemoryService` | `GetMemory`, `CurateMemory`, `GetMemoryHistory`, `GetMemoryGraph` |
+| `PageService` | `CreatePageFolder`, `CreatePage`, `UpdatePageNode`, `RefreshPage`, `PreviewPageRefresh`, `ExportPageBundle` |
+| `MentalModelService` | `ListMentalModels`, `CreateMentalModel`, `UpdateMentalModel`, `DeleteMentalModel`, `GetMentalModelHistory`, `ClearMentalModel` |
 | `DirectiveService` | `ListDirectives`, `CreateDirective`, `GetDirective`, `UpdateDirective`, `DeleteDirective` |
 | `ObservationService` | `ListObservationScopes`, `PreviewConsolidation`, `TriggerConsolidation`, `RecoverConsolidation`, `ClearBaseObservations` |
 | `EntityService` | `ListEntities`, `GetEntity`, `GetEntityGraph` |
 | `TemplateService` | `GetTemplateSchema`, `ExportTemplate`, `ImportTemplate`, `ExportBase`, `ImportBase`, `CloneBase` |
 | `OperationService` | `ListOperations`, `GetOperation`, `CancelOperation`, `RetryOperation`, `DeleteOperation` |
-| `IngestService` | `PlanIngest`, `ApplyIngest` |
 
-`ClearBaseObservations` appears in two services above, which is a mistake in the
-table and not in the design: it belongs to one of them and §14 records which.
+Three things in that table are the unification, and each is worth reading
+against the shape it replaces:
 
-### 5.2 Vocabulary and side effects
+- **`ContentService` has no per-origin services under it.** The reads that used
+  to be `GetDocument`, `GetPage` and a corpus read are now `GetContent` (U-3).
+  `ListContentChunks` and `ReprocessContent` remain because chunks and
+  reprocessing are things a *retained* document has and an authored file or a
+  derived page does not; they are origin-specific and are named as such.
+- **`PageService` lost its read methods.** `GetPageTree` became
+  `GetContentTree`, which walks authored and derived content together (U-4), and
+  `SearchPages` became `Search` with a scope (U-2). What is left on `PageService`
+  is what is genuinely page-specific: creating, configuring and refreshing a
+  projection.
+- **`MemoryService` lost its reads and its query.** `GetMemory` and `CurateMemory`
+  stay because a fact is not content — it is a statement the system extracted, and
+  reading a fact and reading the document it came from are different questions at
+  different fidelities. `Recall` became `QueryService.Recall` because it is a
+  query, not a storage concern.
+
+`CorpusService` exists at all because reconcile is not a content operation: it
+is a comparison between a directory and a base, and the answer is a plan.
+
+
+### 6.2 Vocabulary and side effects
 
 | RPC group | `@toolbox.side-effects` | Why |
 |---|---|---|
@@ -417,12 +704,13 @@ table and not in the design: it belongs to one of them and §14 records which.
 | `Retain`, `Create*`, `Update*`, `Add*`, `Set*`, `Trigger*`, `Recover*` | `create update` | |
 | `Refresh*`, `Preview*` on a model that has a side effect | `update` | A refresh rewrites a document, so it is a write even though its input is a read. |
 | `Delete*`, `Remove*`, `Cancel*`, `Clear*` | `delete` | |
-| `PlanIngest` | `read_only` | It reads the corpus and the base and writes nothing. |
-| `ApplyIngest` | `create update delete` | The only operation in the contract that can delete, create and update in one call, and therefore the one whose confirmation matters most. |
+| `PlanReconcile` | `read_only` | It reads the corpus and the base and writes nothing. |
+| `ApplyReconcile` | `create update delete` | The only operation in the contract that can create, update and delete in one call, and so the one whose confirmation matters most. |
+| `WriteCorpusFile` | `create update` | A write into a person's repository. Confirmation applies for the same reason as the reconcile, and this is the case where it matters most. |
 | `ImportTemplate` | `create update` | Applies configuration and defines directives; the content it defines is generated, not authored. |
 | `ImportBase`, `CloneBase` | `create update delete` | Both can replace an existing base's contents. |
 
-### 5.3 Message rules
+### 6.3 Message rules
 
 Rules from N-3 through N-5, stated as rules:
 
@@ -449,13 +737,14 @@ Rules from N-3 through N-5, stated as rules:
   backend speaks ISO-8601 strings; the conversion belongs in the provider, and
   the field comment should say which the caller sends.
 
-### 5.4 Errors
+### 6.4 Errors
 
 | Condition | `api.ErrorKind` | ConnectRPC |
 |---|---|---|
 | Malformed or missing required field | `KindInvalid` | `InvalidArgument` |
-| No such base, document, page, operation, fact | `KindNotFound` | `NotFound` |
+| No such base, content, page, operation, fact | `KindNotFound` | `NotFound` |
 | Duplicate page name in a folder; reused operation identifier | `KindAlreadyExists` | `AlreadyExists` |
+| A write against content whose origin is not writable that way (C-6) | `KindFailedPrecondition` | `FailedPrecondition` |
 | Feature the deployment reports disabled (N-7) | `KindUnsupported` | `Unimplemented` |
 | Backend unreachable, timed out, or failing | `KindUnavailable` | `Unavailable` |
 | Anything else | `KindInternal` | `Internal` |
@@ -465,17 +754,52 @@ that a provider must not flatten: **not deployed** and **not answering** are
 different facts with different fixes, and a provider that reports both as
 "unavailable" has thrown away the diagnosis.
 
+The `KindFailedPrecondition` row is the one the unified surface introduces and
+it is load-bearing. `WriteContent` is one operation (U-5), and the three origins
+answer it differently (§10.2), so a write that cannot mean what the caller asked
+for is a precondition and not an invalid argument — the request was well formed,
+the content just does not accept that kind of change. It is also the answer that
+keeps the documentation half safe: an assistant that tries to write a derived
+page is told that pages are regenerated, and an assistant that tries to write
+somebody's runbook is told it is edited at its source, rather than either
+succeeding and being overwritten later.
+
 The attachment endpoint (R-11) is the one place where two different conditions
 must produce the *same* answer (N-8), because the backend does that deliberately
 to stop the endpoint being used to probe what a base holds.
 
-## 6. Retrieval, in the terms the contract uses
+## 7. One query over both halves
 
-The backend's four arms are an implementation strategy. The contract states what
-a caller gets, not how, with one exception worth making: the caller *can* ask
-for a subset, and that is part of the interface.
+This is U-2 stated as a contract, and it is the requirement most likely to be got
+wrong by accident — because the backend offers a fact search and a page search as
+two calls, and the easy thing is to expose them as two and let a consumer choose.
 
-```
+### 7.1 Search
+
+`Search` spans content and returns `Content`. A person's runbook, a retained
+conversation and a synthesized page are the same result type, ranked against
+each other (R-15), with origin on each. The backend's page-level search and its
+fact-level search are both reached through this, because the caller cannot and
+should not know they were two.
+
+### 7.2 Recall and Reflect
+
+`Recall` and `Reflect` are about *facts* rather than *documents*, and stay
+separate, for a reason worth stating rather than assuming: a caller asking "what
+do we know about retries" usually wants the passages to read, a caller asking
+"why do we do it this way" usually wants the document that explains it, and a
+caller asking "should we change this" wants prose. Collapsing all three into one
+call would mean every caller pays for the reasoning it did not want.
+
+They still span both halves, because a fact's origin is a fact's origin: a fact
+extracted from a runbook and a fact extracted from a conversation are the same
+kind of thing, and `origin` on the result says which.
+
+The backend's four retrieval arms are an implementation strategy. The contract
+states what a caller gets, not how, with one exception worth making: the caller
+*can* ask for a subset, and that is part of the interface.
+
+```proto
 message RecallRequest {
   // The question. Required.
   string query = 1;
@@ -508,6 +832,10 @@ message RecallRequest {
 
   // What to attach to each result.
   IncludeOptions include = 9;
+
+  // Restrict to one or more origins. Unset means all of them, which is the
+  // point: the common case is not choosing (U-7).
+  repeated Origin origins = 10;
 }
 ```
 
@@ -523,7 +851,7 @@ filtering stages. The backend documents this at length and the contract must not
 lose it, because the generated MCP tool description is the only place an agent
 will read it.
 
-## 7. Pages
+## 8. Pages
 
 A page is a mental model configured as a document. The configuration is what
 makes it a page, and it is worth stating because the default is doing real work:
@@ -553,10 +881,10 @@ write behind, so a page citing a deleted fact keeps reporting itself current.
 Stating this is more useful than leaving it to be found, because the fix is
 different from what a reader assumes.
 
-## 8. Directives and base configuration
+## 9. Directives and base configuration
 
 Two things a person writes that the base keeps verbatim and never rewrites.
-They are the hand-authored part that is not corpus, and §9.2 says why they are
+They are the hand-authored part that is not corpus, and §10.3 says why they are
 not ingested.
 
 **Directives** are hard rules the reasoning step must follow — "never recommend
@@ -572,67 +900,127 @@ per-base override, everything else inheriting the server default. That is what
 makes an exported template portable rather than a snapshot of one server's
 defaults (T-5).
 
-## 9. Two paths in, and why they are two
+## 10. The two halves, and where they differ
 
-A deployment has two kinds of hand-authored material and they are not the same
-kind of thing.
+### 10.1 Where they are the same
 
-### 9.1 Prose → documents
+Everything in the read path, and that is most of the surface. A caller lists
+content, reads content, browses a tree and searches — and origin is a field on
+what comes back rather than a choice made before the call. Both halves share
+tags, both are filtered the same way, and both are cited the same way with
+origin stated.
 
-Described in §4. It becomes facts, is consolidated, is reconciled, and is
+The write path is shared too, with one branch. An assistant retains; a person
+writes a file or uses `WriteContent`, which lands in the file; an assistant can
+also write a document; a person can also retain. The branch is not "which
+audience" but "which origin", and origin is a property of the content rather
+than of the caller (U-5).
+
+### 10.2 Where they differ, and why that is not a failure
+
+Three things do not unify, and each is a real difference rather than an
+inconsistency to paper over.
+
+**Mutability (C-6, N-11).** Authored content is edited at its source and
+reconciled in. Retained content is curated. Derived content is regenerated and
+cannot be written at all. A single `WriteContent` cannot mean all three, and a
+uniform one that pretended to would either lose a person's edit or hand an
+assistant a way to overwrite documentation. So `Mutability` is on the content,
+the contract states the rule per origin, and a write against the wrong origin is
+refused with the reason — which is a better answer than accepting it and
+discarding it later.
+
+**Granularity of extraction.** A fact is not content. It is one statement the
+system pulled out, it exists only for retained and authored material, and
+reading a fact and reading the document it came from are different questions at
+different fidelities — one is the extracted claim, the other is the text. So
+`GetMemory` stays separate, and so do chunks.
+
+**Where the body comes from.** A derived page's body is generated. An authored
+file's body is the file. A retained document's body may or may not be retained,
+depending on a per-base setting. `has_body` exists for that last case, because
+an empty string and "we did not keep it" are different answers and a consumer
+that cannot tell them apart will render a blank page and call it a bug in the
+base.
+
+### 10.3 Configuration is a third path, and stays separate
+
+There are two kinds of hand-authored material in a system, and the second is
+not prose.
+
+**Prose → content.** §5. It becomes facts, is consolidated, is reconciled, and is
 retrievable. What comes back is facts in the document's own words, not its whole
 content — extraction is lossy and non-deterministic, and that is accepted rather
 than hidden. Where a deployment wants the authored words back byte-for-byte, the
-file is the answer, not the base (W-12).
+file is the answer, not the base (W-14).
 
-### 9.2 Configuration → a template
+**Configuration → a template.** A template is hand-authored, versioned,
+schema-described, diffable, verified before it is applied, and never rewritten.
+It is the artifact that belongs in a repository next to the deployment's
+configuration, and it is what "export this base's setup" produces.
 
-A template is hand-authored, versioned, schema-described, diffable, verified
-before it is applied, and never rewritten. It is the artifact that belongs in a
-repository next to the deployment's configuration, and it is what "export this
-base's setup" produces.
-
-The reason it is a separate operation rather than another field on ingest is
-precisely that the two are stored differently. Prose is extracted into facts and
-reconciled; a directive is stored as written and injected. A corpus ingest that
-also tried to set configuration would put authored rules through a lossy
-extraction, which is the one thing a directive must not be put through.
+These are separate operations precisely because they are stored differently.
+Prose is extracted into facts and reconciled; a directive is stored as written
+and injected. A reconcile that also set configuration would put authored rules
+through a lossy extraction, which is the one thing a directive must not be put
+through.
 
 It is also the only place a person states *how the base should think* rather than
-*what it should know*, and those deserve different review.
+*what it should know*, and those deserve different review — which is why a
+template is readable as content (T-9) but is not reconciled as prose.
 
-## 10. Agent tools
+## 11. What each audience gets
 
-What an assistant may call, and what it may not. The split is not a formality:
-it is the difference between a tool surface an agent can reason about and one it
-has to page through.
+### 11.1 The same surface
 
-**Offered:** `Retain`, `Recall`, `Reflect`, `ListMemories`, `GetMemory`,
-`ListDocuments`, `GetDocument`, `ListTags`, `ListOperations`, `GetOperation`,
-`GetPageTree`, `SearchPages`, `GetPage`, `ListMentalModels`, `GetMentalModel`,
-`ListDirectives`, `ListBases`, `GetBase`, `PlanIngest`, `ApplyIngest`.
+U-9: the generated CLI and the generated MCP tools are the same generator over
+the same contract, so a capability cannot exist for one audience and not the
+other. There is no "knowledge features for agents" and "knowledge features for
+people" — there is one set of operations, reachable two ways, and the difference
+between the two is which policy is in force and who is asking.
 
-**Not offered to an agent, even where a policy permits it:** `DeleteBase`,
-`DeleteDocument`, `DeletePageNode`, `DeleteMentalModel`, `DeleteDirective`,
+**Shared, and what an assistant gets by default:** `Search`, `Recall`,
+`Reflect`, `ListContent`, `GetContent`, `GetContentTree`, `WriteContent`,
+`CurateContent`, `GetMemory`, `GetMemoryHistory`, `ListTags`, `ListOperations`,
+`GetOperation`, `ListBases`, `GetBase`, `ListDirectives`, `ListMentalModels`,
+`PlanReconcile`, `ApplyReconcile`.
+
+**Documentation, and what a person gets that an assistant usually should not:**
+`ReadCorpusFile`, `WriteCorpusFile`, `GetCorpusStatus`. The last is the one worth
+naming: a person needs to know whether their documentation is reconciled, what
+the plan would do, and what the base believes that their files contradict
+(W-16). An assistant can be given it and usually has no use for it.
+
+**Operator surface, offered to neither by default:** `DeleteBase`,
+`DeleteContent`, `DeletePageNode`, `DeleteMentalModel`, `DeleteDirective`,
 `ClearBaseObservations`, `ImportTemplate`, `ExportBase`, `ImportBase`,
 `CloneBase`, `RecoverConsolidation`, and everything to do with aliases, webhooks,
 audit logs and traces.
 
-Two framework rules decide this rather than preference. A contract's declaration
-says what invoking a method does; a policy says who may invoke it; neither is
-derived from the other, and the empty policy permits nothing. So every RPC above
-is discovered and classified whether or not it is ever exposed, and exposure is
-a policy decision made per deployment.
+### 11.2 What decides the split
 
-And the confirmation of §4.4 is a **value the agent relays**, not a prompt the
+Two framework rules, not preference. A contract's declaration says what invoking
+a method does; a policy says who may invoke it; neither is derived from the
+other, and the empty policy permits nothing. So every RPC above is discovered and
+classified whether or not it is ever exposed, and exposure is a policy decision
+made per deployment.
+
+And the confirmation of §5.5 is a **value the agent relays**, not a prompt the
 transport asks for — because the stateless HTTP endpoint cannot elicit, and a
-rule that held only where it could would not be a framework rule.
+rule that held only where it could would not be a framework rule. That applies to
+`ApplyReconcile`, to `ImportTemplate`, and to `WriteCorpusFile`, which is the
+case that matters most for the human half: an assistant with a write on the
+corpus can change what the project says about itself, so it proposes and a person
+decides.
 
-## 11. Where the behaviour lives
+## 12. Where the behaviour lives
 
-- **`pkg/knowledge`** — the provider-neutral model and the engine interfaces the
-  contract's messages convert to. This is where the behaviour is, because the
-  framework needs it in process.
+- **`pkg/knowledge`** — the content model, the engine interfaces the contract's
+  messages convert to, and the reconcile. This is where the behaviour is, because
+  the framework needs it in process. The reconcile belongs here rather than in
+  the provider because it is pure computation over a directory and a set of
+  digests, with no backend in it at all — which is what makes it testable offline,
+  and §15 question 3 turns on whether it should be its own subsystem instead.
 - **`pkg/knowledge/hindsight`** — a hand-written client for the backend's HTTP
   API, returning `api.Errorf`-classified failures. Hand-written rather than
   generated, because a generated client drags the whole 195-schema model into a
@@ -644,75 +1032,99 @@ rule that held only where it could would not be a framework rule.
 The reference in-memory implementation is **not** part of this specification. A
 subsystem with seventy-odd RPCs does not get a second implementation that does
 `strings.Contains` over a map; the contract is the deliverable and one honest
-provider is better than two, one of which is a fiction. §14 records this as a
+provider is better than two, one of which is a fiction. §15 records this as a
 decision to confirm rather than an open question.
 
 The backend is reachable three ways without any of this, and they are worth
 stating because they are cheaper than the above and they are how a deployment
 should evaluate whether to build any of it: its OpenAPI description can be
 registered in the API catalog, its own MCP server can be exposed, and its
-documented ingestion semantics are the ones §4 specifies. A deployment that
+documented ingestion semantics are the ones §5 specifies. A deployment that
 wants the capability this month can have it without a line of the code above.
 That is a legitimate outcome, not a failure of the design.
 
-## 12. Failure and degradation
+## 13. Failure and degradation
 
 | Situation | Behaviour |
 |---|---|
 | Backend unreachable at startup | The provider fails to start, naming the endpoint and the failure. It does not start and serve empty results, because a base that reports "no knowledge" when it is disconnected is the worst possible answer. |
 | Backend unreachable during a call | `KindUnavailable`, and the error distinguishes not-deployed from not-answering. |
 | A capability is disabled | `KindUnsupported` naming the flag (N-7), not a 404. |
-| Ingestion partially fails | Per-file outcomes in the operation's report; the operation is failed, not silently short. |
-| A wiki file is unreadable | Named in the plan as skipped, with the reason. A permission error on one file is not a reason to fail a thousand-file ingest. |
+| A reconcile partially fails | Per-file outcomes in the operation's report; the operation is failed, not silently short. |
+| A corpus file is unreadable | Named in the plan as skipped, with the reason. A permission error on one file is not a reason to fail a thousand-file reconcile. |
 | A page's refresh fails | Recorded on the node, and the page does not rebuild while it is set. A base with one broken page is not a base that has silently lost a page. |
-| A reconcile is interrupted | Idempotent per batch (W-10), so a rerun resumes rather than duplicating. |
+| A reconcile is interrupted | Idempotent per batch (W-12), so a rerun resumes rather than duplicating. |
+| A file is edited between the plan and the apply | The apply uses the digests from the plan and reports any file whose digest no longer matches, rather than reconciling a version nobody saw. A confirm that approved one thing must not quietly apply another. |
+| A corpus file is edited while the base is serving | No effect on reads: the base holds what it reconciled and `revision` says which version. The next plan reports the drift. Read-your-writes across a filesystem is not a property this can offer, and pretending otherwise would be worse than saying so. |
 
-## 13. What is deliberately not here
+## 14. What is deliberately not here
 
 - **A second provider.** One backend, one provider. A second is a second
   provider behind the same contract, and it is not worth designing for before
   there is a second.
-- **Writing prose into a page.** §4.1.
-- **Page and mental model as separate concepts.** They are one object with
-  different defaults. This specification collapses them into `PageService` and
-  `MentalModelService` and §14 records the cost.
+- **Writing prose into a page.** §5.1.
+- **Two read surfaces, one per half.** The whole point of this subsystem is that
+  there are not. §4.4 states the shape that fails, so this is recorded as a
+  rejected alternative rather than an open question.
 - **Webhooks, audit logs, trace logs, metrics.** Operator and infrastructure
   surface, reachable through the backend directly.
 - **Memory defence.** A real feature with its own policy implications, worth its
   own investigation rather than a paragraph here.
-- **Streaming.** §3, N-9.
+- **Streaming.** N-9.
 
-## 14. Open questions
+## 15. Open questions
 
-1. **Where does `ClearBaseObservations` live** — `KnowledgeBaseService` or
-   `ObservationService`? It clears derived knowledge from a base, so the base is
-   the subject; it is also one of the observation operations. Pick one.
-2. **Are pages and mental models one service or two?** They are the same object
-   with different defaults and the distinction is invisible in the API. Two
-   services is more faithful and costs a concept; one is cheaper and loses the
-   distinction a reader of the contract may want.
-3. **Does the wiki live in this subsystem or a sibling?** A sibling
-   `knowledgewiki` serving a corpus contract and calling this one over
-   ConnectRPC obeys the cross-subsystem rule more literally and makes the
-   reconcile testable with no backend at all. One subsystem is fewer modules.
-4. **Is the corpus on disk at ingest time, or does the base hold the bytes?**
-   §4 assumes the file is the copy and the base holds derived knowledge. A
-   deployment that wants the base to be self-contained needs the text retained
-   and accepts that it then has two copies that can disagree.
-5. **Provenance tag namespace.** Reserved prefix and value spelling. It should be
-   a framework decision, because a deployment that guesses differently cannot
-   filter across two bases.
-6. **Is `Reflect` a knowledge operation or an agent operation?** It runs a model
+Ordered by how much they change the contract's shape.
+
+1. **Is the corpus writable at all through the API?** W-15 assumes yes. The
+   argument for it is symmetry — U-5 and U-10 both require that a person is not
+   confined to their half. The argument against is that a person's documentation
+   should change through their editor, with its hooks and its review, and a tool
+   that writes behind their editor produces conflicts. Symmetry says yes; not
+   surprising people says no. This is the first question because the answer
+   changes W-15, §5.3, and the `CorpusService` shape.
+2. **How much does `CorpusService` share with `ContentService`?** W-15 says an
+   API write to the corpus lands in the file, which makes `WriteContent` on
+   `origin=AUTHORED` and `WriteCorpusFile` the same operation with two names. Is
+   that one RPC taking a path, or two where one is defined in terms of the other?
+   Two names for one operation is how one becomes two implementations.
+3. **Does the corpus live in this subsystem or a sibling?** A sibling serving a
+   corpus contract and calling this one over ConnectRPC obeys the
+   cross-subsystem rule more literally, and makes the reconcile testable with no
+   backend at all. One subsystem is fewer modules, and one surface is the thesis.
+   These pull in opposite directions and the thesis is winning.
+4. **Is `Reflect` a knowledge operation or an agent operation?** It runs a model
    loop over the base. `subsystems/agent` exists. Getting this wrong puts a
    second model-calling path in the framework, which is a boundary worth deciding
-   deliberately rather than by default.
-7. **Should the base's own configuration be project configuration?** A base's
+   deliberately rather than by default. This is bigger now than it was before the
+   halves were unified, because reasoning over documentation is something a person
+   wants too — and if reasoning belongs to the agent subsystem, the knowledge
+   subsystem's answer to "should we change this" is a search, which is a smaller
+   promise than this document makes.
+5. **Is the corpus on disk, or does the base hold the bytes?** §5 assumes the
+   file is the copy and the base holds derived knowledge. A deployment that wants
+   the base to be self-contained needs the text retained and accepts two copies
+   that can disagree — and W-15's promise that an API write lands in the file
+   holds only in the first world. The two questions are coupled and should be
+   answered together.
+6. **Where does `ClearBaseObservations` live** — `KnowledgeBaseService` or
+   `ObservationService`? It clears derived knowledge from a base, so the base is
+   the subject; it is also one of the observation operations. Pick one.
+7. **Are pages and mental models one service or two?** They are one object with
+   different defaults and the distinction is invisible in the API. Two services
+   is more faithful and costs a concept; one is cheaper and loses the distinction
+   a reader of the contract may want.
+8. **Provenance tag namespace.** Reserved prefix and value spelling. It should be
+   a framework decision, because a deployment that guesses differently cannot
+   filter across two bases, which is the one capability the unified surface exists
+   to provide.
+9. **Should a base's own configuration be project configuration?** A base's
    missions and directives are authored material, and a project configuration
-   file is where this framework puts authored material. If they merge, ingesting
+   file is where this framework puts authored material. If they merge, importing
    a template becomes a rule-17 operation on the project's configuration file,
-   which is a stronger reason to confirm than §4.4 already gives.
+   which is a stronger reason to confirm than §5.5 already gives.
 
-## 15. What a change would touch
+## 16. What a change would touch
 
 Not a plan; a list, so the size is visible before anyone starts.
 
@@ -727,14 +1139,14 @@ row, which is hand-written and whose absence fails nothing, and an ADR.
 
 **Phasing.** Evaluate through the backend's own surfaces first — they need none
 of this and they answer whether the backend fits the work at all. Then decide
-§14 items 1–3 and 6, which are the ones that change the contract's shape. Then
+§15 items 1–5, which are the ones that change the contract's shape. Then
 `pkg/knowledge` and the client, tested against the real API description rather
 than a live server so the suite stays deterministic and offline. Then the
 provider. Then ingest and templates, which are last because they are the parts
 that involve a person and the parts most likely to change shape after a first
 real use.
 
-## 16. Sources
+## 17. Sources
 
 - The investigation this supersedes:
   [`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md)

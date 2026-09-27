@@ -175,20 +175,17 @@ implementation performs simple `{{variable}}` substitution.
 
 ### Knowledge base
 
-A knowledge base is a governed body of knowledge an agent can search, cite and
-reason over, held in named bases that isolate one subject from another. A base
-holds documents, the facts extracted from them, the observations consolidated
-from those facts, the mental models synthesized from those observations, and the
-pages that render them as documents.
+A knowledge base is a governed body of knowledge, memory and documentation that
+both people and assistants work from. A base holds two kinds of knowledge that
+are not alternatives: a **documentation half** that people write as markdown in
+a repository they own and review, and a **memory half** — extracted facts,
+consolidated observations, synthesized models — that assistants accumulate. They
+coexist in one base because the questions both audiences ask cross the line, and
+the surface over them is one API: content is read through one call, searched
+through one query, and its **origin** — authored, retained or derived — is a
+filter rather than a partition.
 
-A **document** is the container for retained content and the unit of provenance:
-a fact can be traced to the document and chunk it came from. An **observation**
-is a consolidated, deduplicated, evidence-bearing belief. A **mental model** is
-a synthesized document answering a question, rebuilt when its scope changes. A
-**page** is a mental model configured as a living document in a folder tree.
-
-The authoritative body of a project's knowledge is a **markdown wiki** the project
-itself owns. It is the source of truth about what was written; the base is the
+The corpus is the source of truth about what was written; the memory half is the
 reconciled, retrievable projection of it. See [`knowledge.md`](knowledge.md) for
 the full specification, which this section summarises.
 
