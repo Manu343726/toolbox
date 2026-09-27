@@ -433,7 +433,7 @@ func (s *contentService) describeRecord(path, id string, tags []string, e knowle
 
 // contentOptions is the one place this provider decides what to read.
 func (s *contentService) contentOptions(includeBody bool) knowledge.ContentOptions {
-	return knowledge.ContentOptions{BaseID: s.p.ProviderName(), Owner: s.p.Owner(), IncludeBody: includeBody}
+	return knowledge.ContentOptions{BaseID: s.p.ProviderName(), IncludeBody: includeBody}
 }
 
 // contentMessage converts the domain content to the contract, in one place.

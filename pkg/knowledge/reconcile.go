@@ -111,8 +111,11 @@ type PlanEntry struct {
 	Reason string
 }
 
-// Changed reports whether the entry represents a change.
-func (e PlanEntry) Changed() bool { return e.Digest != e.PriorDigest }
+// PriorDigest is what the ownership record had for this file, and it is the whole of how an apply
+// tells a create from a replace: a create has none, a replace has one that differs. The two are
+// kept in one field rather than as a boolean because a boolean would have to be set by whoever
+// built the entry, and a plan that disagrees with itself about which files changed is a plan whose
+// ingest counts are wrong in a way nothing else would notice.
 
 // PlanMove is a file whose identity was declared and therefore survived a change
 // of path.
@@ -589,8 +592,14 @@ func (p Plan) digest() string {
 // Drift is dropped rather than filtered. A derived claim is contradicted by the corpus as a whole
 // and attributing it to a directory would misattribute it, so a narrowed plan reports no drift
 // rather than a partial answer that reads like a complete one.
+//
+// A subtree that names nothing — empty, whitespace, or a slash — is **not** a narrowing. The
+// alternative is the worst of the three answers available: a plan with nothing in it says "this
+// directory is current", and for a whitespace-only value that is a statement about the whole corpus
+// which happens to be false. The caller gets the plan it would have got without the argument, whose
+// digest is therefore the one a confirmation computed over the full corpus still matches.
 func (p Plan) RestrictedTo(subtree string) Plan {
-	prefix := NormalizePath(subtree)
+	prefix := NormalizePath(strings.TrimSpace(subtree))
 	if prefix == "" {
 		return p
 	}

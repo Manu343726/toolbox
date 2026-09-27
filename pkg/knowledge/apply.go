@@ -519,12 +519,24 @@ func (a *Applier) ingestAll(
 
 		now := now().UTC()
 		for _, e := range out.batch.entries {
-			if e.Changed() || !wasKnown(rec, e.SourceKey) {
-				if e.PriorDigest == "" {
-					res.Ingested++
-				} else {
-					res.Replaced++
-				}
+			// Every entry in a batch is a created or updated one, so its digest differs from
+			// its prior and the classification below is unconditional.
+			//
+			// It used to read `e.Changed() || !wasKnown(rec, e.SourceKey)`, with a second
+			// clause guarding the case where the backend reported the batch as a duplicate for
+			// a file the record had never seen. That clause could not fire: a batch is built
+			// from `plan.Created` and `plan.Updated` and nothing else, and an entry in either
+			// has a prior digest that differs from its own. So it read as a distinction between
+			// two cases and was not one, and a reader working out why an ingest might not be
+			// counted would have been working out nothing.
+			//
+			// The count describes the base rather than this run, which is why a batch the
+			// backend called a duplicate still counts: its files *are* in the base, and the
+			// warning above says this run did not create them.
+			if e.PriorDigest == "" {
+				res.Ingested++
+			} else {
+				res.Replaced++
 			}
 			rec.Files[e.SourceKey] = OwnershipEntry{
 				ID:           e.ID,
@@ -544,11 +556,6 @@ func (a *Applier) ingestAll(
 	}
 	report(opts.Progress, ApplyProgress{Phase: "ingest", Done: len(batches), Total: len(batches)})
 	return nil
-}
-
-func wasKnown(rec *OwnershipRecord, key string) bool {
-	_, ok := rec.Files[key]
-	return ok
 }
 
 func removeEntry(entries []PlanEntry, sourceKey string) []PlanEntry {

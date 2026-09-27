@@ -144,6 +144,12 @@ python3 scripts/mcp_knowledge_dump.py content__list_content   # one full respons
 python3 scripts/mcp_knowledge_mount.py     # the mount, and the failure path
 ```
 
+The projection read path is tested over a plain `io/fs` in `pkg/knowledge/projectionfs_test.go`
+and needs nothing at all — which is the whole reason that logic lives in a root package rather than
+beside the mount. The standard library's own `fstest.MapFS` is used as the reference for what a
+filesystem is expected to report, so the expectations are the ones `io/fs` defines rather than a
+hand-written list of them.
+
 `mcp_knowledge_mount.py` is the one that needs a tag, and it builds one: the mount is behind
 `fuse`, and without `TAGS=fuse` it would be testing the *absence* of FUSE rather than the
 behaviour of a mount. It establishes whether the machine can mount at all by building a minimal

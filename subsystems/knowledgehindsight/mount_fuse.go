@@ -73,7 +73,6 @@ type projFile struct {
 
 // OnAdd populates the tree at mount time.
 func (r *projFS) OnAdd(ctx context.Context) {
-	r.cache.Paths()
 	for _, path := range r.cache.Paths() {
 		if err := r.attach(ctx, path); err != nil {
 			// A file that cannot be attached is reported by the mount's status rather than
@@ -234,16 +233,18 @@ func (c *projectionCache) Read(path string) []byte {
 }
 
 // Paths returns every projected file path, sorted.
+//
+// Delegated rather than rebuilt from `Wiki.Files`, because the domain's list is the one that
+// includes the index and the marker. A mount built from the files alone served a tree that was
+// neither navigable nor identifiable as a projection — and the marker's entire job is to be
+// identifiable, since it is the one thing a corpus walk refuses to read as content. It also meant
+// `GetMountStatus.files` counted two files `ls` could not show.
 func (c *projectionCache) Paths() []string {
 	wiki, err := c.source.Cache().Current(context.Background())
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(wiki.Files))
-	for _, f := range wiki.Files {
-		out = append(out, f.Path)
-	}
-	return out
+	return wiki.WikiPaths()
 }
 
 // register records a file's inode so a refresh can notify it.

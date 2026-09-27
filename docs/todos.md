@@ -114,6 +114,10 @@ is left is what the specification itself records as open.
       conversion, which was the one place a second backend would have found
       duplication, now goes through the domain.
 - [ ] Decide the §15 open questions this implementation did not settle.
+- [ ] The subsystem package is at 61%. Most of the remainder is the projection, the registry, the
+      state store and the git plumbing, all of which the subsystem tests reach only indirectly.
+      The domain underneath is at 90.9% with no function untested, so this is about which
+      subsystem-level paths are worth a test rather than about a hole in the design.
 
 Both of the following were gaps recorded here and are now closed. They are
 listed because a reader comparing this file with the specification will find the

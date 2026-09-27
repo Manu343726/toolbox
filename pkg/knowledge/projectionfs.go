@@ -145,13 +145,17 @@ func (c *ProjectionCache) RefreshedAt() time.Time {
 }
 
 // FileCount is how many files the served view has, the index and marker included.
+//
+// It counts `WikiPaths` rather than adding two to a file count, because those two numbers
+// answering the same question is exactly the shape of bug that hides: a status bar said five files
+// while `ls` showed three, and both were computed from the same view in the same process.
 func (c *ProjectionCache) FileCount() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !c.have {
 		return 0
 	}
-	return len(c.wiki.Files) + 2
+	return len(c.wiki.WikiPaths())
 }
 
 // FS returns a read-only io/fs view of the projection.
@@ -193,16 +197,57 @@ type readOnlyFS struct {
 
 func (r *readOnlyFS) Open(name string) (fs.File, error) {
 	clean := trimLeadingSlash(name)
-	if clean == "" {
-		return &memFile{name: ".", dir: true}, nil
+	// `.` and the empty path are both the root. `fs.WalkDir` stats its root before descending and
+	// `fs.Stat(fsys, ".")` is how a reader asks a filesystem what it is, so a view that cannot
+	// open its own root is not an `fs.FS` — it is a map with an `Open` on it. `ReadDir` synthesised
+	// directories from the start; `Open` did not, and the two disagreeing is what made
+	// `fs.WalkDir` fail on a projection that `ReadDir` could enumerate perfectly well.
+	if clean == "" || clean == "." {
+		return &memFile{name: ".", dir: true, from: r}, nil
 	}
 	if content, ok := r.extra[clean]; ok {
-		return &memFile{name: clean, data: content, mod: time.Time{}}, nil
+		// The size is set, which looks like a detail and is not one. It is the same answer the
+		// projected files give, and leaving it off made the index and the marker report zero
+		// bytes while holding content — so `ls -l` showed 0 for the two files that make a
+		// projection navigable, and any reader that sized a buffer from the reported length
+		// would have read nothing at all.
+		return &memFile{name: clean, data: content, size: int64(len(content)), mod: time.Time{},
+			from: r}, nil
 	}
 	if f, ok := r.files[clean]; ok {
-		return &memFile{name: clean, data: f.Content, size: int64(len(f.Content)), mod: time.Time{}, origin: f.Origin}, nil
+		return &memFile{name: clean, data: f.Content, size: int64(len(f.Content)), mod: time.Time{},
+			origin: f.Origin, from: r}, nil
+	}
+	// A directory is not a file, so it is answered by the same rule `ReadDir` uses: something is
+	// under it. The order matters and is deliberate: a path that is *both* a file and a prefix of
+	// other files opens as the file. A reader that asked for that path by name wants its content,
+	// and the FUSE mount refuses such a projection outright rather than serving either.
+	if r.isDir(clean) {
+		return &memFile{name: clean, dir: true, from: r}, nil
 	}
 	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+}
+
+// isDir reports whether a path names a directory in this view, which means something is under it.
+//
+// Synthesised rather than stored, for the same reason `ReadDir` synthesises it: the projection is a
+// flat list of paths, and requiring a caller to have declared its directories in advance would make
+// this a filesystem with a second authority over its shape.
+func (r *readOnlyFS) isDir(path string) bool {
+	if path == "" || path == "." {
+		return true
+	}
+	for candidate := range r.files {
+		if underDir(candidate, path) {
+			return true
+		}
+	}
+	for candidate := range r.extra {
+		if underDir(candidate, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadDir returns a directory's entries, so that a reader can walk the tree.
@@ -225,7 +270,17 @@ func (r *readOnlyFS) ReadDir(name string) ([]fs.DirEntry, error) {
 			return
 		}
 		seen[base] = true
-		out = append(out, fs.FileInfoToDirEntry(&fileInfo{name: base, size: r.sizeOf(path)}))
+		// The origin is carried here as well as on the file's own `Stat`, and it has to be: a
+		// reader that lists a directory and a reader that stats a file are asking the same
+		// question — "is this something a person wrote?" — through two paths, and an answer
+		// that depends on which one was taken is an answer nobody can rely on. The one place
+		// this was not passed is the one place a listing could not tell a reviewed runbook
+		// from a rendered page without opening each file.
+		out = append(out, fs.FileInfoToDirEntry(&fileInfo{
+			name:   base,
+			size:   r.sizeOf(path),
+			origin: r.originOf(path),
+		}))
 	}
 	addDir := func(path string) {
 		base := baseName(path)
@@ -274,6 +329,16 @@ func (r *readOnlyFS) sizeOf(path string) int64 {
 	return int64(len(r.extra[path]))
 }
 
+// originOf is where a projected path came from, and the empty string for the two generated files
+// the view always carries — the index and the marker are this framework's own output and are not
+// "a file a person wrote" under any reading.
+func (r *readOnlyFS) originOf(path string) string {
+	if f, ok := r.files[path]; ok {
+		return f.Origin
+	}
+	return ""
+}
+
 func (r *readOnlyFS) ReadFile(name string) ([]byte, error) {
 	f, err := r.Open(name)
 	if err != nil {
@@ -284,6 +349,12 @@ func (r *readOnlyFS) ReadFile(name string) ([]byte, error) {
 }
 
 // memFile is one file in the read-only view.
+//
+// A directory handle carries a back-reference to the view, because a handle that can be opened and
+// stat'ed but not listed is a half-implemented handle: `tar`, `zip`, `http.FileServer` and a plain
+// `os.File`-shaped reader all take a directory handle and call `ReadDir` on it. The `io/fs`
+// contract allows `ReadDir` on a file to fail, and for a *file* it must; for a directory that would
+// just be a view that stops working one level up from where it worked.
 type memFile struct {
 	name   string
 	data   []byte
@@ -291,6 +362,7 @@ type memFile struct {
 	mod    time.Time
 	dir    bool
 	origin string
+	from   *readOnlyFS
 }
 
 func (m *memFile) Stat() (fs.FileInfo, error) {
@@ -311,9 +383,26 @@ func (m *memFile) Read(p []byte) (int, error) {
 
 func (m *memFile) Close() error { return nil }
 
-// ReadDir reports a directory's entries for a directory handle.
+// ReadDir lists a directory handle's entries.
+//
+// For a directory this is the same listing `ReadDir` on the filesystem gives, so the two agree —
+// and their agreeing is the point, because a reader that lists through the handle and a reader that
+// lists through the filesystem are the same reader on different transports. For a file it is the
+// refusal `io/fs` requires: a file is not a directory, and answering with a listing would be a lie
+// about what was opened.
 func (m *memFile) ReadDir(n int) ([]fs.DirEntry, error) {
-	return nil, &fs.PathError{Op: "readdir", Path: m.name, Err: fs.ErrInvalid}
+	if !m.dir || m.from == nil {
+		return nil, &fs.PathError{Op: "readdir", Path: m.name, Err: fs.ErrInvalid}
+	}
+	entries, err := m.from.ReadDir(m.name)
+	if err != nil {
+		return nil, err
+	}
+	// `n > 0` means "at most n, and the next call continues". The listing is materialised either
+	// way, so honouring a partial read would need a cursor this handle does not have; the whole
+	// list is returned and `io` is told so by returning no error, which is the documented
+	// behaviour for a caller that gets everything at once.
+	return entries, nil
 }
 
 // fileInfo is one entry's metadata.
@@ -397,7 +486,22 @@ func join(dir, name string) string {
 // The index and the marker are included. The marker carries the timestamp the view was taken at, so
 // two otherwise identical views taken at different moments compare different — which is correct: a
 // view is a thing that was taken, not a thing that is true.
+//
+// **The files are sorted before hashing, and that is load-bearing rather than tidy.** A view is a
+// set of files, so a fingerprint that depends on the order they arrived in reports a change
+// whenever a fetcher returns the same files differently — and the cost of a false change is not one
+// wasted call: every reader's file cache is invalidated, a thousand mount threads re-read, and the
+// projection a person is reading is replaced with a byte-identical one for no visible reason. The
+// corpus walk sorts its own output, so today's fetcher happens to be stable; the composition of two
+// sources, one of which is the backend's own bundle, is not something a digest should have to
+// assume.
 func wikiDigest(w Wiki) string {
+	pairs := make([]string, 0, len(w.Files))
+	for _, f := range w.Files {
+		pairs = append(pairs, f.Path+"="+f.Digest)
+	}
+	sort.Strings(pairs)
+
 	h := &strings.Builder{}
 	h.WriteString(w.BaseID)
 	h.WriteString("\x00")
@@ -406,11 +510,9 @@ func wikiDigest(w Wiki) string {
 	h.WriteString(Digest(w.Index))
 	h.WriteString("\x00")
 	h.WriteString(Digest(w.Marker))
-	for _, f := range w.Files {
+	for _, pair := range pairs {
 		h.WriteString("\x00")
-		h.WriteString(f.Path)
-		h.WriteString("=")
-		h.WriteString(f.Digest)
+		h.WriteString(pair)
 	}
 	return Digest([]byte(h.String()))
 }

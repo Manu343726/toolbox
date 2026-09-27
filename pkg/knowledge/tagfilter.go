@@ -65,23 +65,39 @@ func (f TagFilter) Validate(path string) error {
 		}
 		return nil
 	case f.Not != nil:
-		return f.Not.Validate(path + ".not")
+		return f.Not.Validate(childPath(path, "not", -1))
 	case len(f.And) > 0:
 		for i, sub := range f.And {
-			if err := sub.Validate(path + ".and[" + itoa(i) + "]"); err != nil {
+			if err := sub.Validate(childPath(path, "and", i)); err != nil {
 				return err
 			}
 		}
 		return nil
 	case len(f.Or) > 0:
 		for i, sub := range f.Or {
-			if err := sub.Validate(path + ".or[" + itoa(i) + "]"); err != nil {
+			if err := sub.Validate(childPath(path, "or", i)); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	return &FilterError{Path: path, Reason: "a group with no members constrains nothing, which is the same as leaving it out; a filter that looks present and matches nothing is the one shape a reader cannot diagnose"}
+}
+
+// childPath extends a path with a step, and does not put a separator on an empty one.
+//
+// A caller constructing a filter programmatically has no index to name, and an error reading
+// "at .and[0]" points at nothing — worse than the message without a path, which at least describes
+// the shape that was wrong.
+func childPath(path, step string, index int) string {
+	suffix := step
+	if index >= 0 {
+		suffix += "[" + itoa(index) + "]"
+	}
+	if path == "" {
+		return suffix
+	}
+	return path + "." + suffix
 }
 
 // FilterError is a filter that cannot be expressed, and where in the tree it went wrong.

@@ -374,10 +374,21 @@ func displayName(f ProjectedFile) string {
 
 // WikiPaths returns the projection's paths in tree order, which is what a
 // filesystem needs in order to present the view.
+//
+// **The index and the marker are included, and that is the whole point of this being one
+// function.** A projection is not just the files a person wrote: the index is what makes it
+// navigable and the marker is what identifies the directory as a projection at all — a corpus
+// walk refuses to read a directory carrying one, which is the only way a projection can be
+// re-ingested without being mistaken for content. A caller that assembled the list from
+// `Wiki.Files` alone served a tree that is neither navigable nor identifiable, and then counted
+// two files it was not serving.
+//
+// Every count and every listing of a projection goes through here, so "how many files are in it"
+// and "which files are in it" cannot be two different questions with two answers.
 func (w Wiki) WikiPaths() []string {
 	out := make([]string, 0, len(w.Files)+2)
 	for _, f := range w.Files {
 		out = append(out, f.Path)
 	}
-	return out
+	return append(out, "index.md", MarkerName())
 }

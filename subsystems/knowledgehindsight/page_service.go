@@ -429,6 +429,20 @@ func triggerFromMessage(baseID string, msg *knowledgev1.PageTrigger) (knowledge.
 	return out, nil
 }
 
+// filterStep extends a path with one step of a filter tree, and omits the separator when there is
+// no path yet. The domain has the same rule for its own `Validate`, and the two agreeing is what
+// means a message from either names the same place in the tree.
+func filterStep(path, step string, index int) string {
+	suffix := step
+	if index >= 0 {
+		suffix = fmt.Sprintf("%s[%d]", step, index)
+	}
+	if path == "" {
+		return suffix
+	}
+	return path + "." + suffix
+}
+
 // tagFilterFrom converts the contract's recursive tag expression into the domain's.
 //
 // The conversion is here rather than in the adapter because the contract's `TagGroup` and the
@@ -453,7 +467,7 @@ func tagFilterFrom(group *knowledgev1.TagGroup, path string) (knowledge.TagFilte
 	case *knowledgev1.TagGroup_GroupsAnd:
 		out := knowledge.TagFilter{}
 		for i, sub := range g.GroupsAnd.GetGroups() {
-			child, err := tagFilterFrom(sub, fmt.Sprintf("%s.and[%d]", path, i))
+			child, err := tagFilterFrom(sub, filterStep(path, "and", i))
 			if err != nil {
 				return out, err
 			}
@@ -463,7 +477,7 @@ func tagFilterFrom(group *knowledgev1.TagGroup, path string) (knowledge.TagFilte
 	case *knowledgev1.TagGroup_GroupsOr:
 		out := knowledge.TagFilter{}
 		for i, sub := range g.GroupsOr.GetGroups() {
-			child, err := tagFilterFrom(sub, fmt.Sprintf("%s.or[%d]", path, i))
+			child, err := tagFilterFrom(sub, filterStep(path, "or", i))
 			if err != nil {
 				return out, err
 			}
@@ -471,12 +485,12 @@ func tagFilterFrom(group *knowledgev1.TagGroup, path string) (knowledge.TagFilte
 		}
 		return out, out.Validate(path)
 	case *knowledgev1.TagGroup_GroupNot:
-		inner, err := tagFilterFrom(g.GroupNot.GetGroup(), path+".not")
+		inner, err := tagFilterFrom(g.GroupNot.GetGroup(), filterStep(path, "not", -1))
 		if err != nil {
 			return knowledge.TagFilter{}, err
 		}
 		negated := knowledge.TagFilter{Not: &inner}
-		return negated, negated.Validate(path + ".not")
+		return negated, negated.Validate(filterStep(path, "not", -1))
 	}
 	return knowledge.TagFilter{}, &api.Error{
 		Kind:    api.KindInvalid,

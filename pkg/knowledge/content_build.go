@@ -10,10 +10,6 @@ type ContentOptions struct {
 	// BaseID is the base this content belongs to. It is required: a `Content` with no base is
 	// not addressable, and `Valid` says so rather than letting it through.
 	BaseID string
-	// Owner is the identity written into the ownership marker, and it becomes part of
-	// nothing here — it is a reconcile concern. It is carried because a caller building a
-	// `Content` from a record usually has it and a tag list derived from it.
-	Owner string
 	// IncludeBody says whether the body should be read and carried. A listing that does not
 	// want three thousand bodies says false, and the result then has `HasBody` false — which
 	// is the same state as a deployment that does not retain text, and both are honest.

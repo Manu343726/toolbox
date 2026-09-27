@@ -2100,6 +2100,41 @@ is why the mount is an RPC without putting FUSE in every build (§5.9).
 matching each RPC against the test files, not by reading. "Every method somebody thought to test
 was tested" was true and was not what the previous claim meant.
 
+**`pkg/knowledge` was at 73.7% and `projectionfs.go` — the entire read path — was at zero.** The
+design puts the projection logic in the root package over a plain `io/fs` for exactly one reason:
+so that no test needs a mount. That reasoning had not been carried through, and the consequence
+was that the code a person reaches with `cat` had never been executed. It is at 90.9% now with no
+function untested, and writing those tests found five defects that a mount would have shown first
+and a unit test would not have shown at all:
+
+- **`Open` could not open a directory.** `ReadDir` synthesised them; `Open` did not, so
+  `fs.Stat(fsys, "runbooks")` and `fs.WalkDir` both failed with "file does not exist" on a
+  projection `ReadDir` could enumerate perfectly well. The FUSE mount builds its own inode tree
+  and never went through this path — so the public `fs.FS` was broken in the one way that matters
+  and nothing noticed, because the mount was never mounted.
+- **The view's fingerprint depended on the order the files arrived in.** It is the change signal,
+  and a false change is not one wasted call: every reader's file cache is invalidated, a thousand
+  mount threads re-read, and a person watching their directory sees it rebuilt for no reason. The
+  corpus walk happens to sort, so today's fetcher is stable; a composition of two sources, one of
+  which is the backend's bundle, is not something a fingerprint should have to assume.
+- **A directory listing dropped each entry's origin while `Open().Stat()` carried it.** The same
+  question — *is this something a person wrote?* — with two answers depending on which path the
+  reader took to ask.
+- **The index and the marker reported zero bytes while holding content**, so `ls -l` showed 0 for
+  the two files that make a projection navigable and identifiable.
+- **The path list, the served tree and the file count were three different answers.** A mount's
+  status bar said five files while `ls` showed three, because the count added two for the index and
+  the marker and the attached tree did not contain them. `WikiPaths` existed, included neither, and
+  had no callers — the subsystem had rebuilt the list from `Wiki.Files` instead. All three now go
+  through one function.
+
+Plus one in the reconciler: a whitespace-only subtree narrowed a plan to **nothing**, which reports
+"this directory is current" about the whole corpus. And one piece of code removed rather than
+tested — an `|| wasKnown(...)` clause whose second half could never fire, because a batch is built
+from `plan.Created` and `plan.Updated` and every entry in either has a prior digest that differs
+from its own. It read as a distinction between two cases and was not one; the invariant it implied
+is now asserted directly instead.
+
 **Four more defects, found by writing those tests.**
 
 - `Reflect` accepted `follow_directives` and sent nothing — the backend has no such field. The
