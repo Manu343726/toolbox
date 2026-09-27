@@ -28,7 +28,7 @@ import (
 // operations are its product, and a command tree missing one is a tool a caller cannot
 // reach.
 func TestEveryOperationInTheContractIsACommand(t *testing.T) {
-	for _, subsystem := range []string{"knowledge", "registry", "workflow", "health", "documentation", "prompt"} {
+	for _, subsystem := range []string{"skill", "registry", "workflow", "health", "documentation", "prompt"} {
 		t.Run(subsystem, func(t *testing.T) {
 			names, err := serviceNamesFor(t, subsystem)
 			require.NoError(t, err)
@@ -53,53 +53,72 @@ func TestEveryOperationInTheContractIsACommand(t *testing.T) {
 
 // The generated operations and the deployment commands live on one root, and neither set
 // hides the other. A caller who cannot find `daemon` has lost the deployment; a caller who
-// cannot find `search` has lost the product.
+// cannot find `find-skill` has lost the product.
 //
 // The service keeps its level here, because the command is `toolbox` and the service is
-// `knowledge`: a namespace that costs a word and names nothing the caller did not already
+// `skill`: a namespace that costs a word and names nothing the caller did not already
 // name is dropped, and this one is not that. The operations are therefore one level down,
 // and the test looks for them where they are rather than where a flat list would be easier
 // to assert on.
 func TestTheDeploymentCommandsAndTheOperationsCoexist(t *testing.T) {
 	root := rootFor(t)
 	names := commandNames(root)
-	for _, wanted := range []string{"daemon", "mcp", "knowledge", "registry", "workflow"} {
+	for _, wanted := range []string{"daemon", "mcp", "skill", "registry", "workflow"} {
 		assert.Contains(t, names, wanted)
 	}
-	for _, wanted := range []string{"Search", "PutSource", "ListServices", "WatchServices"} {
+	for _, wanted := range []string{"FindSkill", "ListSkills", "ListServices", "WatchServices"} {
 		assert.NotNil(t, findCommand(root, wanted), "the operation %s is reachable", wanted)
 	}
 	// And the operations sit under their service, so a caller who knows the contract knows
 	// the path without being told a different one.
-	knowledge := findChild(root, "knowledge")
-	require.NotNil(t, knowledge)
-	assert.Contains(t, commandNames(knowledge), "search")
+	skill := findChild(root, "skill")
+	require.NotNil(t, skill)
+	assert.Contains(t, commandNames(skill), "find-skill")
 }
 
 // Every operation command carries the flags its contract declares, typed as the contract
 // declares them. A command that lost a field cannot make the call its contract describes.
+//
+// The two width claims are held against two different methods, because no single request in
+// the host happens to carry a 32-bit field and a repeated string together, and a test that
+// needs one contract to be convenient is a test that breaks when some other contract is
+// added. What is under test is the generator, not any one contract.
+//
+// They are not held against the skills contract, which is the most mature one in the host:
+// maturity is not the property these two assertions need, shape is. FindSkillRequest carries
+// a 32-bit page_size and no repeated string, and the one repeated string in the contract
+// (CheckPinsRequest.refs) is in a different method that carries no number.
 func TestEveryOperationCommandCarriesItsContractFlags(t *testing.T) {
-	search := findCommand(rootFor(t), "Search")
-	require.NotNil(t, search)
-
-	// SearchRequest declares query, limit and tags.
-	require.NotNil(t, search.Flags().Lookup("query"))
-	require.NotNil(t, search.Flags().Lookup("limit"))
-	require.NotNil(t, search.Flags().Lookup("tags"))
-	assert.Equal(t, "int64", search.Flags().Lookup("limit").Value.Type(),
+	// GenerateRequest declares model_id, prompt, temperature and max_output_tokens.
+	generate := findCommand(rootFor(t), "Generate")
+	require.NotNil(t, generate)
+	require.NotNil(t, generate.Flags().Lookup("model_id"))
+	require.NotNil(t, generate.Flags().Lookup("prompt"))
+	require.NotNil(t, generate.Flags().Lookup("max_output_tokens"))
+	assert.Equal(t, "int64", generate.Flags().Lookup("max_output_tokens").Value.Type(),
 		"a 32-bit field is read as a 64-bit flag and sent at the field's own width")
-	assert.Equal(t, "stringSlice", search.Flags().Lookup("tags").Value.Type())
+
+	// ListServicesRequest declares required_capabilities, a repeated string.
+	list := findCommand(rootFor(t), "ListServices")
+	require.NotNil(t, list)
+	assert.Equal(t, "stringSlice", list.Flags().Lookup("required_capabilities").Value.Type(),
+		"a repeated string is a slice flag, not one flag holding a joined list")
 }
 
 // A nested message is flattened, in the main CLI as in a subsystem command. The rule is one
 // rule; a second implementation here would be a second rule, free to disagree.
+//
+// The fixture is the prompts contract because it is one of the few in the host whose request
+// has a message-typed field at all. Every skills request is flat scalars — a qualified ref
+// and a few options — which is a deliberate shape rather than a gap in that contract, and it
+// means nothing there can exercise flattening.
 func TestANestedMessageIsFlattenedInTheMainCLI(t *testing.T) {
-	put := findCommand(rootFor(t), "PutSource")
+	put := findCommand(rootFor(t), "PutPrompt")
 	require.NotNil(t, put)
 
-	require.NotNil(t, put.Flags().Lookup("source"), "the message is addressable")
-	require.NotNil(t, put.Flags().Lookup("source.id"), "and so is one of its fields")
-	assert.Contains(t, put.Flags().Lookup("source.id").Usage, "Stable source identifier",
+	require.NotNil(t, put.Flags().Lookup("prompt"), "the message is addressable")
+	require.NotNil(t, put.Flags().Lookup("prompt.id"), "and so is one of its fields")
+	assert.Contains(t, put.Flags().Lookup("prompt.id").Usage, "Stable prompt identifier",
 		"documented from the contract, not from the field's type")
 }
 
@@ -142,13 +161,18 @@ func TestAnUnknownCommandIsRefusedByName(t *testing.T) {
 // the person who writes the policy from using it. This holds that with the default
 // read-only policy in force, a write still happens — and says so, because a reader of the
 // test should not have to infer which behaviour was intended.
+//
+// The write is to a store rather than to a project, because the claim is about the policy
+// gate and a test that also had to stand up a project to satisfy a write would report on
+// whichever of the two failed.
 func TestTheCommandLineIsNotGatedByThePolicy(t *testing.T) {
-	_, stderr, err := runRoot(t, "knowledge", "put-source",
+	_, stderr, err := runRoot(t, "prompt", "put-prompt",
 		"--launch", "disabled", "--daemon-host", "127.0.0.1", "--daemon-port", "1",
-		"--source.id", "policy-check",
-		"--source.name", "Policy check",
-		"--source.type", "note",
-		"--source.location", "mem://policy-check")
+		"--prompt.id", "policy-check",
+		"--prompt.name", "Policy check",
+		"--prompt.version", "1",
+		"--prompt.template", "policy {{name}}",
+		"--prompt.variables", "name")
 	require.NoError(t, err, "an operator may write with a read-only policy in force")
 	assert.NotContains(t, stderr, "policy document",
 		"and nothing consulted one, so nothing reported one")
@@ -159,17 +183,17 @@ func TestTheCommandLineIsNotGatedByThePolicy(t *testing.T) {
 // reflection — and the routes can disagree, so they are compared rather than assumed equal.
 // A caller who learned one has learned the other.
 func TestTheMainCLIAndTheSubsystemCommandOfferTheSameFlags(t *testing.T) {
-	standalone := subsystemFlagsFor(t, "knowledge", "Search")
+	standalone := subsystemFlagsFor(t, "skill", "FindSkill")
 	require.NotEmpty(t, standalone, "the subsystem command declares flags, or this proves nothing")
 
-	main := findCommand(rootFor(t), "Search")
+	main := findCommand(rootFor(t), "FindSkill")
 	require.NotNil(t, main)
 	for name, kind := range standalone {
 		flag := main.Flags().Lookup(name)
 		require.NotNil(t, flag, "the main CLI is missing --%s, which the subsystem command has", name)
 		assert.Equal(t, kind, flag.Value.Type(), "--%s is typed the same in both", name)
 	}
-	for _, name := range []string{"query", "limit", "tags"} {
+	for _, name := range []string{"query", "catalog", "page_size", "page_token"} {
 		assert.Contains(t, standalone, name)
 	}
 }
@@ -177,10 +201,10 @@ func TestTheMainCLIAndTheSubsystemCommandOfferTheSameFlags(t *testing.T) {
 // The help of an operation command names the contract it came from, so a reader who found a
 // command by guessing can find the contract that defines it.
 func TestAnOperationCommandNamesItsContract(t *testing.T) {
-	search := findCommand(rootFor(t), "Search")
-	require.NotNil(t, search)
-	assert.Contains(t, search.Long, "toolbox.knowledge.v1.KnowledgeService/Search")
-	assert.Contains(t, search.Short, "relevant passages",
+	find := findCommand(rootFor(t), "FindSkill")
+	require.NotNil(t, find)
+	assert.Contains(t, find.Long, "toolbox.skill.v1.SkillService/FindSkill")
+	assert.Contains(t, find.Short, "integrated catalogs",
 		"and the one-line form says what it does, for the command list")
 }
 

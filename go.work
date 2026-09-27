@@ -10,7 +10,6 @@ use (
 	./subsystems/apitools
 	./subsystems/documentation
 	./subsystems/health
-	./subsystems/knowledge
 	./subsystems/logfile
 	./subsystems/logger
 	./subsystems/model

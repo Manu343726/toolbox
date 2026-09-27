@@ -24,7 +24,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	require.NoError(t, err)
 	// Health and registry are started on purpose: their services declare
 	// capabilities, so the uniform rule has to hold for them too.
-	require.NoError(t, h.Select("knowledge", "workflow", "apigrpc", "apitools", "health", "registry"))
+	require.NoError(t, h.Select("skill", "workflow", "apigrpc", "apitools", "health", "registry"))
 	require.NoError(t, h.Start(context.Background()))
 	defer func() { require.NoError(t, h.Shutdown(context.Background())) }()
 
@@ -104,7 +104,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 	for _, feature := range features {
 		byTool[feature.ToolName] = feature.Exposed
 	}
-	assert.True(t, byTool["knowledge__search"], "a declared operation is offered as a tool")
+	assert.True(t, byTool["skill__list_skills"], "a declared operation is offered as a tool")
 	assert.True(t, byTool["workflow__validate_workflow"], "every subsystem contributes its declared operations")
 
 	// Every contract in the deployment is annotated, so the default policy — every
@@ -119,16 +119,16 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 
 	// A write is not offered, because the default document does not grant one. This
 	// is the half that used to be the default's whole answer.
-	assert.False(t, byTool["knowledge__put_source"],
+	assert.False(t, byTool["skill__add_skill"],
 		"the default policy grants reads, so a write is registered, described, and not exposed")
 
-	// A call goes through the catalog's invoker to the real subsystem. The search
-	// is empty on purpose: the assertion is that the call path is real, not what a
+	// A call goes through the catalog's invoker to the real subsystem. The listing is
+	// empty on purpose: the assertion is that the call path is real, not what a
 	// particular fixture happens to return.
 	_, err = catalog.service.CallOperation(context.Background(), connect.NewRequest(&apitoolsv1.CallOperationRequest{
-		ApiId:         "knowledge",
-		OperationId:   "knowledge/toolbox.knowledge.v1.KnowledgeService/Search",
-		ArgumentsText: `{"query":""}`,
+		ApiId:         "skill",
+		OperationId:   "skill/toolbox.skill.v1.SkillService/ListSkills",
+		ArgumentsText: `{}`,
 	}))
 	if err != nil {
 		t.Logf("the call reached the subsystem and reported: %v", err)
@@ -140,7 +140,7 @@ func TestAutomaticExposureOfSubsystems(t *testing.T) {
 func TestReflectionAndCatalogAgreeOnToolNames(t *testing.T) {
 	h, catalog, err := buildHost(hostComposition{config: config.Config{LoggingBaseDir: t.TempDir()}})
 	require.NoError(t, err)
-	require.NoError(t, h.Select("knowledge", "apigrpc"))
+	require.NoError(t, h.Select("skill", "apigrpc"))
 	require.NoError(t, h.Start(context.Background()))
 	defer func() { require.NoError(t, h.Shutdown(context.Background())) }()
 	_, err = catalog.registerSubsystems(context.Background(), false)

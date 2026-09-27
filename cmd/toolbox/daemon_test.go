@@ -118,7 +118,7 @@ func portOf(t *testing.T, address string) int {
 func TestTheCoreBindsTheAddressItWasConfiguredWith(t *testing.T) {
 	// The address is the whole point: a subsystem joining and an agent connecting
 	// both need to know where the core is without being told per session.
-	core, _ := startCore(t, "registry", "knowledge")
+	core, _ := startCore(t, "registry", "skill")
 	registryServer, ok := core.host.Servers()["registry"]
 	require.True(t, ok, "the core needs its registry")
 	assert.Equal(t, core.address, strings.TrimPrefix(registryServer.Endpoint(), "http://"),
@@ -213,7 +213,7 @@ func TestTheCoreAnswersAboutWhatItHolds(t *testing.T) {
 	// A daemon is only useful if the catalog behind it is the catalog an in-process
 	// core fills. A client that reached the core over its registry must find the same
 	// descriptions, or there are two products.
-	core, _ := startCore(t, "registry", "apitools", "knowledge")
+	core, _ := startCore(t, "registry", "apitools", "skill")
 	_, err := core.catalog.registerSubsystems(t.Context(), false)
 	require.NoError(t, err)
 
@@ -223,7 +223,7 @@ func TestTheCoreAnswersAboutWhatItHolds(t *testing.T) {
 	for _, described := range apis {
 		names = append(names, described.ID)
 	}
-	assert.Contains(t, names, "knowledge", "a subsystem the core started is described")
+	assert.Contains(t, names, "skill", "a subsystem the core started is described")
 	assert.Contains(t, names, "apitools", "and so is the catalog itself")
 }
 
@@ -263,7 +263,7 @@ func TestTheCoreServesTheSurfaceItsCatalogDescribes(t *testing.T) {
 	// The claim an agent depends on: the tools on the network are the catalog's
 	// operations, under the names the naming rules give them, gated by the same
 	// policy the core authorized with.
-	core, deferred := startCore(t, "registry", "apitools", "knowledge")
+	core, deferred := startCore(t, "registry", "apitools", "skill")
 	_, err := core.catalog.registerSubsystems(t.Context(), false)
 	require.NoError(t, err)
 
@@ -280,8 +280,8 @@ func TestTheCoreServesTheSurfaceItsCatalogDescribes(t *testing.T) {
 	for _, feature := range bridge.Features() {
 		exposed[feature.ToolName] = feature.Exposed
 	}
-	assert.True(t, exposed["knowledge__search"], "a read the default policy permits is offered")
-	assert.False(t, exposed["knowledge__put_source"], "and a write it does not is not")
+	assert.True(t, exposed["skill__list_skills"], "a read the default policy permits is offered")
+	assert.False(t, exposed["skill__add_skill"], "and a write it does not is not")
 
 	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "probe", Version: "0.1.0"}, nil).
 		Connect(t.Context(), &sdkmcp.StreamableClientTransport{
@@ -296,8 +296,8 @@ func TestTheCoreServesTheSurfaceItsCatalogDescribes(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	assert.Contains(t, names, "knowledge__search", "the mounted endpoint serves the catalog's tools")
-	assert.NotContains(t, names, "knowledge__put_source", "and hides the write the policy refuses")
+	assert.Contains(t, names, "skill__list_skills", "the mounted endpoint serves the catalog's tools")
+	assert.NotContains(t, names, "skill__add_skill", "and hides the write the policy refuses")
 }
 
 func TestTheCoreReportsItIsStillStarting(t *testing.T) {

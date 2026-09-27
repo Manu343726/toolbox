@@ -15,11 +15,11 @@
 # matched most specific first and the first match decides, so a narrow rule can
 # carve an exception out of a broad one:
 #
-#   allow knowledge/**      read write
-#   deny  registry/**       write
+#   allow prompt/**        read write
+#   deny  registry/**      write
 #
 # "*" matches one segment of an identifier and a trailing "**" matches the rest,
-# so "knowledge/**" is every operation of the knowledge API. An identifier is
+# so "prompt/**" is every operation of the prompt API. An identifier is
 # "<api>/<service>/<method>": the API is part of it because three subsystems serve
 # the same contract, and naming one provider has to be possible.
 #

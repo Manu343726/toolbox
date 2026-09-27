@@ -30,7 +30,6 @@ import (
 	apitools "github.com/Manu343726/toolbox/subsystems/apitools"
 	documentation "github.com/Manu343726/toolbox/subsystems/documentation"
 	health "github.com/Manu343726/toolbox/subsystems/health"
-	knowledge "github.com/Manu343726/toolbox/subsystems/knowledge"
 	logger "github.com/Manu343726/toolbox/subsystems/logger"
 	model "github.com/Manu343726/toolbox/subsystems/model"
 	policy "github.com/Manu343726/toolbox/subsystems/policy"
@@ -470,7 +469,6 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 		"apimcp":        func() (*subsystem.Server, error) { return apimcp.New(apimcp.Options{}) },
 		"documentation": func() (*subsystem.Server, error) { return documentation.New(documentation.Options{}) },
 		"health":        func() (*subsystem.Server, error) { return health.New(health.Options{}) },
-		"knowledge":     func() (*subsystem.Server, error) { return knowledge.New(knowledge.Options{}) },
 		"logger": func() (*subsystem.Server, error) {
 			return logger.New(logger.Options{
 				Router:    fanout.Router,

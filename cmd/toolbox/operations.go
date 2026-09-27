@@ -12,8 +12,8 @@ import (
 
 // The main CLI offers every operation the built-in subsystems serve, as a command with that
 // operation's own flags. It is the same generator the standalone subsystem commands use,
-// over the same contracts, so `toolbox knowledge search` and `knowledge search` are one
-// command with a different host around it.
+// over the same contracts, so `toolbox prompt render-prompt` and `prompt render-prompt` are
+// one command with a different host around it.
 //
 // Two things are decided here rather than in the generator, because both are about this
 // process rather than about the contract:

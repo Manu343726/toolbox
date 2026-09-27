@@ -19,7 +19,7 @@ func TestBuildHostRegistersIndependentSubsystems(t *testing.T) {
 	h, _, err := buildHost(hostComposition{config: config.Config{LoggingBaseDir: t.TempDir()}})
 	require.NoError(t, err)
 	assert.NoError(t, h.Select("workflow"))
-	assert.NoError(t, h.Select("agent", "knowledge"))
+	assert.NoError(t, h.Select("agent", "skill"))
 }
 
 func TestAllModeRegistersEndpoints(t *testing.T) {

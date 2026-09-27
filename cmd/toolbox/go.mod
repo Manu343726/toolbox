@@ -12,7 +12,6 @@ require (
 	github.com/Manu343726/toolbox/subsystems/apitools v0.0.0
 	github.com/Manu343726/toolbox/subsystems/documentation v0.0.0
 	github.com/Manu343726/toolbox/subsystems/health v0.0.0
-	github.com/Manu343726/toolbox/subsystems/knowledge v0.0.0
 	github.com/Manu343726/toolbox/subsystems/logfile v0.0.0
 	github.com/Manu343726/toolbox/subsystems/logger v0.0.0
 	github.com/Manu343726/toolbox/subsystems/model v0.0.0
@@ -74,8 +73,6 @@ replace github.com/Manu343726/toolbox/subsystems/agent => ../../subsystems/agent
 replace github.com/Manu343726/toolbox/subsystems/documentation => ../../subsystems/documentation
 
 replace github.com/Manu343726/toolbox/subsystems/health => ../../subsystems/health
-
-replace github.com/Manu343726/toolbox/subsystems/knowledge => ../../subsystems/knowledge
 
 replace github.com/Manu343726/toolbox/subsystems/model => ../../subsystems/model
 
