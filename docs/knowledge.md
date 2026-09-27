@@ -21,22 +21,41 @@ project is limited to whatever they remember to open. **This subsystem is the
 system that both of them work from**: the knowledge, the memory, and the
 documentation, in one place, reachable by both.
 
-### 1.1 The two halves
+### 1.1 The three layers
 
-There are two kinds of knowledge, they are made differently, and they are not
-alternatives to each other.
+There are three layers here, and keeping them apart is most of the design.
 
-|  | The memory half | The documentation half |
-|---|---|---|
-| **What it is** | What the system has learned: extracted facts, consolidated observations, synthesized models | What people have written: architecture notes, runbooks, decisions, glossaries |
-| **Who writes it** | Assistants, from conversation, and imports | People, in files, reviewed like code |
-| **How it is stored** | The memory backend, which indexes, links, consolidates and reranks | A directory of markdown in a repository |
-| **What makes it trustworthy** | Evidence: every fact traces to a document, every observation to its facts | Authorship: a named person wrote it and a reviewer accepted it |
-| **What it cannot do** | Show you the sentence someone wrote | Notice that a decision was reversed last month |
+|  | The authored corpus | The memory engine | The projection |
+|---|---|---|---|
+| **What it is** | What people wrote: architecture notes, runbooks, decisions, policies | What the system derived from it and from conversation: facts, entities, observations, models | Readable documents rendered from the engine's current beliefs |
+| **Who writes it** | People, in files, reviewed by other people | The system, from retained content | The system, on a refresh |
+| **Stored as** | Markdown in a Git repository | The memory backend's indexes | Backend pages, and a markdown export of them |
+| **What makes it trustworthy** | Authorship and review. A named person wrote it and someone accepted it | Evidence. Every fact traces to a document, every observation to its facts | Nothing on its own. It is what the system believes *now* |
+| **If deleted** | Nothing to rebuild from — this is the loss | **Rebuilt in full from the corpus** | Rebuilt from the engine |
+| **What it cannot do** | Notice that a decision was reversed last month | Show you the sentence someone wrote | Be quoted as authority |
 
-Neither substitutes for the other and a base that has only one of them is
-deficient in a way its users can feel. Documentation that is never reconciled
-lies. Memory that was never written down is a conversation nobody had again.
+The corpus and the engine are the two halves in §1.1's sense; the projection is
+the engine's rendering of itself, and it is **not** a third source of truth. It
+exists because "what does the system currently believe about this" is a real
+question with a real answer, and a person should be able to read that answer
+without a query language.
+
+Two consequences follow, and they are the two rules this subsystem is built on:
+
+- **The corpus is authoritative. The engine is disposable and reproducible.**
+  Delete the base and it can be rebuilt in full from the repository. That is not
+  a nice property, it is the property that makes every other decision safe —
+  because it means the derived side can be regenerated when the backend changes,
+  when the extraction settings change, when the whole thing is migrated, and
+  when you want to index a historical version of the corpus.
+- **The projection never flows back into the corpus.** Feeding generated pages
+  back in would make the system increasingly self-referential, and every
+  generation would be reasoning partly from its own previous output. The corpus
+  is written by people; that is the whole of its provenance.
+
+Neither substitutes for the others. A base with only an engine has nothing its
+users can review. A base with only a corpus has nothing an assistant can reason
+with. A base that treats the projection as authority has nothing trustworthy.
 
 ### 1.2 Why they coexist in one base
 
@@ -184,7 +203,7 @@ person owns. See §5 for the design.
 | W-2 | Corpus content is listed and read through the API with the same calls as any other content, so documentation is a first-class thing and not a filesystem an API consumer has to be given separately. (U) |
 | W-3 | The corpus is browsable as a tree, and its tree sits in the same walk as derived pages. (U) |
 | W-4 | **Reconcile is the unit of work**: plan what would change, report it, and apply only what the user confirmed. There is no unconditional write. (W) |
-| W-5 | A file's identity is a pure function of the base and its relative path, so an edit is an update, a rename is a delete and a create, and no state outside the base is required. (W) |
+| W-5 | A file's identity is declared, not inferred from where it happens to sit: the frontmatter `id` when the file has one, and a path-derived identifier otherwise. Both are computable from the file alone, so no state outside the base is required, and a **move** of a file that declares an id keeps its identity. (W) |
 | W-6 | An unchanged file costs nothing: the plan compares digests against the content's recorded digest. (W) |
 | W-7 | Each reconcile records which content it owns, and a prune only removes content that owner recorded. Two reconciles over one base cannot delete each other's work. (W) |
 | W-8 | Frontmatter becomes tags — path segments, dates, and the author's own tags — so scope is a filter retrieval already supports rather than a directory convention the API must learn. (W) |
@@ -194,8 +213,13 @@ person owns. See §5 for the design.
 | W-12 | Application is asynchronous, batched, and idempotent per batch, because a large corpus is thousands of extractions and cannot be a synchronous call. (W) |
 | W-13 | Binary files under the corpus are ingested through the binary path. (W) |
 | W-14 | **The corpus remains the source of truth.** Deleting a base deletes derived knowledge, not the files. Deleting a page deletes a projection. Nothing in the base is the only copy of anything a person wrote. (W) |
-| W-15 | **A person may write corpus content through the API**, and the change lands in the file the corpus is, so the repository stays the copy a reviewer reads. A write that only existed in the base would be a second source of truth. (U) |
-| W-16 | **A reconcile reports drift in the other direction too**: derived knowledge a person has contradicted, so that a base's beliefs are visibly wrong when the documentation says otherwise. (U) |
+| W-15 | **The corpus is written by people, through their editor, and reviewed through Git.** Not through this API. An assistant never writes a corpus file, and neither does the subsystem on its own. A write that existed only in the base would be a second source of truth, and the next reconcile would delete it; a write that landed in the file behind somebody's editor would produce a conflict with their tooling. §10.2. (U) |
+| W-16 | **A reconcile reports drift in the other direction too**: derived knowledge the corpus contradicts, so that a base's beliefs are visibly wrong when the documentation says otherwise. (U) |
+| W-17 | **The base is disposable and rebuildable.** Deleting it and reconciling from the repository reproduces the corpus, and the operation is supported rather than merely possible. (U) |
+| W-18 | **A commit corresponds to an index.** A reconcile records the commit it reconciled, and a base can be asked what commit it reflects, so "the index matches the merge" is a checkable statement. (W) |
+| W-19 | **Reconcile runs on merged content, not on every local edit.** An uncommitted or unreviewed change is not knowledge the deployment should believe. (W) |
+| W-20 | **The projection never flows back into the corpus.** Generated pages are not reconciled as authored content, so the system cannot accumulate its own output as input. (U) |
+| W-21 | **Contradictions between two authored documents are preserved, not resolved.** An ADR that supersedes another is the corpus's own statement about which holds, and the reconcile passes both through with that metadata intact rather than picking one. (W) |
 
 ### The memory half — ingestion
 
@@ -224,6 +248,7 @@ person owns. See §5 for the design.
 | D-5 | List and read chunks: the original text segments, their order, and whether they were truncated. (H) |
 | D-6 | Reprocess a document on demand. (H) |
 | D-7 | Delete a document and every fact extracted from it, reporting the count. (H) |
+| D-8 | Replacing a document's content **changes the identifiers of the facts extracted from it**, so every observation and page derived from those facts is re-derived and a citation naming a fact is dangling. A reconcile reports that cascade: it is the most expensive consequence of an edit and the least visible. (H) |
 
 ### The memory half — facts and curation
 
@@ -336,6 +361,8 @@ person owns. See §5 for the design.
 | N-9 | Streaming: there is none. Every operation is unary, and adding one would be the only streaming contract in the tree. (new) |
 | N-10 | The provider declares one record, not one per base, and a deployment running two backends distinguishes them by identifier. (new) |
 | N-11 | **Origin-specific behaviour is stated in the contract, not discovered.** A caller can tell from the contract what a write will do to each origin, because "edits are applied at the source and reconciled in" is a promise and a silent overwrite is a bug. (U) |
+| N-12 | **Exact-term search is on by default for a corpus-backed base.** Technical prose is full of identifiers — `OAuth 2.1`, `ADR-014`, `CustomerID` — that semantic similarity alone does not reliably find, so a base reconciling a corpus keeps its keyword and text arms enabled. A deployment may turn them off having measured the cost; the point is that turning them off is a decision rather than a default. The backend exposes this as a toggle whose own default is not stated in its description, so the provider sets it explicitly for a corpus-backed base rather than inheriting it. (W) |
+| N-13 | **The extraction mode is a per-base choice, and both modes are first-class.** Full extraction gives facts, entities and relationships, and is the default; a chunk-oriented mode stores the text as-is without model extraction, for a corpus that is read rather than reasoned over. Which one a base uses is recorded, because a base whose mode changed has different knowledge and a reader should be able to tell. (W) |
 
 
 ## 4. The content model
@@ -534,9 +561,55 @@ docs/
 └── glossary.md
 ```
 
-Frontmatter is optional and, where present, becomes tags (W-8). The path becomes
-tags. Nothing about the format is required: a file with no frontmatter is
-reconciled, and the path alone scopes it.
+Frontmatter is optional, and where present it is a contract rather than a
+suggestion. A file with none is reconciled, and the path alone scopes it; a file
+with frontmatter gets its identity, its kind and its status from there, and the
+extraction step gets explicit signals instead of inferring everything from prose.
+
+```markdown
+---
+id: wiki:architecture/authentication
+title: Authentication
+kind: architecture
+status: active
+authority: human
+source: company-wiki
+---
+
+# Authentication
+
+Our API uses OAuth 2.1. Access tokens expire after 60 minutes.
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | recommended | The stable identity, globally unique within the base. Overrides the path-derived identifier, and is what makes a **move** a move rather than a delete and a create. |
+| `title` | optional | A display title where the filename is a poor one. |
+| `kind` | optional | One of `architecture`, `policy`, `decision`, `procedure`, `reference`. Becomes a tag, so retrieval can be scoped to "the policies" or "the decisions". |
+| `status` | optional | One of `active`, `deprecated`, `draft`. Becomes a tag, and is what lets a consumer discount a superseded document. |
+| `authority` | optional | `human` for a person-written document. The default and the only value a person should write; it exists so a file states what it is rather than the deployment assuming it. |
+| `source` | optional | Which corpus or repository this came from, when a base reconciles more than one. |
+| `supersedes` | optional | Identifiers this document replaces. For decisions. W-21. |
+| `owner`, `reviewed`, `date` | optional | Who owns it, when it was last reviewed, when it was decided. Metadata for a reader; nothing depends on them. |
+| `source_commit`, `source_path` | optional | Which commit and path this version came from. Usually the reconciler records these rather than a person writing them. |
+
+Two of these are load-bearing and the rest are conveniences:
+
+- **`id` changes the identity rule.** Without it, identity is the
+  repository-relative path and a move is a delete plus a create. With it, a move
+  keeps the identity and every fact extracted from the file survives the move.
+  Which is right depends on whether the corpus is reorganised, and a
+  reorganised corpus with path identity silently re-extracts everything and
+  orphans the facts — so the recommendation is `id` on anything that might move,
+  and the reconciler says so when it sees a moved file without one.
+- **`supersedes` is how authored conflicts stay authored.** An ADR that
+  supersedes an earlier one is the corpus making its own statement about which
+  holds. The reconciler does not act on it beyond carrying it as metadata and a
+  tag: the contradiction is resolved by a person, in a file, in review — not by
+  a synchroniser guessing. W-21.
+
+`kind` and `status` are enums in the contract, not free strings, because
+retrieval filters on them and a typo in a tag is a silently empty result.
 
 What the corpus deliberately is **not**: a place to store derived knowledge.
 Observations and pages are the system's, and writing them by hand would be
@@ -555,14 +628,19 @@ U-10, W-2, W-3):
 - The corpus tree appears in the same browse walk as the page tree, labelled by
   origin, so a person sees their documentation and the pages the system maintains
   in one place (U-4).
-- A person can write corpus content **through the API** (W-15), and the change
-  lands in the file. This matters more than it looks: a write that only existed
-  in the base would be a second source of truth, and the next reconcile would
-  silently delete it — the exact failure this half exists to prevent. So the API
-  write is a file write, and the file stays the copy a reviewer reads.
+- A person **reads** corpus content through the same `ReadContent` they read
+  anything else through, and through `ReadCorpusFile` when they want the file
+  itself with its frontmatter. There is no documentation-only read, and no reason
+  for one.
+- A person **writes** corpus content through their editor and their Git review,
+  not through here. W-15. This is the one asymmetry in the whole design and it is
+  deliberate: a corpus file has an editor, hooks, a blame view and a review
+  process, and a tool that wrote it behind their back would fight all four. It
+  also means the tool never has to be trusted with someone's documentation, which
+  is a much easier property to reason about than "it only writes files you
+  approved".
 - An assistant reads documentation through the same `ReadContent` it reads
-  anything else through. There is no documentation-only read, and no reason for
-  one.
+  anything else through, and **never writes it**.
 
 ### 5.4 Reconcile
 
@@ -580,12 +658,46 @@ and does the work asynchronously.
 
 Four decisions inside that, each of which is a choice rather than a detail:
 
-**Identity is a pure function of the base and the relative path.** W-5. This is
-what makes the reconcile stateless. The alternative — an index file, as a
-reference implementation for a different corpus keeps outside the synced tree —
+**Identity is read from the file, never looked up.** W-5. The frontmatter `id`
+when there is one, and a path-derived identifier when there is not. Either way
+it is computable from the file alone, which is what makes the reconcile
+stateless. The alternative — an index file mapping paths to identities, which is
+what a synchroniser for a different corpus keeps outside the synced tree —
 introduces a second thing that can be lost and two indexers that can disagree.
-Deriving identity from the path means a lost index costs nothing: the next plan
-recomputes it, and a digest comparison tells it what is unchanged.
+Reading identity from the file means a lost index costs nothing: the next plan
+recomputes it and a digest comparison says what is unchanged.
+
+The two cases behave differently on a **move**, and that difference is the whole
+reason `id` exists:
+
+| | No `id` | With `id` |
+|---|---|---|
+| Edit | digest differs, content replaced | same |
+| Move | **delete + create**; facts re-extracted, the old ones pruned | identity unchanged; facts follow the content |
+| Rename | delete + create | identity unchanged |
+
+A corpus that gets reorganised and has no `id` fields silently re-extracts
+everything and orphans every fact that referenced the old paths. The reconciler
+reports a moved file with no declared identity as `moved` rather than treating
+it as two unrelated files, so whoever reorganised the tree finds out.
+
+**Replacement really is a replace, and that is what we want — with a caveat worth
+naming.** A repeated `document_id` on the backend *replaces*: the old document
+and its facts are deleted and re-extracted rather than appended to. That is
+correct for a corpus, because an edited runbook must not leave the previous
+version's facts retrievable — an assistant answering from a superseded sentence
+is worse than one that answers from nothing. The caveat is D-8: the facts get new
+identifiers, so everything consolidated from them is re-derived and a citation
+naming a fact goes dangling. The reconcile reports the cascade rather than leaving
+it to be found.
+
+**A commit is recorded, and is not identity.** W-18. Every reconcile records the
+commit it reconciled against, on the base and on each document it touched, so
+"the index matches the merge" is a question with an answer. It is deliberately
+*not* part of identity: a commit is a property of a run, not of a document, and
+putting it in identity would mean every commit re-extracts the whole corpus.
+The provenance chain a consumer walks is memory → document → path → commit →
+markdown, and every link in it is a field rather than a lookup.
 
 **Diffing is by content digest, never by timestamp.** W-6. Filesystems lie about
 timestamps; digests do not, and the content already carries one.
@@ -621,8 +733,14 @@ Three rules converge on this shape, and all three are worth naming:
   approval cannot be reordered. The same shape `AddSkill` already uses, for the
   same reason.
 
-The same applies to `ImportTemplate` (T-4) and to any API write that lands in a
-person's file (W-15), for the same reasons.
+The same applies to `ImportTemplate` (T-4), for the same reasons.
+
+`PlanReconcile` and `ApplyReconcile` are also where W-19 lands: a reconcile runs
+against **merged** content, not against a working tree. A base that indexed an
+uncommitted change would believe something no reviewer has seen, and the
+reproducibility property in §1.1 would be a claim rather than a fact. A
+deployment that wants a local preview runs the plan, which is a read, and sees
+what would change without any of it being believed.
 
 ### 5.6 Promotion: how the human loop closes
 
@@ -648,6 +766,36 @@ That is why W-16 asks a reconcile to report derived knowledge the corpus
 contradicts — the drift a person most wants to know about is the base believing
 something their own documentation says otherwise.
 
+### 5.7 Two kinds of contradiction, handled differently
+
+This is worth separating, because the two cases have opposite right answers and
+a design that treats them alike gets one of them wrong.
+
+**Authored against derived — the corpus wins.** A file states something; the
+system inferred something else. A person, in review, decided. The derived claim
+is superseded, not deleted, and the corpus is now citable for it.
+
+**Authored against authored — nobody wins, and the synchroniser must not try.**
+An ADR says use PostgreSQL; a later ADR says migrate to something else. Both are
+in the corpus, both are true of some moment, and the question of which holds is a
+question about the organisation, not about the text. A synchroniser that picked
+one would be making that decision silently, and the decision is the expensive
+one. So both are indexed, both are retrievable, and the corpus's own metadata
+does the work:
+
+- `status` says whether a document is active, deprecated or a draft.
+- `supersedes` says which decision replaced which, written by a person in a
+  reviewed file.
+- The commit each version was reconciled from says which is newer in practice,
+  though newer is not the same as current — a document can be revised to say
+  something older.
+
+A consumer that needs one answer retrieves both and applies the metadata. An
+engine that consolidates them into a single "the database is X" observation has
+answered a question nobody asked, and the observation is the thing a person then
+has to unpick. This is why the reconcile reports rather than resolves (W-21), and
+why the tags carry `status` and `kind` through rather than flattening them.
+
 
 ## 6. The contract
 
@@ -662,7 +810,7 @@ and what the MCP gateway gates on.
 |---|---|
 | `ContentService` | `ListContent`, `GetContent`, `WriteContent`, `CurateContent`, `DeleteContent`, `GetContentTree`, `ListContentChunks`, `ReprocessContent` |
 | `QueryService` | `Search`, `Recall`, `Reflect`, `ListTags`, `PreviewExtraction`, `PreviewPrompts` |
-| `CorpusService` | `PlanReconcile`, `ApplyReconcile`, `GetCorpusStatus`, `ReadCorpusFile`, `WriteCorpusFile` |
+| `CorpusService` | `PlanReconcile`, `ApplyReconcile`, `GetCorpusStatus`, `ReadCorpusFile`, `RebuildCorpus` |
 | `KnowledgeBaseService` | `ListBases`, `GetBase`, `CreateBase`, `UpdateBase`, `DeleteBase`, `ResetBaseConfig`, `GetBaseConfig`, `UpdateBaseConfig`, `GetBaseStats`, `GetBaseIngestionSeries`, `ListBaseAliases`, `AddBaseAlias`, `SetPrimaryBaseAlias`, `RemoveBaseAlias` |
 | `MemoryService` | `GetMemory`, `CurateMemory`, `GetMemoryHistory`, `GetMemoryGraph` |
 | `PageService` | `CreatePageFolder`, `CreatePage`, `UpdatePageNode`, `RefreshPage`, `PreviewPageRefresh`, `ExportPageBundle` |
@@ -695,6 +843,13 @@ against the shape it replaces:
 `CorpusService` exists at all because reconcile is not a content operation: it
 is a comparison between a directory and a base, and the answer is a plan.
 
+It has no write. W-15: the corpus is written by people, through their editor,
+and reviewed through Git. `ReadCorpusFile` exists so a person can read
+documentation through the same tool they read everything else with, and
+`RebuildCorpus` exists so the disposability property in §1.1 is an operation
+rather than a promise — drop the base, rebuild it from the repository, and
+compare.
+
 
 ### 6.2 Vocabulary and side effects
 
@@ -706,7 +861,7 @@ is a comparison between a directory and a base, and the answer is a plan.
 | `Delete*`, `Remove*`, `Cancel*`, `Clear*` | `delete` | |
 | `PlanReconcile` | `read_only` | It reads the corpus and the base and writes nothing. |
 | `ApplyReconcile` | `create update delete` | The only operation in the contract that can create, update and delete in one call, and so the one whose confirmation matters most. |
-| `WriteCorpusFile` | `create update` | A write into a person's repository. Confirmation applies for the same reason as the reconcile, and this is the case where it matters most. |
+| `RebuildCorpus` | `create update delete` | Drops the base's derived knowledge and reconciles the corpus again. The only operation that destroys anything on the documentation side, and therefore the one §15 question 3 is about. |
 | `ImportTemplate` | `create update` | Applies configuration and defines directives; the content it defines is generated, not authored. |
 | `ImportBase`, `CloneBase` | `create update delete` | Both can replace an existing base's contents. |
 
@@ -921,14 +1076,23 @@ than of the caller (U-5).
 Three things do not unify, and each is a real difference rather than an
 inconsistency to paper over.
 
-**Mutability (C-6, N-11).** Authored content is edited at its source and
-reconciled in. Retained content is curated. Derived content is regenerated and
-cannot be written at all. A single `WriteContent` cannot mean all three, and a
-uniform one that pretended to would either lose a person's edit or hand an
-assistant a way to overwrite documentation. So `Mutability` is on the content,
-the contract states the rule per origin, and a write against the wrong origin is
-refused with the reason — which is a better answer than accepting it and
-discarding it later.
+**Mutability (C-6, N-11, W-15).** Authored content is edited at its source —
+in the file, reviewed through Git — and reconciled in from there. Retained
+content is curated. Derived content is regenerated and cannot be written at all.
+There is exactly one writable origin, and it is the one the deployment's users
+write in their editor.
+
+A single `WriteContent` therefore does not mean all three, and a uniform one
+that pretended to would either lose a person's edit or hand an assistant a way to
+overwrite somebody's documentation. So `Mutability` is on the content, the
+contract states the rule per origin, and a write against the wrong origin is
+refused with `FailedPrecondition` and the reason — which is a better answer than
+accepting it and discarding it later, and a better answer than granting the
+write at all.
+
+This is the one place the "both audiences may write" claim in §1.3 is narrowed,
+and the narrowing is a decision rather than an omission: both audiences may
+write *knowledge*, and only people may write *documentation*.
 
 **Granularity of extraction.** A fact is not content. It is one statement the
 system pulled out, it exists only for retained and authored material, and
@@ -986,10 +1150,12 @@ between the two is which policy is in force and who is asking.
 `PlanReconcile`, `ApplyReconcile`.
 
 **Documentation, and what a person gets that an assistant usually should not:**
-`ReadCorpusFile`, `WriteCorpusFile`, `GetCorpusStatus`. The last is the one worth
-naming: a person needs to know whether their documentation is reconciled, what
-the plan would do, and what the base believes that their files contradict
-(W-16). An assistant can be given it and usually has no use for it.
+`ReadCorpusFile`, `GetCorpusStatus`, `RebuildCorpus`. The second is the one worth
+naming: a person needs to know whether their documentation is reconciled, which
+commit the base reflects, what the plan would do, and what the base believes that
+their files contradict (W-16, W-18). An assistant can be given it and usually has
+no use for it. There is no corpus write on this list or any other, because there
+is no corpus write (W-15).
 
 **Operator surface, offered to neither by default:** `DeleteBase`,
 `DeleteContent`, `DeletePageNode`, `DeleteMentalModel`, `DeleteDirective`,
@@ -1008,10 +1174,14 @@ made per deployment.
 And the confirmation of §5.5 is a **value the agent relays**, not a prompt the
 transport asks for — because the stateless HTTP endpoint cannot elicit, and a
 rule that held only where it could would not be a framework rule. That applies to
-`ApplyReconcile`, to `ImportTemplate`, and to `WriteCorpusFile`, which is the
-case that matters most for the human half: an assistant with a write on the
-corpus can change what the project says about itself, so it proposes and a person
-decides.
+`ApplyReconcile` and to `ImportTemplate`: both change what the deployment
+believes, so both propose and a person decides.
+
+The corpus case does not need this treatment because it is not offered. An
+assistant with a write on somebody's documentation would be able to change what
+the project says about itself, and no confirmation value makes that a good idea —
+so the write does not exist, and the rule that would have governed it is
+unnecessary rather than implemented.
 
 ## 12. Where the behaviour lives
 
@@ -1056,6 +1226,7 @@ That is a legitimate outcome, not a failure of the design.
 | A reconcile is interrupted | Idempotent per batch (W-12), so a rerun resumes rather than duplicating. |
 | A file is edited between the plan and the apply | The apply uses the digests from the plan and reports any file whose digest no longer matches, rather than reconciling a version nobody saw. A confirm that approved one thing must not quietly apply another. |
 | A corpus file is edited while the base is serving | No effect on reads: the base holds what it reconciled and `revision` says which version. The next plan reports the drift. Read-your-writes across a filesystem is not a property this can offer, and pretending otherwise would be worse than saying so. |
+| A corpus file is edited, so its facts are replaced | **Fact identifiers change.** A replaced document's facts are deleted and re-extracted, so every observation consolidated from the old ones, and every page built from those observations, has to be re-derived — and any citation that named a fact identifier is now dangling. The reconcile reports the scope of that cascade rather than leaving a caller to discover it, because it is the operation's most expensive consequence and its least visible one. |
 
 ## 14. What is deliberately not here
 
@@ -1074,51 +1245,60 @@ That is a legitimate outcome, not a failure of the design.
 
 ## 15. Open questions
 
-Ordered by how much they change the contract's shape.
+Two of these were open in the previous revision and are now settled by the
+integration design, so they are recorded as decisions rather than questions. The
+rest are open, ordered by how much they change the contract's shape.
 
-1. **Is the corpus writable at all through the API?** W-15 assumes yes. The
-   argument for it is symmetry — U-5 and U-10 both require that a person is not
-   confined to their half. The argument against is that a person's documentation
-   should change through their editor, with its hooks and its review, and a tool
-   that writes behind their editor produces conflicts. Symmetry says yes; not
-   surprising people says no. This is the first question because the answer
-   changes W-15, §5.3, and the `CorpusService` shape.
-2. **How much does `CorpusService` share with `ContentService`?** W-15 says an
-   API write to the corpus lands in the file, which makes `WriteContent` on
-   `origin=AUTHORED` and `WriteCorpusFile` the same operation with two names. Is
-   that one RPC taking a path, or two where one is defined in terms of the other?
-   Two names for one operation is how one becomes two implementations.
-3. **Does the corpus live in this subsystem or a sibling?** A sibling serving a
-   corpus contract and calling this one over ConnectRPC obeys the
-   cross-subsystem rule more literally, and makes the reconcile testable with no
-   backend at all. One subsystem is fewer modules, and one surface is the thesis.
-   These pull in opposite directions and the thesis is winning.
-4. **Is `Reflect` a knowledge operation or an agent operation?** It runs a model
+**Settled — the corpus is not writable through the API** (W-15). A corpus file
+has an editor, hooks, a blame view and a review process, and a tool that wrote
+it behind someone's back would fight all four. It also means the tool never has
+to be trusted with a person's documentation, which is a far easier property to
+reason about than "it only writes files you approved". The previous revision
+listed this as a question and proposed `WriteCorpusFile`; both are gone.
+
+**Settled — a file's identity comes from its frontmatter when it has one**
+(W-5). A path alone is not identity for a corpus that gets reorganised, because
+a move would then be a delete and a create and every fact would be orphaned. The
+reconciler reports a moved file with no declared identity rather than treating it
+as two files, so the omission is visible.
+
+1. **Is `Reflect` a knowledge operation or an agent operation?** It runs a model
    loop over the base. `subsystems/agent` exists. Getting this wrong puts a
    second model-calling path in the framework, which is a boundary worth deciding
-   deliberately rather than by default. This is bigger now than it was before the
-   halves were unified, because reasoning over documentation is something a person
-   wants too — and if reasoning belongs to the agent subsystem, the knowledge
-   subsystem's answer to "should we change this" is a search, which is a smaller
-   promise than this document makes.
-5. **Is the corpus on disk, or does the base hold the bytes?** §5 assumes the
-   file is the copy and the base holds derived knowledge. A deployment that wants
-   the base to be self-contained needs the text retained and accepts two copies
-   that can disagree — and W-15's promise that an API write lands in the file
-   holds only in the first world. The two questions are coupled and should be
-   answered together.
-6. **Where does `ClearBaseObservations` live** — `KnowledgeBaseService` or
+   deliberately rather than by default. It is the largest remaining question,
+   because reasoning over documentation is something a person wants too — and if
+   reasoning belongs to the agent subsystem, this subsystem's answer to "should we
+   change this" is a search, which is a smaller promise than this document makes.
+2. **Does the corpus live in this subsystem or a sibling?** A sibling serving a
+   corpus contract and calling this one over ConnectRPC obeys the
+   cross-subsystem rule more literally, and makes the reconcile testable with no
+   backend at all — the reconcile is pure computation over a directory and a set
+   of digests. One subsystem is fewer modules, and one surface is the thesis.
+   These pull in opposite directions and the thesis is winning, but the testability
+   argument is the strongest thing anyone could raise for the other side.
+3. **What does `RebuildCorpus` do when the corpus and the base disagree?** W-17
+   says a base is rebuildable, which implies dropping and reconciling. Whether it
+   is allowed to do that in place, or must refuse when the base holds retained
+   content that did not come from the corpus, is unresolved — and it matters,
+   because a base shared between a corpus and an assistant's conversation memory
+   cannot be rebuilt without losing the second half.
+4. **Is a moved file without an `id` a warning or an error?** W-5 says the
+   reconciler reports it. Whether that is a note in the plan or a refusal is a
+   decision about how strict this framework is about its own frontmatter
+   contract, and the answer probably differs between a project that never moves
+   files and one that reorganises quarterly.
+5. **Where does `ClearBaseObservations` live** — `KnowledgeBaseService` or
    `ObservationService`? It clears derived knowledge from a base, so the base is
    the subject; it is also one of the observation operations. Pick one.
-7. **Are pages and mental models one service or two?** They are one object with
+6. **Are pages and mental models one service or two?** They are one object with
    different defaults and the distinction is invisible in the API. Two services
    is more faithful and costs a concept; one is cheaper and loses the distinction
    a reader of the contract may want.
-8. **Provenance tag namespace.** Reserved prefix and value spelling. It should be
+7. **Provenance tag namespace.** Reserved prefix and value spelling. It should be
    a framework decision, because a deployment that guesses differently cannot
    filter across two bases, which is the one capability the unified surface exists
    to provide.
-9. **Should a base's own configuration be project configuration?** A base's
+8. **Should a base's own configuration be project configuration?** A base's
    missions and directives are authored material, and a project configuration
    file is where this framework puts authored material. If they merge, importing
    a template becomes a rule-17 operation on the project's configuration file,
@@ -1148,14 +1328,43 @@ real use.
 
 ## 17. Sources
 
-- The investigation this supersedes:
+- **The integration design this implements**, held outside the repository at
+  `~/Downloads/hindsight-human-wiki-integration.md`. It settled the corpus
+  layering, the source-of-truth invariant, the frontmatter contract, the
+  commit-correspondence property, the two ingestion modes, and the retrieval
+  authority directives. Where this document differs it is because the backend's
+  machine-readable description was consulted and the design document's open
+  question about replacement semantics has since been answered — see §5.4 and
+  D-8.
+- The investigation that preceded both:
   [`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md)
 - Hindsight's machine-readable API description (0.10.1) and its documentation
   site, for every claim about the backend's behaviour. Structural claims in
   particular — the absence of a writable page body, the response-only provenance
-  flag, the request shapes — were checked against the description rather than
-  the prose, because the prose is written for humans and the description is what
-  the backend will actually accept.
+  flag, the request shapes, and the `replace` default on a repeated document
+  identifier — were checked against the description rather than the prose,
+  because the prose is written for humans and the description is what the
+  backend will actually accept.
+
+### One open question in the source design, answered here
+
+The integration design says, correctly, to verify the backend's update semantics
+before building a production sync and not to assume old facts disappear. Checked
+against the description for 0.10.1:
+
+> If a memory item has a `document_id` that already exists, the old document and
+> its memory units will be deleted before creating new ones (upsert behavior).
+
+and on the item itself, `update_mode` defaults to `replace`, which *"deletes old
+data and reprocesses from scratch"*, with `append` as the alternative.
+
+So old facts **do** disappear, which is what a corpus sync wants. The
+consequence the design document does not draw is D-8: because the facts are
+deleted and re-extracted, their identifiers change, so observations consolidated
+from them are re-derived, pages built on those observations go stale, and a
+citation naming a fact identifier goes dangling. A synchroniser that treats a
+retain as a write and ignores the cascade ends up with a base that looks
+consistent and cites nothing.
 - [`feature-spec.md`](feature-spec.md) for the product-level framing this
   implements.
 - [`architecture.md`](architecture.md) and
