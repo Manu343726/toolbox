@@ -623,9 +623,17 @@ enum TagResolve {
 message TagGroup {
   oneof group {
     TagGroupLeaf leaf = 1;
-    TagGroup groups_and = 2;
-    TagGroup groups_or = 3;
-    TagGroup group_not = 4;
+    // The compounds hold the declared `TagGroupAnd` / `TagGroupOr` / `TagGroupNot`, and not
+    // another `TagGroup`.
+    //
+    // An earlier version of this declared the field as `TagGroup` and left the three messages
+    // unreferenced. That compiles and it is wrong: it makes every compound binary, so "these
+    // three tags together" cannot be one node and has to be written as a chain of pairs — which
+    // is a shape no reader would guess and which cannot be read back out into a tree without
+    // inventing the arity. The numbers are unchanged; the types are not.
+    TagGroupAnd groups_and = 2;
+    TagGroupOr groups_or = 3;
+    TagGroupNot group_not = 4;
   }
 }
 
@@ -2030,6 +2038,15 @@ message PageTrigger {
   // `any`, `all`, `any_strict` or `all_strict`.
   string tags_match = 6;
   string cron = 7;
+  // The same filter as a boolean expression, which is what "these two tags, or all three of those"
+  // needs. `TagGroup` is the type `Recall` and `Search` already use for a retrieval scope, so a
+  // trigger and a query are written in the same vocabulary rather than two.
+  //
+  // `tags` is the shorthand for a single leaf of this tree, and both are carried because a flat
+  // list is what a caller writes almost always. Setting both is **refused** rather than merged:
+  // two filters over the same input with no rule for combining them is a filter whose meaning
+  // depends on which one a reader happened to look at.
+  repeated TagGroup tag_groups = 8;
 }
 
 // PageService creates, configures and refreshes the projection.

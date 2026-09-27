@@ -46,10 +46,20 @@ func triggerInput(t knowledge.Trigger) *hs.MentalModelTriggerInput {
 	if resolved.Cron != "" {
 		trigger.RefreshCron = *hs.NewNullableString(&resolved.Cron)
 	}
-	if len(t.Tags) > 0 {
-		trigger.TagGroups = []hs.MentalModelTriggerInputTagGroupsInner{{
-			TagGroupLeaf: &hs.TagGroupLeaf{Tags: t.Tags},
-		}}
+	if len(t.TagGroups) > 0 {
+		// The tree, when there is one. The contract carries both forms because a flat list is
+		// what a caller writes almost always, and refusing the tree because the shorthand
+		// exists would make the backend's own capability unreachable.
+		if nodes := filterInput(t.TagGroups); len(nodes) > 0 {
+			trigger.TagGroups = nodes
+		}
+	} else if len(t.Tags) > 0 {
+		// The shorthand, as one leaf — exact for everything a flat list can say.
+		leaf := &hs.TagGroupLeaf{Tags: t.Tags}
+		if resolved.TagsMatch != "" {
+			leaf.Match = &resolved.TagsMatch
+		}
+		trigger.TagGroups = []hs.MentalModelTriggerInputTagGroupsInner{{TagGroupLeaf: leaf}}
 	}
 	return trigger
 }
@@ -71,12 +81,28 @@ func triggerFrom(t hs.MentalModelTriggerOutput) knowledge.Trigger {
 	if t.Mode != nil {
 		out.Mode = *t.Mode
 	}
-	if len(t.TagGroups) == 1 {
-		if leaf := t.TagGroups[0].TagGroupLeaf; leaf != nil {
-			out.Tags = leaf.GetTags()
+	if groups := filterFrom(t.TagGroups); len(groups) > 0 {
+		// A single leaf reads back through the *shorthand*, not through both.
+		//
+		// Filling both would describe a configuration this package's own contract refuses —
+		// `tags` and `tag_groups` together is an error — so a trigger read back could not be
+		// sent again. A round trip that produces a value the API rejects is a round trip that
+		// has lost the one property worth having, which is that it is idempotent.
+		if len(groups) == 1 && groups[0].IsLeaf() {
+			out.Tags = groups[0].Leaf.Tags
+			if groups[0].Leaf.Match != "" {
+				out.TagsMatch = groups[0].Leaf.Match
+			}
+		} else {
+			out.TagGroups = groups
 		}
 	}
-	if out.Mode == "" && out.TagsMatch == "" && len(out.FactTypes) == 0 && len(out.Tags) == 0 {
+	// The "nothing was reported" check has to consider the tree, and did not when it was
+	// written: a trigger whose *only* filter is a compound has no mode, no fact types and no
+	// flat tags, so it matched every clause and was reported as no trigger at all — a
+	// configuration that silently became "use the defaults".
+	if out.Mode == "" && out.TagsMatch == "" && len(out.FactTypes) == 0 &&
+		len(out.Tags) == 0 && len(out.TagGroups) == 0 {
 		// A trigger with nothing set is a trigger the backend did not report, and reporting the
 		// defaults as if it had would be claiming a configuration nobody chose.
 		return knowledge.Trigger{}
@@ -107,10 +133,14 @@ func triggerOutput(t knowledge.Trigger) *hs.MentalModelTriggerOutput {
 	if t.Cron != "" {
 		out.RefreshCron = *hs.NewNullableString(&t.Cron)
 	}
-	if len(t.Tags) > 0 {
-		out.TagGroups = []hs.MentalModelRefreshScopeTagGroupsInner{{
-			TagGroupLeaf: &hs.TagGroupLeaf{Tags: t.Tags},
-		}}
+	if len(t.TagGroups) > 0 {
+		out.TagGroups = filterOutput(t.TagGroups)
+	} else if len(t.Tags) > 0 {
+		leaf := &hs.TagGroupLeaf{Tags: t.Tags}
+		if t.TagsMatch != "" {
+			leaf.Match = &t.TagsMatch
+		}
+		out.TagGroups = []hs.MentalModelRefreshScopeTagGroupsInner{{TagGroupLeaf: leaf}}
 	}
 	return out
 }

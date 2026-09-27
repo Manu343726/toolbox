@@ -84,7 +84,7 @@ func (s *contentService) ListContent(ctx context.Context, req *connect.Request[k
 			// A listing that skipped a file's bytes can still describe it, because the
 			// record carries its digest, title and declared metadata. Saying so is better
 			// than reporting a file with an empty body that looks like an empty document.
-			out = append(out, s.describeRecord(f.Root, f.Path, f.ID, fileTags, knowledge.OwnershipEntry{
+			out = append(out, s.describeRecord(f.Path, f.ID, fileTags, knowledge.OwnershipEntry{
 				ID: f.ID, DeclaredID: f.DeclaredID, Root: f.Root, Path: f.Path,
 				Digest: f.Digest, ModTime: f.ModTime, Size: f.Size, Title: f.Title,
 				Front: f.Front, Tags: fileTags,
@@ -118,7 +118,7 @@ func (s *contentService) GetContent(ctx context.Context, req *connect.Request[kn
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&knowledgev1.GetContentResponse{Content: documentMessage(doc, msg.GetIncludeBody())}), nil
+	return connect.NewResponse(&knowledgev1.GetContentResponse{Content: documentMessage(doc, baseID, msg.GetIncludeBody())}), nil
 }
 
 // findAuthored resolves an identifier to a corpus file, or returns nil.
@@ -142,7 +142,7 @@ func (s *contentService) findAuthored(ctx context.Context, baseID, id string) *k
 		}
 		tags := knowledge.TagsFor(f, knowledge.TagOptions{RootName: f.Root, Owner: s.p.Owner()})
 		if !f.Read {
-			return s.describeRecord(f.Root, f.Path, f.ID, tags, knowledge.OwnershipEntry{
+			return s.describeRecord(f.Path, f.ID, tags, knowledge.OwnershipEntry{
 				ID: f.ID, DeclaredID: f.DeclaredID, Root: f.Root, Path: f.Path,
 				Digest: f.Digest, ModTime: f.ModTime, Size: f.Size, Title: f.Title,
 				Front: f.Front, Tags: tags,
@@ -380,65 +380,118 @@ func (s *contentService) ReprocessContent(ctx context.Context, req *connect.Requ
 		return nil, derr
 	}
 	return connect.NewResponse(&knowledgev1.ReprocessContentResponse{
-		Content: documentMessage(doc, false),
+		Content: documentMessage(doc, baseID, false),
 		Cascade: cascadeMessage(cascade),
 	}), nil
 }
 
 // --- conversion.
 
+// contentFromFile builds a Content message for a corpus file the walk actually read.
+//
+// The file constructor, because the body is in memory here — and the two constructors differ in
+// exactly that. Conflating them is how a listing reports an empty document for a file that has
+// text.
 func (s *contentService) contentFromFile(f knowledge.File, tags []string, includeBody bool) *knowledgev1.Content {
-	return s.describeRecord(f.Root, f.Path, f.ID, tags, knowledge.OwnershipEntry{
-		ID: f.ID, DeclaredID: f.DeclaredID, Root: f.Root, Path: f.Path,
-		Digest: f.Digest, ModTime: f.ModTime, Size: f.Size, Title: f.DerivedTitle(),
-		Front: f.Front, Tags: tags,
-	}, includeBody, f.Body)
+	c, err := knowledge.ContentFromFile(f, tags, s.contentOptions(includeBody))
+	if err != nil {
+		// The domain refuses rather than returning a broken value. A message builder in a
+		// listing has no error to return, so an absent message is the answer — and it is
+		// unreachable with a file from a walk, which is what makes it safe to swallow here
+		// rather than turn a listing into a loop of skips.
+		s.p.log.Warn("refusing to report content", "id", f.ID, "path", f.Path, "error", err)
+		return nil
+	}
+	return contentMessage(c, f.Front)
 }
 
 // describeRecord builds a Content message for a corpus file, from the file or from the record that
 // stands in for one the walk skipped.
-func (s *contentService) describeRecord(root, path, id string, tags []string, e knowledge.OwnershipEntry, includeBody bool, body ...string) *knowledgev1.Content {
-	hasBody := includeBody && e.Digest != ""
-	text := ""
-	if hasBody && len(body) > 0 {
-		text = body[0]
+//
+// The `knowledge.Content` is built by `pkg/knowledge`, not here, and that placement is the point:
+// the invariant that a piece of content has an origin, a location of the right kind for that
+// origin, and the mutability its origin implies is the framework's, and a provider that assembled
+// the message itself would be a second implementation of it. A second backend is exactly what
+// would expose the difference, and the difference would be a runbook reported as editable because
+// one of the two forgot the mapping.
+func (s *contentService) describeRecord(path, id string, tags []string, e knowledge.OwnershipEntry, includeBody bool) *knowledgev1.Content {
+	// A record is what a *skipped* file has, so it carries no body and none is taken from it.
+	// A file the walk actually read goes through the file constructor instead — see
+	// `contentFromFile` — because a `Content` claiming a body that was never read is a document
+	// that says nothing and looks like an empty one.
+	c, err := knowledge.ContentFromRecord("", path, id, e, tags, s.contentOptions(includeBody))
+	if err != nil {
+		// The domain refuses rather than returns a broken value, and this is the one caller
+		// that has no error to return: it is a message builder in a listing. So the refusal is
+		// impossible to reach with a record from a walk — and if it ever is, an absent message
+		// is better than one asserting something the domain has already rejected.
+		s.p.log.Warn("refusing to report content", "id", id, "path", path, "error", err)
+		return nil
 	}
+	return contentMessage(c, e.Front)
+}
+
+// contentOptions is the one place this provider decides what to read.
+func (s *contentService) contentOptions(includeBody bool) knowledge.ContentOptions {
+	return knowledge.ContentOptions{BaseID: s.p.ProviderName(), Owner: s.p.Owner(), IncludeBody: includeBody}
+}
+
+// contentMessage converts the domain content to the contract, in one place.
+//
+// Every `Content` this subsystem returns goes through here, so a caller cannot get two different
+// answers about the same thing from two methods — which is exactly how `ListContent` and
+// `GetContent` came to disagree about whether a runbook was editable, with the domain's own
+// `MutabilityFor` on both sides of the disagreement.
+//
+// It is a function rather than a method because it uses nothing of the provider, and a method that
+// uses nothing of its receiver is a converter the reader has to look up the receiver of to find.
+func contentMessage(c knowledge.Content, front knowledge.Frontmatter) *knowledgev1.Content {
 	return &knowledgev1.Content{
-		Id:         id,
-		BaseId:     s.p.ProviderName(),
-		Origin:     knowledgev1.Origin_ORIGIN_AUTHORED,
-		Title:      e.Title,
-		Body:       text,
-		HasBody:    hasBody,
-		Tags:       tags,
-		Location:   &knowledgev1.Location{Kind: knowledgev1.LocationKind_LOCATION_KIND_CORPUS_PATH, Path: path},
-		Mutability: mutabilityMessage(knowledge.OriginAuthored),
+		Id:         c.ID,
+		BaseId:     c.BaseID,
+		Origin:     originMessage(c.Origin),
+		Title:      c.Title,
+		Body:       c.Body,
+		HasBody:    c.HasBody,
+		Tags:       c.Tags,
+		Location:   locationMessage(c.Location),
+		Mutability: mutabilityMessage(c.Origin),
 		Provenance: &knowledgev1.Provenance{
-			OriginTag: knowledge.OriginTag(knowledge.OriginAuthored),
-			Source:    path,
+			OriginTag:      c.Provenance.OriginTag,
+			Source:         c.Provenance.Source,
+			SourceRevision: c.Provenance.SourceRevision,
+			DerivedFrom:    c.Provenance.DerivedFrom,
 		},
 		Revision: &knowledgev1.Revision{
-			Digest:  e.Digest,
-			ModTime: timestamppb.New(e.ModTime),
-			Size:    e.Size,
+			Digest:       c.Revision.Digest,
+			ModTime:      timestamppb.New(c.Revision.ModTime),
+			Size:         c.Revision.Size,
+			ReconciledAt: timestampOrNil(c.Revision.ReconciledAt),
+			SourceCommit: c.Revision.SourceCommit,
 		},
-		CorpusMeta: corpusMetaMessage(e.Front),
+		CorpusMeta: corpusMetaMessage(front),
 	}
 }
 
-func documentMessage(doc kh.Document, includeBody bool) *knowledgev1.Content {
-	return &knowledgev1.Content{
-		Id:         doc.ID,
-		Origin:     knowledgev1.Origin_ORIGIN_RETAINED,
-		Title:      doc.Title,
-		Body:       doc.Text,
-		HasBody:    includeBody && doc.Text != "",
-		Tags:       doc.Tags,
-		Location:   &knowledgev1.Location{Kind: knowledgev1.LocationKind_LOCATION_KIND_DOCUMENT, Path: doc.ID},
-		Mutability: mutabilityMessage(knowledge.OriginRetained),
-		Provenance: &knowledgev1.Provenance{OriginTag: knowledge.OriginTag(knowledge.OriginRetained), Source: doc.Source},
-		Revision:   &knowledgev1.Revision{Digest: doc.ContentHash, ModTime: parseTimestamp(doc.ModTime)},
+// documentMessage builds a Content message for a retained document.
+//
+// The mutability is `Curated` and it comes from the domain rather than from here: retained content
+// is the one origin that is edited through the surface, and a provider that chose the value itself
+// would be a second place to get it wrong — and getting it wrong in the direction of `None` sends an
+// assistant to edit a file that does not exist.
+func documentMessage(doc kh.Document, baseID string, includeBody bool) *knowledgev1.Content {
+	c, err := knowledge.ContentFromRetained(baseID, doc.ID, doc.Title, doc.Text, doc.ID, doc.Source,
+		doc.Tags, knowledge.ContentOptions{BaseID: baseID, IncludeBody: includeBody})
+	if err != nil {
+		return nil
 	}
+	// The digest and the modification time are the backend's own, and the domain's `Revision`
+	// has no source for them — a second backend will report its own. So they are filled in
+	// after the fact rather than through a constructor argument that would be this provider's.
+	msg := contentMessage(c, knowledge.Frontmatter{})
+	msg.Revision.Digest = doc.ContentHash
+	msg.Revision.ModTime = parseTimestamp(doc.ModTime)
+	return msg
 }
 
 func cascadeMessage(c kh.Cascade) *knowledgev1.CascadeReport {

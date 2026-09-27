@@ -24,6 +24,14 @@ type Trigger struct {
 	// is refreshed.
 	Tags      []string
 	TagsMatch string
+	// TagGroups is the same filter as a boolean expression, and it is what a compound trigger
+	// uses. `Tags` is the shorthand for a single leaf of this tree.
+	//
+	// The two coexist because a flat list is what a caller writes almost always, and the tree
+	// is what the backend's own algebra actually is. Setting both is a refusal rather than a
+	// merge: two filters over the same input with no rule for combining them is a filter whose
+	// meaning depends on which one a reader happened to look at.
+	TagGroups []TagFilter
 	// Cron schedules a refresh on a fixed interval. Mutually exclusive with refreshing after
 	// consolidation: a document refreshes either after consolidation or on a schedule, not both.
 	Cron string

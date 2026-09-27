@@ -355,11 +355,17 @@ func pageNodeMessage(baseID string, p kh.Page) *knowledgev1.PageNode {
 }
 
 func triggerMessage(t knowledge.Trigger) *knowledgev1.PageTrigger {
-	return &knowledgev1.PageTrigger{
+	out := &knowledgev1.PageTrigger{
 		Mode: t.Mode, FactTypes: t.FactTypes, ExcludeMentalModels: t.ExcludeMentalModels,
 		RefreshAfterConsolidation: t.RefreshAfterConsolidation, Tags: t.Tags,
 		TagsMatch: t.TagsMatch, Cron: t.Cron,
 	}
+	for _, g := range t.TagGroups {
+		if msg := tagFilterMessage(g); msg != nil {
+			out.TagGroups = append(out.TagGroups, msg)
+		}
+	}
+	return out
 }
 
 // triggerFromMessage reads a trigger out of the contract and checks it against what the backend
@@ -401,7 +407,137 @@ func triggerFromMessage(baseID string, msg *knowledgev1.PageTrigger) (knowledge.
 			Message: "a trigger cannot both refresh after every consolidation and refresh on a schedule; a document refreshes either when consolidation produces something or on a cron, and naming both means it refreshes twice for reasons nothing in the document will show",
 		}
 	}
+	// The shorthand and the tree are two ways of saying the same thing, so carrying both is
+	// refused rather than merged. A merged filter is one whose meaning depends on which field
+	// a reader looked at — and it would read back differently again, which is worse.
+	if len(msg.GetTagGroups()) > 0 && (len(msg.GetTags()) > 0 || msg.GetTagsMatch() != "") {
+		return out, &api.Error{
+			Kind: api.KindInvalid,
+			Message: "a trigger carries either `tags` — a flat list, shorthand for one leaf — " +
+				"or `tag_groups`, the expression, and not both. Two filters over the same " +
+				"input with no rule for combining them is a filter whose meaning depends on " +
+				"which one a reader looked at",
+		}
+	}
+	for i, group := range msg.GetTagGroups() {
+		filter, err := tagFilterFrom(group, fmt.Sprintf("tag_groups[%d]", i))
+		if err != nil {
+			return out, &api.Error{Kind: api.KindInvalid, Message: err.Error()}
+		}
+		out.TagGroups = append(out.TagGroups, filter)
+	}
 	return out, nil
+}
+
+// tagFilterFrom converts the contract's recursive tag expression into the domain's.
+//
+// The conversion is here rather than in the adapter because the contract's `TagGroup` and the
+// domain's `TagFilter` are two declarations of one idea, and the *rules* — a leaf needs tags, a
+// group needs members, a match mode is one of four — are the framework's, not the backend's. The
+// adapter's job is the wire form; this is the shape.
+func tagFilterFrom(group *knowledgev1.TagGroup, path string) (knowledge.TagFilter, error) {
+	if group == nil {
+		return knowledge.TagFilter{}, &api.Error{Kind: api.KindInvalid, Message: "a tag group cannot be absent"}
+	}
+	switch g := group.GetGroup().(type) {
+	case *knowledgev1.TagGroup_Leaf:
+		match := ""
+		if g.Leaf.GetMatch() != knowledgev1.TagMatch_TAG_MATCH_UNSPECIFIED {
+			match = tagMatchString(g.Leaf.GetMatch())
+		}
+		leaf := knowledge.TagFilter{Leaf: &knowledge.TagLeaf{Tags: g.Leaf.GetTags(), Match: match}}
+		if err := leaf.Validate(path + ".leaf"); err != nil {
+			return knowledge.TagFilter{}, &api.Error{Kind: api.KindInvalid, Message: err.Error()}
+		}
+		return leaf, nil
+	case *knowledgev1.TagGroup_GroupsAnd:
+		out := knowledge.TagFilter{}
+		for i, sub := range g.GroupsAnd.GetGroups() {
+			child, err := tagFilterFrom(sub, fmt.Sprintf("%s.and[%d]", path, i))
+			if err != nil {
+				return out, err
+			}
+			out.And = append(out.And, child)
+		}
+		return out, out.Validate(path)
+	case *knowledgev1.TagGroup_GroupsOr:
+		out := knowledge.TagFilter{}
+		for i, sub := range g.GroupsOr.GetGroups() {
+			child, err := tagFilterFrom(sub, fmt.Sprintf("%s.or[%d]", path, i))
+			if err != nil {
+				return out, err
+			}
+			out.Or = append(out.Or, child)
+		}
+		return out, out.Validate(path)
+	case *knowledgev1.TagGroup_GroupNot:
+		inner, err := tagFilterFrom(g.GroupNot.GetGroup(), path+".not")
+		if err != nil {
+			return knowledge.TagFilter{}, err
+		}
+		negated := knowledge.TagFilter{Not: &inner}
+		return negated, negated.Validate(path + ".not")
+	}
+	return knowledge.TagFilter{}, &api.Error{
+		Kind:    api.KindInvalid,
+		Message: "a tag group is a leaf or one of the three compounds; an empty one constrains nothing, and a filter that looks present and matches nothing is the one shape a reader cannot diagnose",
+	}
+}
+
+func tagMatchString(m knowledgev1.TagMatch) string {
+	switch m {
+	case knowledgev1.TagMatch_TAG_MATCH_ANY:
+		return "any"
+	case knowledgev1.TagMatch_TAG_MATCH_ALL:
+		return "all"
+	case knowledgev1.TagMatch_TAG_MATCH_ANY_STRICT:
+		return "any_strict"
+	case knowledgev1.TagMatch_TAG_MATCH_ALL_STRICT:
+		return "all_strict"
+	}
+	return ""
+}
+
+// tagFilterMessage converts a domain filter back to the contract, for a response that reports what
+// a trigger actually is.
+func tagFilterMessage(f knowledge.TagFilter) *knowledgev1.TagGroup {
+	switch {
+	case f.Leaf != nil:
+		leaf := &knowledgev1.TagGroupLeaf{Tags: f.Leaf.Tags}
+		if f.Leaf.Match != "" {
+			leaf.Match = tagMatchValue(f.Leaf.Match)
+		}
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_Leaf{Leaf: leaf}}
+	case len(f.And) > 0:
+		groups := make([]*knowledgev1.TagGroup, 0, len(f.And))
+		for _, sub := range f.And {
+			groups = append(groups, tagFilterMessage(sub))
+		}
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_GroupsAnd{GroupsAnd: &knowledgev1.TagGroupAnd{Groups: groups}}}
+	case len(f.Or) > 0:
+		groups := make([]*knowledgev1.TagGroup, 0, len(f.Or))
+		for _, sub := range f.Or {
+			groups = append(groups, tagFilterMessage(sub))
+		}
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_GroupsOr{GroupsOr: &knowledgev1.TagGroupOr{Groups: groups}}}
+	case f.Not != nil:
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_GroupNot{GroupNot: &knowledgev1.TagGroupNot{Group: tagFilterMessage(*f.Not)}}}
+	}
+	return nil
+}
+
+func tagMatchValue(m string) knowledgev1.TagMatch {
+	switch m {
+	case "any":
+		return knowledgev1.TagMatch_TAG_MATCH_ANY
+	case "all":
+		return knowledgev1.TagMatch_TAG_MATCH_ALL
+	case "any_strict":
+		return knowledgev1.TagMatch_TAG_MATCH_ANY_STRICT
+	case "all_strict":
+		return knowledgev1.TagMatch_TAG_MATCH_ALL_STRICT
+	}
+	return knowledgev1.TagMatch_TAG_MATCH_UNSPECIFIED
 }
 
 // unsupportedFields names what a backend refused, rather than accepting a request and dropping half

@@ -2,6 +2,7 @@ package knowledgehindsight
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -1192,4 +1193,126 @@ func TestEveryServiceAddressesABaseTheSameWay(t *testing.T) {
 			assert.Equal(t, reflect.String, field.Kind())
 		})
 	}
+}
+
+// --- the compound trigger.
+//
+// The backend's trigger filter is a boolean expression over the tag namespace and this contract can
+// now say so. These are the cases where getting it wrong produces a page that stays empty with no
+// visible error, which is the failure mode the whole trigger exists to prevent.
+
+func TestATriggerCarriesEitherTheShorthandOrTheTreeAndRefusesBoth(t *testing.T) {
+	t.Parallel()
+	p, b := newAdminProvider(t, map[string]string{
+		"/knowledge-base/tree": `{"roots":[]}`,
+	})
+	_, err := p.pageHandler().CreatePage(context.Background(), connect.NewRequest(&knowledgev1.CreatePageRequest{
+		BaseId: "docs", Name: "restore", SourceQuery: "how do we restore a base?",
+		Trigger: &knowledgev1.PageTrigger{
+			Tags: []string{"runbook"}, TagsMatch: "all_strict",
+			TagGroups: []*knowledgev1.TagGroup{{Group: &knowledgev1.TagGroup_Leaf{
+				Leaf: &knowledgev1.TagGroupLeaf{Tags: []string{"a"}}}}},
+		},
+	}))
+	require.Error(t, err)
+	assert.Equal(t, api.KindInvalid, api.KindOf(err))
+	// Two filters over the same input with no rule for combining them is a filter whose meaning
+	// depends on which field a reader looked at — and the answer would differ again from the
+	// one given when the trigger is read back, which is worse.
+	assert.Contains(t, err.Error(), "not both")
+	assert.Empty(t, b.sentTo("/knowledge-base/pages"))
+}
+
+func TestCreatePageSendsACompoundTriggerAsABooleanExpression(t *testing.T) {
+	t.Parallel()
+	// Built bottom-up, because a `oneof` literal nested four deep by hand is unreadable and a
+	// misplaced brace in one of them produces a *different* tree rather than a compile error.
+	leaf := func(tags ...string) *knowledgev1.TagGroup {
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_Leaf{
+			Leaf: &knowledgev1.TagGroupLeaf{Tags: tags}}}
+	}
+	andOf := func(groups ...*knowledgev1.TagGroup) *knowledgev1.TagGroup {
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_GroupsAnd{
+			GroupsAnd: &knowledgev1.TagGroupAnd{Groups: groups}}}
+	}
+	orOf := func(groups ...*knowledgev1.TagGroup) *knowledgev1.TagGroup {
+		return &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_GroupsOr{
+			GroupsOr: &knowledgev1.TagGroupOr{Groups: groups}}}
+	}
+	strict := &knowledgev1.TagGroup{Group: &knowledgev1.TagGroup_Leaf{
+		Leaf: &knowledgev1.TagGroupLeaf{Tags: []string{"architecture"},
+			Match: knowledgev1.TagMatch_TAG_MATCH_ALL}}}
+
+	// "these tags together, or all three of those" — the case a flat list could not say.
+	tree := orOf(strict, andOf(leaf("runbook"), leaf("safety")))
+
+	p, b := newAdminProvider(t, map[string]string{
+		"/knowledge-base/pages": `{"page_id":"page-1","mental_model_id":"model-1"}`,
+		// The tree is the only read that reports a page's model, so the created page is found
+		// through it — the same path a create takes in production.
+		"/knowledge-base/tree": `{"roots":[{"id":"page-1","kind":"page","name":"restore",
+			"parent_id":"","mental_model_id":"model-1"}]}`,
+	})
+	_, err := p.pageHandler().CreatePage(context.Background(), connect.NewRequest(&knowledgev1.CreatePageRequest{
+		BaseId: "docs", Name: "restore", SourceQuery: "how do we restore a base?",
+		Trigger: &knowledgev1.PageTrigger{TagGroups: []*knowledgev1.TagGroup{tree}},
+	}))
+	require.NoError(t, err)
+	sent := b.sentTo("/knowledge-base/pages")
+	require.NotEmpty(t, sent)
+	body := sent[0].Body
+	assert.Contains(t, body, `"or":[`)
+	assert.Contains(t, body, `"and":[{"tags":["runbook"]},{"tags":["safety"]}]`)
+	// The shorthand is absent from the trigger *itself*, which is the property that matters: a
+	// tree and a flat list together is a request this contract refuses, so a trigger carrying
+	// both would be one it could not itself accept. Checked on the parsed object, because a
+	// text search finds the leaves' own `tags` and cannot tell the two apart.
+	var wire struct {
+		Trigger map[string]json.RawMessage `json:"trigger"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &wire))
+	assert.NotContains(t, wire.Trigger, "tags",
+		"the trigger must not carry the flat shorthand alongside the tree")
+	// `tags_match` *is* present, and it is the trigger's own global default rather than the
+	// shorthand: the tree's leaves carry their own modes, which is where a per-leaf one can
+	// mean anything.
+	assert.Contains(t, wire.Trigger, "tags_match")
+	// And the match mode reached the leaf.
+	assert.Contains(t, body, `{"match":"all","tags":["architecture"]}`)
+}
+
+func TestATriggerWithAnEmptyGroupIsRefusedAndExplained(t *testing.T) {
+	t.Parallel()
+	p, b := newAdminProvider(t, nil)
+	_, err := p.pageHandler().CreatePage(context.Background(), connect.NewRequest(&knowledgev1.CreatePageRequest{
+		BaseId: "docs", Name: "restore", SourceQuery: "how do we restore a base?",
+		Trigger: &knowledgev1.PageTrigger{TagGroups: []*knowledgev1.TagGroup{{
+			Group: &knowledgev1.TagGroup_GroupsAnd{GroupsAnd: &knowledgev1.TagGroupAnd{}},
+		}}},
+	}))
+	require.Error(t, err)
+	assert.Equal(t, api.KindInvalid, api.KindOf(err))
+	// "No filter" takes every input; "a filter that matches nothing" produces an empty document
+	// that looks correct. The second is the one shape a reader cannot diagnose, so the message
+	// says which one this is.
+	assert.Contains(t, err.Error(), "matches nothing")
+	assert.Empty(t, b.sentTo("/knowledge-base/pages"))
+}
+
+func TestATriggerTreeErrorNamesWhereInTheTreeItWentWrong(t *testing.T) {
+	t.Parallel()
+	p, _ := newAdminProvider(t, nil)
+	_, err := p.pageHandler().CreatePage(context.Background(), connect.NewRequest(&knowledgev1.CreatePageRequest{
+		BaseId: "docs", Name: "restore", SourceQuery: "how do we restore a base?",
+		Trigger: &knowledgev1.PageTrigger{TagGroups: []*knowledgev1.TagGroup{{
+			Group: &knowledgev1.TagGroup_GroupsOr{GroupsOr: &knowledgev1.TagGroupOr{Groups: []*knowledgev1.TagGroup{
+				{Group: &knowledgev1.TagGroup_Leaf{Leaf: &knowledgev1.TagGroupLeaf{Tags: []string{"a"}}}},
+				{Group: &knowledgev1.TagGroup_Leaf{Leaf: &knowledgev1.TagGroupLeaf{}}},
+			}}},
+		}}},
+	}))
+	require.Error(t, err)
+	// A tree has no single obvious "the filter", so a caller handed several levels needs to be
+	// told which — or the fix is a search.
+	assert.Contains(t, err.Error(), "tag_groups[0].or[1]")
 }

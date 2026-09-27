@@ -145,8 +145,18 @@ def check_refusal(prepared):
                 if "permission denied" not in message and "fusermount" not in message:
                     failures.append("the refusal does not name what was missing")
             status = json.loads(text_of(gw.tool("mount__get_mount_status", {})))
+            # A failed mount is *reported* — with a state and a reason — and that is M-7
+            # working. What it must never be is reported as serving, because that is the
+            # claim a reader would then trust.
+            for entry in status.get("mounts", []):
+                if entry.get("state") == "MOUNT_STATE_MOUNTED":
+                    failures.append(f"a failed mount is reported as mounted: {entry}")
+                if not entry.get("failure"):
+                    failures.append(f"a failed mount carries no reason: {entry}")
             if status.get("mounts"):
-                failures.append(f"a failed mount is reported as running: {status['mounts']}")
+                print("  reported as:",
+                      ", ".join(f"{e.get('state')} ({str(e.get('failure'))[:60]})"
+                                for e in status["mounts"]))
         finally:
             gw.close()
 
@@ -168,6 +178,10 @@ def check_refusal(prepared):
 
 
 def main():
+    if "--no-fuse-build" not in sys.argv:
+        print("Building the host with the fuse tag, because the mount is behind it.")
+        subprocess.run(["make", "-C", os.path.join(ROOT, "cmd", "toolbox"), "build", "TAGS=fuse"],
+                       capture_output=True)
     ok, why = have_fuse()
     if not ok:
         print(f"SKIP: this machine cannot mount ({why}).")

@@ -141,7 +141,21 @@ make host
 python3 scripts/mcp_knowledge_sweep.py     # per-tool reachability
 python3 scripts/mcp_knowledge_test.py      # the assertions
 python3 scripts/mcp_knowledge_dump.py content__list_content   # one full response, untruncated
+python3 scripts/mcp_knowledge_mount.py     # the mount, and the failure path
 ```
+
+`mcp_knowledge_mount.py` is the one that needs a tag, and it builds one: the mount is behind
+`fuse`, and without `TAGS=fuse` it would be testing the *absence* of FUSE rather than the
+behaviour of a mount. It establishes whether the machine can mount at all by building a minimal
+FUSE mount with none of this repository's code in it, so a skip is evidence rather than a guess —
+`/dev/fuse` existing and `fusermount3` being setuid are both necessary and neither is sufficient,
+and this is a machine where they are and a mount is still refused.
+
+On a machine that cannot mount, the read half is skipped and the **failure** half still runs, which
+is the half that matters there: a refused mount must say which piece was missing, must not be
+reported as serving, and must leave an ordinary usable directory rather than a registered-but-dead
+mount. That last one is M-7, it was violated, and it is invisible to any test over `io/fs` — which
+is precisely why the rule says the wiring is exercised by hand.
 
 They need a corpus, which the scripts create for themselves in a temporary directory, and they
 manage the stub and the gateway. **Rebuild the host first**: the gateway is a process that holds a

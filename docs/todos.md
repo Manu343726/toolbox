@@ -110,19 +110,25 @@ is left is what the specification itself records as open.
 - [ ] Add a second backend as a second mount of `pkg/knowledge`. The rule is
       load-bearing here: the subsystem holds no logic, so a second provider is a
       second adapter rather than a second subsystem. Nothing in the design prevents
-      it and nothing in the tree yet demonstrates it.
-- [ ] Add the compound trigger the backend supports. A trigger filters by a
-      recursive tag-group tree; `PageTrigger` carries a flat list and a match mode,
-      which maps exactly onto one leaf. A `oneof` over the same four cases
-      `TagGroup` already uses for retrieval would close the gap.
-- [ ] Move the `Content` conversion out of the provider and into
-      `pkg/knowledge`. The provider builds `knowledgev1.Content` straight from
-      `knowledge.File`, `knowledge.OwnershipEntry` and the adapter's `Document`, so
-      `pkg/knowledge.Content` — with its `Valid` invariant, its `Mutability`
-      classification and its three-way `Location` — is not on the path. Framework
-      rule 4 says a provider converts messages *from* a root package. Nothing is
-      broken; it is one adapter wide, and a second backend is what would expose it.
+      it and nothing in the tree yet demonstrates it — and the `Content`
+      conversion, which was the one place a second backend would have found
+      duplication, now goes through the domain.
 - [ ] Decide the §15 open questions this implementation did not settle.
+
+Both of the following were gaps recorded here and are now closed. They are
+listed because a reader comparing this file with the specification will find the
+specification's account of them, and because "closed" is a claim worth being able
+to check:
+
+- **The compound trigger.** `PageTrigger` now carries `tag_groups` as the
+  boolean expression the backend's own filter is, alongside the flat `tags`
+  shorthand — and refuses both at once, because two filters over one input with
+  no combining rule is a filter whose meaning depends on which field a reader
+  looked at. `knowledge.TagFilter` carries the shape and its rules.
+- **The `Content` conversion.** `pkg/knowledge` builds the domain `Content` and
+  the provider converts it in one place. Doing so surfaced a disagreement that
+  had been there all along: `ListContent` and `GetContent` reported different
+  mutability for the same file.
 
 Not to be done, and recorded so it is not proposed again: a second, in-memory
 reference provider. The contract is the deliverable and one honest provider beats

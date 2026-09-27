@@ -1757,11 +1757,22 @@ the naming invites, and the operation is a hard stop while the record survives.
 the `oneof` reach the wire as bare objects: a leaf is `{"tags": [...]}`, an `and` is
 `{"and": [...]}`, an `or` is `{"or": [...]}`, a `not` is `{"not": {...}}`. There is no `type`
 field and no `leaf` wrapper, because the generator's oneof handling is symmetric — it marshals
-and unmarshals the same bare shape. Two consequences worth stating: the *outbound* direction the
-adapter writes is therefore correct as written and needed no change, and the *inbound* direction
-fails with `data failed to match schemas in anyOf(...)` on a wrapped form, which is a decode error
-naming the type rather than an empty trigger. Also: **`not` takes a leaf and not an arbitrary
-group**, so the algebra is shallower than a recursive tree suggests.
+and unmarshals the same bare shape. The *outbound* direction the adapter writes is therefore
+correct as written and needed no change, and the *inbound* direction fails with
+`data failed to match schemas in anyOf(...)` on a wrapped form, which is a decode error naming the
+type rather than an empty trigger.
+
+The consequence that mattered was not the wrapper but the **discriminating key**, and getting it
+wrong is a two-hour trap: a leaf is `{"tags": [...]}`, so a stub or a test that sends
+`{"leaf": {"tags": [...]}}` matches *none* of the four alternatives and the whole response fails to
+decode. Nothing about that error points at the field that was wrong.
+
+**An earlier version of this document claimed a `not` can only take a leaf.** It was wrong, and
+wrong from a shape I had invented rather than one the API description declared: the generated type
+is itself a `oneof` over the same four alternatives, so `not` takes any of them, including a
+compound. The claim is recorded here because a document that quietly drops its own mistakes is a
+document nobody can check, and because the mistake is a general one — *probing the generated
+client is not the same as reading the specification about it.*
 
 **Three reads declare an empty response schema**, which is why the generated client returns
 `interface{}` for them: a single fact (`GetMemory`), a fact's history (`GetObservationHistory`) and
@@ -2085,6 +2096,42 @@ without FUSE still builds the subsystem, still serves all thirteen services incl
 `MountService`, and `EnableMount` returns `Unimplemented` naming the tag. That is M-6, and it
 is why the mount is an RPC without putting FUSE in every build (§5.9).
 
+**All 79 methods have a test, and 28 of them had none.** Measured by parsing the contract and
+matching each RPC against the test files, not by reading. "Every method somebody thought to test
+was tested" was true and was not what the previous claim meant.
+
+**Four more defects, found by writing those tests.**
+
+- `Reflect` accepted `follow_directives` and sent nothing — the backend has no such field. The
+  field it does have, `apply_all_directives`, means the *opposite* of the name: the backend already
+  applies directives scoped by tag, and the flag ignores the scope. A caller believing their answer
+  was governed by the base, when it had been governed by a wider set than intended, is the worst
+  available outcome. The contract field is now `apply_all_directives` and says what it does.
+- `reflect_citations` was documented "on by default" and a plain `bool` cannot express that, so it
+  defaulted to **off**: a caller relying on the documented default got bare identifiers and
+  concluded the base had no sources. It is `optional bool` now.
+- The `TagGroup` oneof declared its compounds as `TagGroup` rather than as the `TagGroupAnd` /
+  `TagGroupOr` / `TagGroupNot` messages declared two lines below it. That compiles, and it makes
+  every compound **binary** — "these three tags together" cannot be one node, and reading it back
+  would mean inventing the arity.
+- `triggerFrom`'s "the backend reported no trigger" guard did not know about `TagGroups`, so a
+  trigger whose only filter was a compound matched every clause of the guard and was reported as
+  **no trigger at all** — a configuration silently replaced by the defaults.
+
+**The mount was attempted, and the attempt is what the rules said it was for.** `TAGS=fuse` did not
+exist, so M-6's "a host without FUSE still builds" was the only half anyone could produce; both
+Makefiles take `TAGS` now. With a tagged binary on a machine that has `/dev/fuse` and
+`fusermount3`, the mount was attempted and this machine refuses an unprivileged FUSE mount — which a
+probe containing none of this repository's code also shows, so the skip is evidence rather than a
+guess.
+
+**And the attempt found M-7 violated.** A failed mount left the mountpoint as a
+registered-but-dead mount: `rm -r` on it fails with "Transport endpoint is not connected", `ls` on
+it hangs, and the next attempt is told the path is already mounted. Two stale mounts existed before
+the fix and zero after. The library has connected and created the mount by the time it reports the
+failure, so the failure path detaches it, and the refusal says *"nothing is left mounted there"* —
+because a bare "permission denied" leaves a reader believing a path is occupied.
+
 **Two methods were in the contract, registered, classified — and not implemented.** `ExportWiki`
 and `GetProjectionRevision` returned `unimplemented`, because an embedded
 `Unimplemented...Handler` is a real type that satisfies the interface. No unit test noticed: the
@@ -2149,18 +2196,18 @@ been so:
 **Not built, on purpose.** The reference in-memory provider. §12 states why, and §15 records it as
 a decision to confirm rather than an oversight.
 
-**Not yet on the path, and it is a gap against framework rule 4.** `pkg/knowledge.Content` — the
-type carrying the `Valid` invariant, the `Mutability` classification and the three-way `Location` —
-is the content model this document names as the place the behaviour lives, and the provider does
-not produce it. `ContentService` converts from `knowledge.File`, `knowledge.OwnershipEntry` and
-`kh.Document` straight into protobuf messages, so the mapping sits in the provider; rule 4 says a
-provider mounts a package and converts messages *from* it, which puts that conversion one level
-down.
+**Closed: the `Content` conversion was in the provider, against rule 4, and is not any more.**
+`pkg/knowledge.Content` — carrying the `Valid` invariant, the `Mutability` classification and the
+three-way `Location` — is now what the provider converts *from*, through `ContentFromFile`,
+`ContentFromRecord`, `ContentFromRetained` and `ContentFromPage`, and one `contentMessage` is the
+only place a `Content` becomes a protobuf message. The mutability is a function of the origin and
+is set by the domain, not chosen at each call site.
 
-It is a refactor of a passing suite rather than a design change, and it is the first thing to do
-before a second backend — because a second backend is exactly what would expose the duplication.
-Nothing is wrong with what ships: the contract is served, the model is tested, and the duplication
-is one adapter wide. But it is duplication, and a reader of rule 4 arriving here should be told.
+That was not a tidy-up. While the mapping existed in four places in the provider, `ListContent` and
+`GetContent` **disagreed** about whether an authored runbook was `MUTABILITY_NONE` or
+`MUTABILITY_CURATED` — same file, same base, two answers to "may a person edit this". The only
+reason it survived the unit tests is that no test asked both methods the same question. One
+conversion, in one place, is what makes the disagreement impossible rather than merely absent.
 
 ## 17. Sources
 
