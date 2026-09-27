@@ -6,7 +6,7 @@ survives the decision being rewritten.
 
 | Document | What it is | Status |
 |---|---|---|
-| [`hindsight-knowledge-backend.md`](hindsight-knowledge-backend.md) | A survey of the memory backend's API and three candidate placements for it, plus the reasoning that the inverse of its filesystem projection cannot be "create a page with the body I typed". | Superseded by [`knowledge.md`](../knowledge.md), which is the specification. Kept for the evidence. |
+| [`hindsight-knowledge-backend.md`](hindsight-knowledge-backend.md) | A survey of the memory backend's API and three candidate placements for it, the reasoning that the inverse of its filesystem projection cannot be "create a page with the body I typed", and §5.6 on the [upstream question](https://github.com/vectorize-io/hindsight/discussions/4830) this whole line of work answers. | Superseded by [`knowledge.md`](../knowledge.md), which is the specification. Kept for the evidence. |
 | [`hindsight-human-wiki-integration.md`](hindsight-human-wiki-integration.md) | An integration design for using a human-authored markdown wiki with the backend, written outside the project. | An **input** to [`knowledge.md`](../knowledge.md). Where the two differ, the specification is right. |
 
 ## How they relate
@@ -35,6 +35,18 @@ declined to guess at — what a repeated document identifier actually does to th
 facts already extracted from it. The answer is in §5.4 and D-8 of
 [`knowledge.md`](../knowledge.md), and it is the one place where the
 specification is ahead of its inputs.
+
+## §5.6 is a status, not a source
+
+The backend's authors were [asked directly](https://github.com/vectorize-io/hindsight/discussions/4830)
+how to integrate a human-maintained wiki, on 2026-09-27. The question was
+**unanswered** with zero replies when these documents were written, so §5.6 of
+the first document records the question, what it establishes, and what each
+possible answer would change — and **no claim anywhere rests on it**. It is
+there so that when an answer arrives it can be *checked* against
+[`knowledge.md`](../knowledge.md) rather than absorbed, which matters because the
+most plausible answer from a maintainer is one the API description already
+contradicts.
 
 ## A note on the vendored document
 

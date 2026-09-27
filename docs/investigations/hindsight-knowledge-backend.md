@@ -769,6 +769,69 @@ or hand to a colleague. Note the bundle is **flat** (`index.md` +
 lives inside `index.md`. That is worth stating in the contract, because
 "export" reads like it preserves the tree and it does not.
 
+### 5.6 The upstream question, 2026-09-27 — unanswered
+
+This section records a live dependency, not a source. It is here because it
+bears directly on §5.3 and §5.4, and because when it resolves somebody has to
+check the answer against what this investigation assumed.
+
+**["integration of human authored documentation" — discussion #4830](https://github.com/vectorize-io/hindsight/discussions/4830)**, asked by `Manu343726`
+on 2026-09-27T06:24:53Z, category Q&A. **As of 2026-09-27: marked *Unanswered*,
+"Replies: 0 comments", 1 participant, no labels.** The question, verbatim:
+
+> Hi, I'm considering adopting hindsight, but there's a feature/use case I
+> couldn't find. So before opening any issue I would like to ask here in case I
+> missed something:
+>
+> Say I had an existing human authored source of documentation, a wii for
+> example. That wiki is alive and is maintained by humans alone. How would you
+> integrate the knowledge of that wiki in a hindsight instance? What I would
+> like is to have hindsight sync/import the "human wiki" from time to time,
+> integrating the knowledge there into its memory, banks, semantic graph, etc.
+>
+> Even in the case I didn't miss anything and there's really no feature per se for
+> this, I would love to know what current users do in situations like this.
+
+**There is no answer to incorporate, and the investigation is not going to
+invent one.** What follows is what the question itself establishes.
+
+#### 5.6.1 "A feature I couldn't find" is itself the finding
+
+Someone with exactly this use case read the documentation and did not find a
+documented path. That is consistent with what §5.3 found: the docs describe
+`retain()` for *content* and knowledge pages for documents the engine
+*generates*, and they do not assemble those two into "put my wiki in". The
+capability exists — `retain` with a stable `document_id` does precisely this —
+and what is missing is a worked example naming the case.
+
+**So the gap is a documentation gap, not a capability gap, and this
+investigation's §5.4 design is filling a gap upstream left open.** That is worth
+knowing before treating any of it as exotic.
+
+#### 5.6.2 The question contains three things the answer must separate
+
+| The question says | What it actually is |
+|---|---|
+| "integrating the knowledge there into its **memory**, **banks**, **semantic graph**" | Three destinations that are not peers. *Memory* is `retain` (documents → facts). The *semantic graph* is built automatically during extraction and is not separately fed. *Banks* are the isolation unit, and a wiki maps to one base, or to several deliberately. An answer that treats them as one target will be wrong in an interesting way. |
+| "from time to time" | The cadence question, which is the actual design problem: what triggers a sync, and on what. §5.4's answer is the merge of a reviewed commit (W-19, W-18), not a timer. |
+| "**maintained by humans alone**" | Not a description — a **constraint**, stated by the requester. Never write back. Every candidate answer must respect it, and any future upstream two-way filesystem feature is the thing that would break it. |
+| "what **current users do**" | The requester is explicitly asking for a *community pattern*, not a feature. The most likely answer is therefore a script that walks a directory and calls `retain` with stable ids per file — which is §5.4's reconcile, and which the vendored design in [`hindsight-human-wiki-integration.md`](hindsight-human-wiki-integration.md) already proposes as a phase-one script. |
+
+#### 5.6.3 What each possible answer would change
+
+Recorded now so the answer can be checked rather than absorbed.
+
+| If the answer is… | Then | Check against |
+|---|---|---|
+| "`retain` with a stable `document_id`; here's a script" | §5.4 stands as designed, and **nothing upstream is coming** to be depended on. The most likely outcome. | `MemoryItem.document_id` semantics and `update_mode` (replace vs append) in `openapi.json` |
+| "Use knowledge pages with `managed: false`" | **It would be wrong**, and this investigation has the evidence: `KnowledgeNode.managed` appears exactly once in the description, in a *response* schema, and in no request; and no page request has a body field. `CreatePageRequest` takes `name`, `source_query`, `parent_id`, `tags`, `max_tokens`, `trigger` — nothing else. | `openapi.json`: `CreatePageRequest`, `UpdateNodeRequest`, `KnowledgeNode` |
+| "Use **directives** for procedures" | A real design input. Directives are the one authored artifact the engine natively understands, and §6.2's `DirectiveService` would need to be load-bearing rather than administrative. | `api_directives.go`; `CreateDirectiveRequest` / `UpdateDirectiveRequest` |
+| A maintainer treats it as a feature request and builds authored pages | §5.2's central finding — "the one direction that is not available" — becomes **wrong**, and the corpus design would be duplicated by the backend. | `openapi.json` at a later version, for a body field on a page request |
+
+The second row is the one to watch. A well-meaning maintainer pointing at
+`managed` is the most plausible wrong answer available, and it is checkable in
+one grep.
+
 ---
 
 ## 6. RPC interface design

@@ -1031,6 +1031,50 @@ wiring is exercised by hand.
 small dependencies. `bazil.org/fuse` was the alternative and its last release
 predates this by three years.
 
+### 5.10 The upstream question, and what it is waiting on
+
+This subsystem answers a question that has been asked of the backend's authors
+and **not yet answered**. It is recorded here as a pending dependency, because a
+design that rests on an assumption should say which assumption and who could
+contradict it.
+
+> ["integration of human authored documentation" — discussion #4830](https://github.com/vectorize-io/hindsight/discussions/4830),
+> asked 2026-09-27, category Q&A. **Status when this section was written:
+> *Unanswered*, "Replies: 0 comments", 1 participant.**
+
+The question asks how to get a human-maintained wiki into a Hindsight instance —
+"sync/import the 'human wiki' from time to time" — and asks what current users
+do. The full text and an analysis of it are in
+[`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md)
+§5.6.
+
+**What this design already assumes, and would be unaffected by a hostile answer.**
+The corpus design in §5.2–§5.5 is the answer to that question: a Git directory as
+the authoritative half, reconciled into a base with a stable identifier per file,
+never written back (W-15), on merged content rather than on a timer (W-19). If
+the maintainers reply *"call `retain` with a stable `document_id`"*, that is this
+design, arrived at independently, and nothing here moves. It is the likely answer
+precisely because the question asks for a community pattern and not a feature.
+
+**What would move, and is worth watching:**
+
+- **If a maintainer points at knowledge pages with `managed: false`, the answer
+  is wrong** and this document has the evidence: `KnowledgeNode.managed` occurs
+  exactly once in the API description, in a *response* schema, and in no request;
+  and no page request carries a body. §5.1 and §5.2 are built on that, and they
+  are right.
+- **If directives turn out to be the recommended home for authored procedures**,
+  `DirectiveService` stops being administrative and becomes load-bearing, which
+  changes §6.1 and probably §15 question 1.
+- **If upstream builds authored pages as a feature**, §5.2's premise — that the
+  only direction available is memory → disk — becomes false, and this design has
+  duplicated a backend capability. That is the one outcome that would make most
+  of §5 wrong, and it is the one to re-read the description for at a later
+  version rather than assume.
+
+Until an answer exists, none of this is a reason to wait: the corpus half is
+Git and plain files, and the whole-wiki view is a bundle of markdown. Both work
+against a backend whose maintainers have never been asked.
 ## 6. The contract
 
 ### 6.1 Services
@@ -1640,6 +1684,16 @@ a move would then be a delete and a create and every fact would be orphaned. The
 reconciler reports a moved file with no declared identity rather than treating it
 as two files, so the omission is visible.
 
+**Open, and not waiting on us — the backend's own answer to the authored-wiki
+question** (§5.10). Discussion
+[#4830](https://github.com/vectorize-io/hindsight/discussions/4830) asked on
+2026-09-27 and unanswered when this revision was written. It does not block
+anything here, and it is the cheapest of these nine to resolve: three of the four
+possible answers change nothing, one is wrong in a way this document can already
+prove, and only "they build authored pages" would move the design. Worth
+re-reading the description for a page body field before acting on any answer
+that suggests one.
+
 **Settled — the wiki is mounted by a command, not by an RPC** (§5.9). A FUSE
 mount exists in the filesystem namespace of the process that creates it, so an RPC
 whose handler runs on another host would mount it on the wrong machine. The
@@ -1792,7 +1846,10 @@ real use.
   *"equivalent to `NotifyEntry`, but also sends an event to inotify watchers"*
   where the other two do not, and `fuse.EntryTimeout` / `fuse.AttrTimeout` for
   M-4. Read out of the module rather than from memory, which is how the
-  asymmetry in §5.9's table was found.
+  asymmetry in §5.9's table was found. §5.10 and investigation §5.6 cite
+  [discussion #4830](https://github.com/vectorize-io/hindsight/discussions/4830)
+  for its **status** — the question text and the fact that it is unanswered — and
+  for nothing else; no claim in either document rests on it.
 
 ### One open question in the source design, answered here
 
