@@ -113,6 +113,34 @@ is left is what the specification itself records as open.
       it and nothing in the tree yet demonstrates it — and the `Content`
       conversion, which was the one place a second backend would have found
       duplication, now goes through the domain.
+- [ ] **A `google.protobuf.Duration` cannot be set on a generated MCP tool using its JSON object
+      form, and the tool's own schema advertises that form.** Found by
+      `scripts/mcp_knowledge_writes.py`. Reproduction, through the gateway with a policy that
+      grants `MountService`:
+
+      ```text
+      mount__enable_mount {"spec": {"baseId": "docs", "mountpoint": "/tmp/x",
+                                    "attrTimeout": "1s"}}                    -> refused (works)
+      mount__enable_mount {"spec": {"baseId": "docs", "mountpoint": "/tmp/x",
+                                    "attrTimeout": {"seconds": 1, "nanos": 0}}}
+                                                                             -> proto: syntax error
+                                                                                (line 1:78):
+                                                                                unexpected token "{"
+      ```
+
+      `MountSpec.attr_timeout`, `entry_timeout` and `poll_interval` are all
+      `google.protobuf.Duration`, and the generated tool's `inputSchema` describes them as an
+      object with `seconds` and `nanos` properties — so a caller reading the schema sends the form
+      that fails. The canonical string form works, and that is the workaround, not a fix.
+
+      What is *not* established: which layer is at fault. The generated Go field is a `*durationpb.
+      Duration` and the embedded descriptor agrees, so `protojson` should accept both forms. Nested
+      objects generally pass through correctly — a nested object the contract does not have is
+      reported as `unknown field`, and a doubly-nested one likewise, so the arguments are not being
+      mangled. The failure is specific to a well-known type, and the error's shape
+      (`proto: syntax error`, rather than the `proto: (line 1:78):` used for a decode error)
+      suggests the arguments are being re-serialised somewhere rather than passed through. That is
+      `pkg/mcp`, and it is not this subsystem's code, so it is recorded rather than guessed at.
 - [ ] Decide the §15 open questions this implementation did not settle.
 - [ ] The 29 writes that a *default* policy denies are now covered by Go tests and by a granted
       policy for the reconciler. The rest — page and mental-model CRUD, directive CRUD, import and

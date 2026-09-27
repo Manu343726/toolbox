@@ -143,7 +143,21 @@ python3 scripts/mcp_knowledge_test.py      # the assertions
 python3 scripts/mcp_knowledge_dump.py content__list_content   # one full response, untruncated
 python3 scripts/mcp_knowledge_mount.py     # the mount, and the failure path
 python3 scripts/mcp_knowledge_reconcile.py # a reconcile, with a policy that grants it
+python3 scripts/mcp_knowledge_writes.py   # every write, with a policy that grants them
 ```
+
+`mcp_knowledge_writes.py` is the write-side sweep, and it differs from the read-side one in what it
+reads the arguments from: **each tool's own `inputSchema`**, not a hand-written table. The first
+version used a table and got six field names wrong, which surfaced as `proto: unknown field` — the
+contract working correctly and the harness not. A sweep that carries a copy of the schema tests the
+copy. The only thing written by hand now is what a field *means*, and it is consulted only after the
+schema has decided the type.
+
+It classifies each answer into answered / refused in its own words / not granted / unimplemented /
+suspicious, and the last category is the point: a refusal this contract could have written is the
+contract working, while a `syntax error` or a nil dereference is a failure nothing else asserts. At
+present it reports 6 answered, 27 refused in its own words, 0 unimplemented, and 2 suspicious — both
+of them the Duration defect in `docs/todos.md`.
 
 `mcp_knowledge_reconcile.py` is the only one that needs a policy that permits writes, and it writes
 a policy naming **two methods by name** rather than a whole service. That is deliberate: granting
