@@ -29,3 +29,7 @@
 toolbox.log
 logger.log
 *.log
+
+# Python bytecode from the MCP probe scripts under scripts/.
+__pycache__/
+*.pyc
