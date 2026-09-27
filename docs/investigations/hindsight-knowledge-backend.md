@@ -11,10 +11,40 @@
 > the corpus design written after this one, and
 > [`README.md`](README.md) for how the three documents relate.
 
-**Status: investigation. Nothing here is a decision.** No ADR is proposed, no
-code exists, and no contract has been written. This document records what was
-found, what the constraints are, and what the open questions are, so that a
-decision can be made deliberately later.
+**Status: investigation. Nothing here is a decision.** No ADR was proposed, no
+code exists, and no contract was written. This document records what was found,
+what the constraints were, and what the open questions were, so that a decision
+could be made deliberately later.
+
+**Read the repository claims against commit `25fc519`.** The old
+`subsystems/knowledge` was deleted in `4e51265`, so §2, §3.3's Toolbox column,
+§5.4's contract sketch, §6.2, §6.5 and §10 describe a repository that no longer
+exists. They are kept unedited so the reasoning is auditable; §10 has a note
+saying what actually happened instead. Every claim about Hindsight is unaffected
+and still checkable against the API description.
+
+## What Hindsight is
+
+**Hindsight** (<https://hindsight.vectorize.io>, HTTP API **0.10.1**,
+description at `/openapi.json`) is a memory backend written by Vectorize, not by
+this project. You hand it documents; it extracts individual **facts** from them,
+links them to **entities** and each other, consolidates related facts into
+deduplicated **observations**, and answers questions by running four retrieval
+strategies in parallel (vector, keyword, entity-graph, temporal), fusing and
+reranking them. Given a question it will **reflect** — write a document
+answering it and keep rewriting it as the bank changes. That document is a
+**mental model**; a mental model in a folder tree with a trigger is a **knowledge
+page**. The isolation unit is a **bank**.
+
+Everything in this document that uses those words uses them in Hindsight's sense.
+[`knowledge.md`](../knowledge.md) §2 is where the provider-neutral renaming
+happens.
+
+Start at [`/developer/knowledge-pages`](https://hindsight.vectorize.io/developer/knowledge-pages)
+and [`/developer/observations`](https://hindsight.vectorize.io/developer/observations).
+There is no `/developer` index; the site sidebar lists the paths.
+
+---
 
 **Scope of research.** Hindsight's public surface was read from the
 documentation site and from the machine-readable OpenAPI description at
@@ -80,9 +110,15 @@ where documentation and spec disagree are called out.
 
 ---
 
-## 2. The knowledge subsystem today
+## 2. The knowledge subsystem as it was at `25fc519`
 
-### 2.1 What exists
+> **Deleted in `4e51265`.** There is no `subsystems/knowledge` any more, and
+> nothing in this section is true of the tree. It is kept because the reason the
+> contract had to grow rather than be reused is stated here, and because the
+> reference implementation's limits are what made a real backend necessary in
+> the first place.
+
+### 2.1 What existed
 
 `subsystems/knowledge` is 182 lines of implementation plus an 82-line contract.
 It is a **reference implementation**, and the repository says so repeatedly:
@@ -985,7 +1021,12 @@ These are the decisions I could not make from the code and the spec alone.
 
 ## 10. What implementing this would touch
 
-For sizing only — **nothing below has been done.**
+For sizing only — **nothing below has been done.** One line has since gone the
+other way: `subsystems/knowledge/proto/knowledge.proto` and
+`subsystems/knowledge/knowledge.go` are no longer "changed", because the module
+they would have been changed in was deleted. The new contract is a new module,
+not a grown one — which is the decision
+[`knowledge.md`](../knowledge.md) §6.1 records and this document got wrong.
 
 **New**
 
@@ -1005,10 +1046,11 @@ For sizing only — **nothing below has been done.**
 
 **Changed**
 
-- `subsystems/knowledge/proto/knowledge.proto` — new services, additively. The
-  existing `KnowledgeService` is untouched.
-- `subsystems/knowledge/knowledge.go` — only if the reference provider must
-  implement the new services (see open question 2).
+- ~~`subsystems/knowledge/proto/knowledge.proto` — new services, additively. The
+  existing `KnowledgeService` is untouched.~~ **Not what happened.** The module
+  was deleted rather than grown, so there is nothing to be additive about. Open
+  question 1 below ("provider-neutral contract, or provider-owned mirror?") is
+  what this got wrong: it assumed the answer was "grow the existing one".
 - `docs/subsystems.md` — the module count (already stale: it says sixteen, the
   tree has nineteen) and the new provider.
 - `docs/status.md` — the "Knowledge search does not yet perform ingestion,

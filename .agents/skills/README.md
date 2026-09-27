@@ -6,7 +6,8 @@ repository. Load the skill that matches the task before editing code.
 - [Toolbox architecture](toolbox-architecture/SKILL.md)
 - [ConnectRPC subsystems](connectrpc-subsystem/SKILL.md)
 - [Toolbox testing](toolbox-testing/SKILL.md)
-- [Documentation and CLI](documentation-cli/SKILL.md)
+- [Writing documentation and specifications](toolbox-docs/SKILL.md) — anything under `docs/`
+- [Documentation and CLI](documentation-cli/SKILL.md) — descriptor extraction and generated help
 - [Toolbox MCP gateway](toolbox-mcp/SKILL.md)
 - [Toolbox logging](toolbox-logging/SKILL.md)
 

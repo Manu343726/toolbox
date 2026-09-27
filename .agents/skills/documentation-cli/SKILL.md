@@ -8,6 +8,11 @@ description: Maintain protobuf documentation extraction, descriptor-set embeddin
 Use this skill for changes to `pkg/docs`, `pkg/discovery`, `pkg/cli`, generated
 help text, descriptor-set files, or subsystem `docs_embed.go` files.
 
+For writing or reviewing anything under `docs/` as prose — a specification, an
+ADR, an investigation, a reference page — use `toolbox-docs` instead. This skill
+is about the code that extracts documentation from descriptors; that one is
+about the text a human reads.
+
 ## Documentation flow
 
 ```text

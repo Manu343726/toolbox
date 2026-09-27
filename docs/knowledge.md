@@ -6,24 +6,84 @@ was removed in the same change. Where it states a decision it is a decision this
 document makes and a later change is expected to follow; where it states an open
 question it is listed in §15 rather than answered.
 
-The investigation that led here — the Hindsight API survey, the reasoning about
+## What the backend is
+
+**Hindsight** (<https://hindsight.vectorize.io>, HTTP API **0.10.1**, machine-readable
+description at `/openapi.json`) is a memory backend written by Vectorize, not by
+this project. It is the only external system this specification depends on, and
+everything below is written against it.
+
+You hand it documents. It runs an LLM over them, breaks each one into individual
+**facts**, links those facts to **entities** and to each other, and later
+**consolidates** clusters of related facts into deduplicated **observations** that
+carry their evidence. It answers questions by running four retrieval strategies
+in parallel — semantic vector search, keyword search, entity-graph traversal, and
+temporal search — fusing them with reciprocal-rank fusion and reranking
+(Hindsight calls the combination TEMPR). On top of that it will **reflect**: given
+a question, it writes a document answering it and keeps rewriting it as the bank
+changes. That stored document is a **mental model**, and a mental model placed in
+a folder tree and configured with a trigger is a **knowledge page**.
+
+```text
+your files ──retain()──▶ Hindsight ──LLM──▶ facts ──consolidate──▶ observations
+                                                               │
+                                                     reflect (your question)
+                                                               ▼
+                                                    mental model = knowledge page
+```
+
+The vocabulary Hindsight uses, and what this document calls it instead:
+
+| Hindsight | This document | Note |
+|---|---|---|
+| bank (`bank_id`) | **base** | the isolation unit: its own memories, config, pages, directives |
+| memory unit | **fact** | one extracted statement, typed `world` or `experience` |
+| observation | **observation** | consolidated, deduplicated, evidence-backed belief |
+| mental model | **mental model** / **page** | a synthesized document answering one question |
+| directive | **directive** | hand-written rule the reasoning step must follow |
+| retain / recall / reflect | `WriteContent`+reconcile / `Recall` / `Reflect` | the contract is provider-neutral (§2) |
+| `managed`, `delta`, `all_strict`, TEMPR, disposition traits | *not used* | §2 explains why these stay out |
+
+Three properties of that backend shape this entire specification, and each is
+verified against the API description rather than the prose:
+
+1. **Nothing a person wrote can be stored in a knowledge page.** A page has no
+   writable body field anywhere in the public surface. §5.1.
+2. **Re-retaining a `document_id` replaces it** — the old document and its facts
+   are deleted and re-extracted. D-8, §5.4.
+3. **A page's `tags` filter what it is built from**, and default to `all_strict`,
+   so a page tagged with descriptive labels it was not given matches nothing.
+   §8.
+
+If you want to read it yourself: the concept page
+[`/developer/knowledge-pages`](https://hindsight.vectorize.io/developer/knowledge-pages),
+the API reference under `/developer/api/*`, and
+[`/developer/observations`](https://hindsight.vectorize.io/developer/observations)
+for the consolidation model. There is no `/developer` index page; the paths are
+listed in the site sidebar.
+
+The investigation that led here — the API survey, the reasoning about
 preloading, and the three placement options — is kept in
 [`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md).
-This document supersedes it where they differ.
+This document supersedes it where they differ. The corpus-side design it also
+implements is
+[`investigations/hindsight-human-wiki-integration.md`](investigations/hindsight-human-wiki-integration.md).
 
 ---
 
 ## 1. What this subsystem is for
 
-An assistant that forgets everything between sessions is limited to whatever
-context the caller pastes in. A person holding the institutional memory of a
-project is limited to whatever they remember to open. **This subsystem is the
-system that both of them work from**: the knowledge, the memory, and the
-documentation, in one place, reachable by both.
+An assistant that forgets everything between sessions can only know what the
+caller pastes in. A person looking for the runbook can only find it if they
+remember that it exists. This subsystem is **one base both of them read from and
+write to**: the wiki people write, the facts and observations the system derives
+from it and from conversation, and the pages it renders from those — behind the
+same calls.
 
 ### 1.1 The three layers
 
-There are three layers here, and keeping them apart is most of the design.
+Three kinds of thing, written by three different parties. Telling them apart
+correctly is most of the work.
 
 |  | The authored corpus | The memory engine | The projection |
 |---|---|---|---|
@@ -34,24 +94,23 @@ There are three layers here, and keeping them apart is most of the design.
 | **If deleted** | Nothing to rebuild from — this is the loss | **Rebuilt in full from the corpus** | Rebuilt from the engine |
 | **What it cannot do** | Notice that a decision was reversed last month | Show you the sentence someone wrote | Be quoted as authority |
 
-The corpus and the engine are the two halves in §1.1's sense; the projection is
-the engine's rendering of itself, and it is **not** a third source of truth. It
-exists because "what does the system currently believe about this" is a real
-question with a real answer, and a person should be able to read that answer
-without a query language.
+The first two are where knowledge comes from. The third is the engine writing
+itself out. It exists because *"what does the system currently believe about
+this"* is a real question, and a person should be able to read the answer
+without writing a query. It is a view, not a source — nothing should cite it.
 
 Two consequences follow, and they are the two rules this subsystem is built on:
 
-- **The corpus is authoritative. The engine is disposable and reproducible.**
-  Delete the base and it can be rebuilt in full from the repository. That is not
-  a nice property, it is the property that makes every other decision safe —
-  because it means the derived side can be regenerated when the backend changes,
-  when the extraction settings change, when the whole thing is migrated, and
-  when you want to index a historical version of the corpus.
-- **The projection never flows back into the corpus.** Feeding generated pages
-  back in would make the system increasingly self-referential, and every
-  generation would be reasoning partly from its own previous output. The corpus
-  is written by people; that is the whole of its provenance.
+- **The corpus is authoritative. Everything else can be deleted and rebuilt.**
+  Drop the base, re-run the reconcile against the repository, and the corpus
+  comes back. That is what makes the rest of this design cheap to change: the
+  extraction settings, the backend, the whole deployment can be replaced and the
+  facts re-derived, because the only thing that was ever real is the markdown
+  somebody wrote.
+- **Generated pages are never reconciled back in as authored content.** If they
+  were, the second generation would be partly reasoning from the first one's
+  output and the fifth from the fourth's. A corpus file always came from a
+  person, which is checkable, and it is the reason to trust it.
 
 Neither substitutes for the others. A base with only an engine has nothing its
 users can review. A base with only a corpus has nothing an assistant can reason
@@ -66,8 +125,8 @@ knowledge base that keeps those in two stores answers half of it twice and the
 other half not at all.
 
 So a base holds both, and **provenance** — whether a piece of knowledge was
-authored, retained, or derived — is a filter rather than a partition. §4 is the
-type that makes this possible.
+authored, retained, or derived — is something you filter on, not something that
+splits the API into separate endpoints. §4 is the type that makes that work.
 
 ### 1.3 One surface, not two
 
@@ -100,14 +159,16 @@ otherwise would be the easier mistake.
 3. **Derived knowledge is worth keeping.** What an assistant learns across
    sessions — a preference, a decision, a correction — is knowledge no file
    contains.
-4. **A single surface over two substrates is easy to fake.** The temptation is to
-   expose the backend's pages and the wiki as two resource families and call
-   that one API. §4 and §10 are about not doing that.
+4. **One API over two backends is easy to fake.** The easy version exposes the
+   backend's pages and the wiki as two sets of RPCs, calls that "one API", and
+   leaves every consumer to work out which set it is holding. §4 and §10 are
+   about the alternative.
 
 ## 2. Terminology
 
-Vocabulary is load-bearing here, because the two halves are different kinds of
-thing and the difference is the whole design.
+Every word below replaces a specific word the backend uses, and the difference
+between a fact, a document and a page is not cosmetic: it decides what a caller
+may write, what gets rewritten underneath them, and what a citation is worth.
 
 | Term | Meaning |
 |---|---|
@@ -291,8 +352,9 @@ person owns. See §5 for the design.
 | P-8 | Search pages as whole documents, returning whole pages with snippets, fused server-side and without a reranking step — because a page search is a tool an agent chooses to call, and it has to be fast enough to be the first call. (H) |
 | P-9 | Export the whole base as a portable markdown bundle, with a refresh log per page. (H) |
 | P-10 | A page's tags **scope** what it is built from rather than labelling it, and the contract says so, because a tag invented at creation time to describe the topic will match nothing. (H) |
-| P-11 | Deleting a page loses nothing: it re-projects from memory. (H) |
+| P-11 | Deleting a page loses the body and nothing else of substance: it re-projects from memory. **But the `source_query` — the question the page answers — and its place in the tree live on the node and are not re-derivable**, so `DeleteContent` on a page is not the same as deleting a row. (H) |
 | P-12 | A page is content of origin `derived`, and is therefore readable through the same call as anything else rather than through a page-only read. (U) |
+| P-13 | **A caller can learn what a page is no longer standing on.** A refresh that finds claims citing facts the base no longer holds records what those facts said and removes the claims, and that report is available — on a dry run or a kept trace, never inferred from the page, because a page citing a deleted fact still reports itself current. (H) |
 
 ### Querying both halves
 
@@ -367,8 +429,10 @@ person owns. See §5 for the design.
 
 ## 4. The content model
 
-This is the type that makes one surface possible. If the two halves were two
-resource families, "one API" would be a claim rather than a fact.
+This message is the point of the whole design. If a corpus file, a retained
+document and a generated page were three resources with three reads each, "one
+API" would be a slogan — every consumer would still have to know which family it
+was holding.
 
 ```proto
 // Content is the one addressable, readable unit of knowledge in a base.
@@ -465,8 +529,8 @@ tree path. Neither has to ask first.
 
 ### 4.3 Provenance
 
-The record that makes a citation worth something, and that makes the two halves
-distinguishable at query time.
+The record that makes a citation worth something: what produced this content, and
+what it was derived from.
 
 ```proto
 message Provenance {
@@ -513,14 +577,29 @@ person owns.
 
 ### 5.1 The one direction that is not available
 
-The memory backend projects a base onto a folder of markdown files, and keeps
-that folder current. That direction is memory → disk, and it exists so a person
-can `ls`, `grep` and edit. Its own documentation is clear that the projection is
+The backend projects a base onto a folder of markdown files, and keeps that
+folder current. That direction is memory → disk, and it exists so a person can
+`ls`, `grep` and edit. Its own documentation is clear that the projection is
 derived:
 
 > A knowledge page is a **projected view** over processed memory, the way a
-> database view is not a table. […] Your raw documents remain the source of truth
-> about *what was said*. The pages are the reconciled truth about *what holds*.
+> database view is not a table. […] The pages are the reconciled truth about
+> *what holds*.
+
+The same page also says *"your raw documents remain the source of truth about
+what was said"*, and that half needs qualifying, because the retain
+documentation says the opposite:
+
+> Each item is a piece of raw content […] **The content itself is never stored
+> verbatim; what gets stored are the structured facts the LLM extracts from
+> it.**
+
+Raw text is persisted only if `store_document_text` is on — a per-base setting
+whose default the API description does not state. With it off there is no
+original text in the bank at all. **This is why the corpus has to stay on disk in
+Git rather than being trusted to the base** (W-14): the repository is the only
+copy that is guaranteed to exist, and the base holds derived facts it may not
+even be keeping the words of.
 
 So the inverse question — how does authored text get in — has an obvious wrong
 answer, and it is worth naming why it is wrong. **"Create a page whose body is
@@ -633,8 +712,8 @@ U-10, W-2, W-3):
   itself with its frontmatter. There is no documentation-only read, and no reason
   for one.
 - A person **writes** corpus content through their editor and their Git review,
-  not through here. W-15. This is the one asymmetry in the whole design and it is
-  deliberate: a corpus file has an editor, hooks, a blame view and a review
+  not through here. W-15. This is the one place the two audiences get different
+  treatment: a corpus file has an editor, hooks, a blame view and a review
   process, and a tool that wrote it behind their back would fight all four. It
   also means the tool never has to be trusted with someone's documentation, which
   is a much easier property to reason about than "it only writes files you
@@ -683,7 +762,10 @@ it as two unrelated files, so whoever reorganised the tree finds out.
 
 **Replacement really is a replace, and that is what we want — with a caveat worth
 naming.** A repeated `document_id` on the backend *replaces*: the old document
-and its facts are deleted and re-extracted rather than appended to. That is
+and its facts are deleted and re-extracted rather than appended to. This is
+stated in the `POST /memories` endpoint description and in prose on
+`MemoryItem.update_mode`; the schema itself carries no `default` key, so a
+generated client sees no default and the provider must send it explicitly. That is
 correct for a corpus, because an edited runbook must not leave the previous
 version's facts retrievable — an assistant answering from a superseded sentence
 is worse than one that answers from nothing. The caveat is D-8: the facts get new
@@ -744,9 +826,8 @@ what would change without any of it being believed.
 
 ### 5.6 Promotion: how the human loop closes
 
-The half that makes this a system rather than two stores. A person reads
-something the system inferred, and wants it to be authoritative. Three ways, in
-increasing order of ceremony:
+A person reads something the system inferred, decides it should be true, and
+wants it to stick. Three ways to do that, cheapest first:
 
 1. **They correct the fact.** `CurateMemory` (F-3). The fact's text changes and
    everything derived from it re-derives. The correction lives in the base and
@@ -801,10 +882,10 @@ why the tags carry `status` and `kind` through rather than flattening them.
 
 ### 6.1 Services
 
-Ordered so the unified surface comes before the machinery behind it, because
-that is the order a consumer meets them in. Every RPC declares its side effects;
-that is not a formality, because the declaration is what a policy author reads
-and what the MCP gateway gates on.
+`ContentService` and `QueryService` come first because that is what callers
+actually use; everything below them is administration. Every RPC carries
+`@toolbox.side-effects`, because that annotation is what a policy author reads
+to decide who may call it and what the MCP gateway checks before exposing it.
 
 | Service | RPCs |
 |---|---|
@@ -821,8 +902,7 @@ and what the MCP gateway gates on.
 | `TemplateService` | `GetTemplateSchema`, `ExportTemplate`, `ImportTemplate`, `ExportBase`, `ImportBase`, `CloneBase` |
 | `OperationService` | `ListOperations`, `GetOperation`, `CancelOperation`, `RetryOperation`, `DeleteOperation` |
 
-Three things in that table are the unification, and each is worth reading
-against the shape it replaces:
+Three rows differ from what the backend offers, and the differences are the point:
 
 - **`ContentService` has no per-origin services under it.** The reads that used
   to be `GetDocument`, `GetPage` and a corpus read are now `GetContent` (U-3).
@@ -1008,39 +1088,52 @@ will read it.
 
 ## 8. Pages
 
-A page is a mental model configured as a document. The configuration is what
-makes it a page, and it is worth stating because the default is doing real work:
+A page is a mental model with a trigger and a place in a folder tree. Nothing
+about the message says "page" — the same request creates a mental model — so the
+defaults are the only thing distinguishing them, and they are worth writing down:
 
 | Setting | Default for a page | Why |
 |---|---|---|
-| Built from | consolidated beliefs only | Beliefs are deduplicated and evidence-backed, so a page reads as a settled document rather than a transcript. The backend enforces this structurally — the refresh agent is not given the raw-fact retrieval tool at all. |
-| Reads other pages | never | Otherwise pages cite each other and one wrong claim propagates across the base. |
+| Built from | consolidated observations | Observations are deduplicated and carry their evidence, so a page reads as a settled document rather than a transcript. Enforced structurally: with only `observation` in scope the refresh agent is not given the raw-memory recall tool. It can still expand a memory to its original chunk when tracing a claim, so "reads beliefs, not the transcript" is about the retrieval surface, not a firewall. |
+| Reads other models | never | `exclude_mental_models: true` hides **every** sibling mental model, not just sibling pages — otherwise pages cite each other and one page's wrong claim gets quoted as fact by the next. |
 | Refresh mode | incremental | Edits the existing document with what is new, so hand-tuned structure survives. |
-| Trigger | after consolidation | Rewrites when new knowledge lands in **its own** scope. |
+| Trigger | after consolidation, if something new landed in **this page's** tags | A page about `auth` does not rewrite when somebody's runbook about `deploy` changes. |
 | Budget | document-sized | It is a document, not an answer. |
 
-Two consequences the contract must state, because both are easy to get wrong:
+Two defaults here have bitten people, and the contract comment has to carry both
+because the generated MCP tool description *is* the comment:
 
-**A page's tags scope it.** They are not labels. A tagged page matches with
-`all_strict` by default: a memory must carry *every* one of the page's tags, and
-untagged memories are excluded entirely. So a page created with tags invented at
-creation time to describe its topic matches nothing and generates as "I don't
-have information about this", while a direct recall for the same query returns
-everything — because recall was not given the same filter. The contract comment
-says this, and the three ways to get it right (omit tags, widen the match, or
-keep the strict default deliberately) are the contract's comment too.
+**A page's tags filter it. They are not labels.** A tagged page matches with
+`all_strict`: a memory must carry *every* one of the page's tags, and memories
+with no tags at all are excluded. So creating a page with tags you invented to
+describe the topic — "What do we know about auth?" with tags
+`["authentication", "security"]` — matches nothing, and the page generates as
+"I don't have information about this", while a direct recall for the same
+question returns plenty, because recall was not handed the same filter. Three
+ways out, and the caller picks: drop the tags, widen the match mode, or keep
+`all_strict` and tag the source material to match.
 
-**Staleness does not see deletions.** A page is stale when something in its scope
-has been *written* since it last read. Deleting an in-scope fact leaves no
-write behind, so a page citing a deleted fact keeps reporting itself current.
-Stating this is more useful than leaving it to be found, because the fix is
-different from what a reader assumes.
+**Staleness tracks writes, not deletions.** A page reports itself stale when
+something in its scope has been *written* since it last read. Deleting an
+in-scope fact leaves no write behind, so a page that cites the deleted fact keeps
+reporting itself current. The fix is a forced refresh, not waiting.
+
+**…but a refresh does clean up deleted claims.** The `is_stale` flag misses
+deletions; the refresh itself does not. Hindsight runs a retraction pass that
+finds facts a document cited which no longer exist in the bank, records what they
+said, and removes the claims that rested on them. Two things follow, and both are
+contract-visible: a forced refresh is how you learn that a page was quoting
+something the base no longer holds, and the retraction is reported only on a
+dry-run or a kept trace, never on the page itself. A caller that wants to know
+"is this page still standing on anything real" has to ask for the trace, or run
+the dry run. P-13.
 
 ## 9. Directives and base configuration
 
-Two things a person writes that the base keeps verbatim and never rewrites.
-They are the hand-authored part that is not corpus, and §10.3 says why they are
-not ingested.
+Two things a person writes that the base stores exactly as given and never
+rewrites: directives, and the base's own configuration. They are the hand-authored
+part that is *not* prose, and §10.3 says why they do not go through extraction
+like the corpus does.
 
 **Directives** are hard rules the reasoning step must follow — "never recommend
 a specific product", "always cite the source". They are matched by name, carry a
@@ -1059,17 +1152,18 @@ defaults (T-5).
 
 ### 10.1 Where they are the same
 
-Everything in the read path, and that is most of the surface. A caller lists
+Reading is identical for both, and reading is most of what callers do. A caller lists
 content, reads content, browses a tree and searches — and origin is a field on
 what comes back rather than a choice made before the call. Both halves share
 tags, both are filtered the same way, and both are cited the same way with
 origin stated.
 
-The write path is shared too, with one branch. An assistant retains; a person
-writes a file or uses `WriteContent`, which lands in the file; an assistant can
-also write a document; a person can also retain. The branch is not "which
-audience" but "which origin", and origin is a property of the content rather
-than of the caller (U-5).
+Writing is shared with one exception, and the exception is the whole
+documentation half. A person writes a corpus file in their editor and commits
+it; `WriteContent` cannot do that and there is no RPC that can. Everything else
+either audience may do: an assistant retains, a person retains through the CLI,
+an assistant writes a document, a person curates a fact. What decides which
+rules apply is the content's `origin`, not who is asking (U-5, W-15).
 
 ### 10.2 Where they differ, and why that is not a failure
 
@@ -1109,8 +1203,8 @@ base.
 
 ### 10.3 Configuration is a third path, and stays separate
 
-There are two kinds of hand-authored material in a system, and the second is
-not prose.
+A person writes two kinds of thing into a deployment: prose, and configuration.
+Only the prose is extracted.
 
 **Prose → content.** §5. It becomes facts, is consolidated, is reconciled, and is
 retrievable. What comes back is facts in the document's own words, not its whole
@@ -1338,13 +1432,22 @@ real use.
   D-8.
 - The investigation that preceded both:
   [`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md)
-- Hindsight's machine-readable API description (0.10.1) and its documentation
-  site, for every claim about the backend's behaviour. Structural claims in
-  particular — the absence of a writable page body, the response-only provenance
-  flag, the request shapes, and the `replace` default on a repeated document
-  identifier — were checked against the description rather than the prose,
-  because the prose is written for humans and the description is what the
-  backend will actually accept.
+- **Hindsight 0.10.1.** The machine-readable description at
+  <https://hindsight.vectorize.io/openapi.json> is the source for every
+  structural claim, because it is what a client will actually be accepted by and
+  the prose is not: the absence of a writable page body (`CreatePageRequest` and
+  `UpdateNodeRequest` have `name`, `source_query`, `parent_id`, `tags`,
+  `max_tokens`, `trigger` and nothing else); `KnowledgeNode.managed` appearing
+  exactly once, in a response schema, in no request; `update_mode` being
+  `replace`/`append` with the default stated only in prose; and
+  `tags_match` defaulting to `all_strict` *only when the page has tags*. The
+  concept pages behind the arguments are
+  [`/developer/knowledge-pages`](https://hindsight.vectorize.io/developer/knowledge-pages),
+  [`/developer/observations`](https://hindsight.vectorize.io/developer/observations),
+  [`/developer/retrieval`](https://hindsight.vectorize.io/developer/retrieval)
+  and [`/developer/mental-models`](https://hindsight.vectorize.io/developer/mental-models).
+  Where the description and the prose disagree, this document says which it used;
+  see §5.1 for the one place it matters most.
 
 ### One open question in the source design, answered here
 
