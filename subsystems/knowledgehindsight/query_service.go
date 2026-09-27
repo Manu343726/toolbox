@@ -337,7 +337,7 @@ func (s *queryService) PreviewPrompts(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, err
 	}
-	prompts, err := s.p.client.PreviewPrompts(ctx, baseID)
+	prompts, err := s.p.client.PreviewPrompts(ctx, baseID, req.Msg.GetOperation(), req.Msg.GetStrategy())
 	if err != nil {
 		return nil, err
 	}

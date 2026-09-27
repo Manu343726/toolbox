@@ -2,6 +2,8 @@ package knowledgehindsight
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1102,4 +1104,92 @@ func TestSubtreePathsMatchOnABoundaryNotAPrefix(t *testing.T) {
 	assert.True(t, withinSubtree("runbooks/restore.md", "runbooks"))
 	assert.False(t, withinSubtree("runbooks-archive/restore.md", "runbooks"))
 	assert.False(t, withinSubtree("architecture/overview.md", "runbooks"))
+}
+
+// --- the three holes the MCP sweep found.
+//
+// Each of these passed every test above it, and each is a class of miss rather than a one-off.
+
+// `ExportWiki` and `GetProjectionRevision` were in the contract, registered, classified and
+// documented, and returned `unimplemented`. An embedded `Unimplemented...Handler` is a real type
+// that satisfies the generated interface, so a method nobody wrote has no failing test — the
+// tests call handlers, and there is no handler to call. This one calls the method.
+func TestTheTwoProjectedReadsAreImplementedRatherThanEmbedded(t *testing.T) {
+	t.Parallel()
+	p, _ := newAdminProvider(t, map[string]string{
+		"/knowledge-base/tree": `{"roots":[]}`,
+	})
+	resp, err := p.contentHandler().ExportWiki(context.Background(), connect.NewRequest(&knowledgev1.ExportWikiRequest{
+		BaseId: "docs", IncludeIndex: true,
+	}))
+	require.NoError(t, err, "ExportWiki is the feature the mount consumes; unimplemented is not an answer")
+	assert.NotNil(t, resp.Msg.GetSource())
+	assert.NotEmpty(t, resp.Msg.GetMarker(), "the marker is what stops a written bundle being mistaken for a corpus")
+	// Both halves are in one tree, namespaced, so a reader can tell which is which before
+	// opening either and two files with the same relative path cannot collide.
+	for _, f := range resp.Msg.GetFiles() {
+		assert.Contains(t, []string{"file/", "generated/"}, f.GetPath()[:5], f.GetPath())
+	}
+
+	rev, err := p.contentHandler().GetProjectionRevision(context.Background(), connect.NewRequest(&knowledgev1.GetProjectionRevisionRequest{
+		BaseId: "docs",
+	}))
+	require.NoError(t, err, "M-5 depends on this and the mount polls it")
+	assert.NotEmpty(t, rev.Msg.GetValue())
+}
+
+// `PreviewPrompts` sent no body, and the endpoint requires one naming the operation. The call
+// failed against any real backend and no test noticed, because the subsystem's stub matched the
+// path and returned a body.
+func TestPreviewPromptsSendsTheOperationAndRefusesOneThatDoesNotExist(t *testing.T) {
+	t.Parallel()
+	p, b := newAdminProvider(t, map[string]string{
+		"/prompts/preview": `{"messages":[
+			{"role":"system","blocks":[{"kind":"text","source":"config","text":"You answer from the corpus."}]}]}`,
+	})
+	_, err := p.queryHandler().PreviewPrompts(context.Background(), connect.NewRequest(&knowledgev1.PreviewPromptsRequest{
+		BaseId: "docs", Operation: strPtr("reflect"),
+	}))
+	require.NoError(t, err)
+	sent := b.sentTo("/prompts/preview")
+	require.NotEmpty(t, sent)
+	// The endpoint requires this and its default is `retain`, so sending nothing is not a
+	// request the backend answers at all.
+	assert.Contains(t, sent[0].Body, `"operation":"reflect"`)
+
+	_, err = p.queryHandler().PreviewPrompts(context.Background(), connect.NewRequest(&knowledgev1.PreviewPromptsRequest{
+		BaseId: "docs", Operation: strPtr("summarise"),
+	}))
+	require.Error(t, err)
+	assert.Equal(t, api.KindInvalid, api.KindOf(err))
+	// The three are different prompts and the default is the extractor's. Shown the wrong
+	// one, a caller has been told something false about the system, so the accepted values are
+	// named rather than forwarded.
+	assert.Contains(t, err.Error(), "consolidation")
+}
+
+// A base was addressed two ways: a `BaseRef` message on one service and `base_id` on the other
+// twelve. Two shapes for one thing, and the two said different things about whether an alias was
+// acceptable — though `resolveBaseForRead` takes either, so they meant the same.
+func TestEveryServiceAddressesABaseTheSameWay(t *testing.T) {
+	t.Parallel()
+	// A generated request struct, checked by field: if a service reintroduces a wrapper message
+	// this fails with the field name rather than with a decode error at call time.
+	requests := []any{
+		&knowledgev1.GetBaseRequest{}, &knowledgev1.GetBaseConfigRequest{},
+		&knowledgev1.ListContentRequest{},
+		&knowledgev1.RecallRequest{}, &knowledgev1.PlanReconcileRequest{},
+		&knowledgev1.ListDirectivesRequest{}, &knowledgev1.ListEntitiesRequest{},
+		&knowledgev1.ListMentalModelsRequest{}, &knowledgev1.ListOperationsRequest{},
+		&knowledgev1.ListObservationScopesRequest{}, &knowledgev1.GetMountStatusRequest{},
+	}
+	for _, r := range requests {
+		t.Run(fmt.Sprintf("%T", r), func(t *testing.T) {
+			t.Parallel()
+			value := reflect.ValueOf(r).Elem()
+			field := value.FieldByName("BaseId")
+			require.True(t, field.IsValid(), "this request has no BaseId field, so it addresses a base some other way")
+			assert.Equal(t, reflect.String, field.Kind())
+		})
+	}
 }

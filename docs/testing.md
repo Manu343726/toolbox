@@ -116,6 +116,38 @@ go test -race ./pkg/mcp
 GOWORK=off make -C subsystems/testecho test
 ```
 
+## Exercising a subsystem through the gateway
+
+The layers above cannot see three things, and all three are real:
+
+- **whether a method is reachable at all.** An embedded `Unimplemented...Handler` satisfies the
+  generated interface, so a method that is in the contract, registered, documented and classified
+  can return `unimplemented` and pass every test that calls the handlers it is testing — because
+  it has no handler.
+- **whether the policy lets an agent call it.** A method can be correctly implemented and
+  correctly classified and still be invisible to every agent, because only a policy permits one.
+- **whether an error survives three layers.** A classification made in a handler can be lost
+  between it and the tool result, and "the backend is down" arriving as `internal` is a
+  deployment that cannot be diagnosed.
+
+`scripts/mcp_knowledge_sweep.py` calls every tool the policy exposes and reports which answer,
+which refuse and which are `unimplemented`; `scripts/mcp_knowledge_test.py` asserts the parts a
+Go test cannot reach. Both drive a real gateway process over stdio against
+`scripts/hindsight_stub.py`, a stub backend serving the required-field shapes the generated client
+insists on.
+
+```sh
+make host
+python3 scripts/mcp_knowledge_sweep.py     # per-tool reachability
+python3 scripts/mcp_knowledge_test.py      # the assertions
+python3 scripts/mcp_knowledge_dump.py content__list_content   # one full response, untruncated
+```
+
+They need a corpus, which the scripts create for themselves in a temporary directory, and they
+manage the stub and the gateway. **Rebuild the host first**: the gateway is a process that holds a
+binary, so a source change is not a running change, and `scripts/toolbox-mcp.sh` rebuilds on a
+stale binary precisely so that a caller is not left testing a build that no longer exists.
+
 ## Concurrency tests
 
 Use the race detector for code involving:

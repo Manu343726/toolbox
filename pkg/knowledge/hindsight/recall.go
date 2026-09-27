@@ -3,6 +3,7 @@ package hindsight
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 
 	hs "github.com/vectorize-io/hindsight/hindsight-clients/go"
@@ -276,8 +277,36 @@ type Prompt struct {
 }
 
 // PreviewPrompts reports the prompts a base's configuration would use.
-func (c *Client) PreviewPrompts(ctx context.Context, baseID string) ([]Prompt, error) {
-	resp, httpResp, err := c.api.BanksAPI.PreviewPrompt(ctx, baseID).Execute()
+func (c *Client) PreviewPrompts(ctx context.Context, baseID, operation, strategy string) ([]Prompt, error) {
+	// The endpoint requires a body, and the body is the operation. Sending none of it is not a
+	// request the backend answers: it refuses, and the refusal is about a missing field rather
+	// than about anything the caller did.
+	//
+	// The operation is validated here rather than forwarded, because the three are different
+	// prompts and the backend's default is `retain`. A caller that asked what a base would send
+	// to the reasoner and was shown the extractor's prompt has been told the wrong thing about
+	// the system, and a validation error naming the three is a better answer than that.
+	if operation == "" {
+		operation = "retain"
+	}
+	switch operation {
+	case "retain", "consolidation", "reflect":
+	default:
+		return nil, errInvalid("the operation is " + strconv.Quote(operation) +
+			", not one of retain, consolidation or reflect; these are the three stages a base has, " +
+			"and they are different prompts, so the one asked for has to be the one sent")
+	}
+	if strategy != "" && operation != "retain" {
+		return nil, errInvalid("a strategy applies to the retain operation, not to " + operation +
+			"; naming one for a stage that has no strategies would be a field the backend reads and ignores")
+	}
+	body := hs.PromptPreviewRequest{}
+	op := operation
+	body.Operation = &op
+	if strategy != "" {
+		body.Strategy = *hs.NewNullableString(&strategy)
+	}
+	resp, httpResp, err := c.api.BanksAPI.PreviewPrompt(ctx, baseID).PromptPreviewRequest(body).Execute()
 	if err != nil {
 		return nil, Classify(err, httpResp, "previewing the prompts of base "+baseID)
 	}

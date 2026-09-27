@@ -947,6 +947,21 @@ message ExtractionSettings {
 message PreviewPromptsRequest {
   // The base whose prompts would be used. Required.
   string base_id = 1;
+  // Which operation's prompts to render: `retain`, `consolidation` or `reflect`. The backend
+  // requires this and its default is `retain`, so an absent one means the extraction prompts
+  // and nothing says so. The three are the stages a base actually has, and they are different
+  // prompts: a caller asking what a base would send and being shown the extractor when they
+  // meant the reasoner has been told the wrong thing about the system.
+  //
+  // There is deliberately nothing else to set. Everything that shapes a prompt comes from the
+  // base — its resolved configuration, its profile and its directives — and the runtime data an
+  // operation would be given is a fixed placeholder, so a preview answers "what does this base
+  // send" and nothing else. To try a candidate value, save it and look again.
+  optional string operation = 2;
+  // A named retain strategy, for the `retain` operation only. It selects among the base's own
+  // configured strategies, so a name the base does not have is a caller's mistake rather than
+  // something to invent.
+  optional string strategy = 3;
 }
 
 message PreviewPromptsResponse {
@@ -1558,13 +1573,6 @@ service KnowledgeBaseService {
   rpc RemoveBaseAlias(RemoveBaseAliasRequest) returns (RemoveBaseAliasResponse);
 }
 
-message BaseRef {
-  // The base identifier, or an alias. A deployment addresses a base by a friendly name far more
-  // often than by a generated identifier, and a contract that made it look up the alias first
-  // would push that into every caller.
-  string name = 1;
-}
-
 message Base {
   string id = 1;
   string name = 2;
@@ -1592,7 +1600,7 @@ message ListBasesResponse {
 }
 
 message GetBaseRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
 }
 
 message GetBaseResponse {
@@ -1617,7 +1625,7 @@ message CreateBaseResponse {
 }
 
 message UpdateBaseRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
   optional string name = 2;
   optional string description = 3;
   // Replace the corpus roots. Absent leaves them.
@@ -1629,7 +1637,7 @@ message UpdateBaseResponse {
 }
 
 message DeleteBaseRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
 }
 
 message DeleteBaseResponse {
@@ -1692,7 +1700,7 @@ message BaseLimits {
 }
 
 message ResetBaseConfigRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
 }
 
 message ResetBaseConfigResponse {
@@ -1704,7 +1712,7 @@ message ResetBaseConfigResponse {
 }
 
 message GetBaseConfigRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
 }
 
 message GetBaseConfigResponse {
@@ -1712,7 +1720,7 @@ message GetBaseConfigResponse {
 }
 
 message UpdateBaseConfigRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
   // Every field is three-valued. `mission` and the maps are merged per key: a key absent here is
   // left alone, a key present with an empty value is cleared.
   optional BaseConfig config = 2;
@@ -1723,7 +1731,7 @@ message UpdateBaseConfigResponse {
 }
 
 message GetBaseStatsRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
 }
 
 message GetBaseStatsResponse {
@@ -1748,7 +1756,7 @@ message BaseStats {
 }
 
 message GetBaseIngestionSeriesRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
   // The bucket size. `hour` and `day` are the useful ones.
   string granularity = 2;
   // How many buckets back, ending now. Refused rather than defaulted to something large, because
@@ -1770,7 +1778,7 @@ message IngestionBucket {
 }
 
 message ListBaseAliasesRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
 }
 
 message ListBaseAliasesResponse {
@@ -1785,7 +1793,7 @@ message BaseAlias {
 }
 
 message AddBaseAliasRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
   string name = 2;
   // Make it the display name immediately.
   bool primary = 3;
@@ -1796,7 +1804,7 @@ message AddBaseAliasResponse {
 }
 
 message SetPrimaryBaseAliasRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
   string alias_id = 2;
 }
 
@@ -1805,7 +1813,7 @@ message SetPrimaryBaseAliasResponse {
 }
 
 message RemoveBaseAliasRequest {
-  BaseRef ref = 1;
+  string base_id = 1;
   string alias_id = 2;
 }
 

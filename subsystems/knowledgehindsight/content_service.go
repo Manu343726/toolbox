@@ -3,6 +3,8 @@ package knowledgehindsight
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -547,4 +549,159 @@ func parseTimestamp(s string) *timestamppb.Timestamp {
 		}
 	}
 	return nil
+}
+
+// ExportWiki returns the whole-wiki view: authored content and generated pages as one tree, with
+// a generated index and the marker that says this is a projection and not a corpus.
+//
+// This is the feature the mount is one way to consume, and the reason it composes rather than
+// re-rendering is the framework's own rule about one translation: the two origins are rendered
+// once, here, and the mount reads the same bytes. A mount that rendered its own would be a second
+// translation of one artifact, and the two would agree only until one of them changed.
+func (s *contentService) ExportWiki(ctx context.Context, req *connect.Request[knowledgev1.ExportWikiRequest]) (*connect.Response[knowledgev1.ExportWikiResponse], error) {
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
+	if err != nil {
+		return nil, err
+	}
+	corpus, err := s.p.bases.corpus(nil)
+	if err != nil {
+		return nil, err
+	}
+	// A pre-filter against the ownership record, so an export of three thousand files reads the
+	// ones that changed and rebuilds the other lines from the record. The bodies still come
+	// from the filesystem below; the record is what says whether that is necessary.
+	record, _ := s.p.ownershipFor(ctx, baseID)
+	walk, err := corpus.Walk(ctx, knowledge.WalkOptions{Prior: record, TrustModTime: true})
+	if err != nil {
+		return nil, err
+	}
+
+	// Files the pre-filter skipped and this loop could not read. Named rather than carried with
+	// an empty body: an empty body in a wiki is a document that says nothing, and a reader
+	// cannot tell it from a file that is genuinely empty.
+	var unreadable []string
+	in := knowledge.WikiInput{
+		BaseID:       baseID,
+		GeneratedAt:  time.Now().UTC(),
+		OriginFilter: filterOrigin(req.Msg.GetOrigin()),
+		Subtree:      strings.TrimSpace(req.Msg.GetSubtree()),
+	}
+	if record != nil {
+		in.Commit = record.LastCommit
+	}
+	for _, f := range walk.Files {
+		if !f.Read {
+			// Skipped by the cheap filter, so the body was not read. The projection needs
+			// it, and reading the file the filter declined is the entire point of the
+			// filter: a file that did not change is read once here, not on every export.
+			raw, rerr := os.ReadFile(filepath.Join(rootPathOf(f.Root, corpus), filepath.FromSlash(f.Path)))
+			if rerr != nil {
+				unreadable = append(unreadable, f.Path)
+				continue
+			}
+			in.Authored = append(in.Authored, knowledge.ProjectedFile{
+				Path: f.Path, Content: raw, Origin: knowledge.ProjectionOriginFile,
+				SourcePath: f.Path, ContentID: f.ID,
+			})
+			continue
+		}
+		in.Authored = append(in.Authored, knowledge.ProjectedFile{
+			Path:       f.Path,
+			Content:    []byte(f.Body),
+			Origin:     knowledge.ProjectionOriginFile,
+			SourcePath: f.Path,
+			ContentID:  f.ID,
+		})
+	}
+
+	// The engine half. A backend that cannot be reached produces no pages rather than no
+	// projection: the authored half is local and a reader asking for the wiki wants it. The
+	// revision below is where the absence is reported, because a projection that silently
+	// omitted half of itself is a bundle that looks complete.
+	pages, perr := s.p.client.ExportPages(ctx, baseID)
+	if perr == nil {
+		in.Pages = pages
+	}
+	tree, terr := s.p.client.PageTree(ctx, baseID)
+	if terr == nil {
+		for _, node := range tree {
+			if node.IsStale {
+				in.StalePages++
+			}
+		}
+	}
+
+	wiki, err := knowledge.ProjectWiki(in)
+	if err != nil {
+		return nil, err
+	}
+	out := &knowledgev1.ExportWikiResponse{
+		Source: &knowledgev1.ProjectionSource{
+			BaseId: wiki.BaseID, Commit: wiki.Commit, StalePages: int32(wiki.Stale),
+			TakenAt: timestampOrNil(time.Now().UTC()),
+		},
+		Skipped: append(append([]string{}, wiki.Skipped...), unreadable...),
+		Marker:  wiki.Marker,
+	}
+	for _, f := range wiki.Files {
+		out.Files = append(out.Files, &knowledgev1.ProjectedFile{
+			Path: f.Path, Content: f.Content, Origin: f.Origin,
+			SourcePath: f.SourcePath, ContentId: f.ContentID, Digest: f.Digest,
+		})
+	}
+	if req.Msg.GetIncludeIndex() {
+		out.Index = wiki.Index
+	}
+	if perr != nil {
+		out.Skipped = append(out.Skipped, "the generated half: "+perr.Error())
+	}
+	return connect.NewResponse(out), nil
+}
+
+// rootPathOf resolves a root name to its absolute path, so a file the pre-filter skipped can be
+// read. An unknown root yields the name itself, which fails the read and lands in `skipped` —
+// where a path nobody can resolve belongs, rather than as a file with an empty body.
+func rootPathOf(rootName string, corpus *knowledge.Corpus) string {
+	for _, root := range corpus.Roots() {
+		if root.Name == rootName {
+			return root.Path
+		}
+	}
+	return rootName
+}
+
+// GetProjectionRevision reports whether the projection changed, without re-fetching it.
+//
+// Two probes and one digest. The authored half is a local directory, so mtime and size per file is
+// enough and nothing is read; the engine half is one tree call, which carries every node's staleness
+// so a page that has not been refreshed is visible without re-exporting anything.
+//
+// A failed probe is reported as `unavailable` and not as a value, because a value that differs from
+// the last one causes a re-fetch and a value that matches it does not — so a backend that is down
+// has to be distinguishable from a base whose content has not moved.
+func (s *contentService) GetProjectionRevision(ctx context.Context, req *connect.Request[knowledgev1.GetProjectionRevisionRequest]) (*connect.Response[knowledgev1.GetProjectionRevisionResponse], error) {
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
+	if err != nil {
+		return nil, err
+	}
+	corpus, err := s.p.bases.corpus(nil)
+	if err != nil {
+		return nil, err
+	}
+	source := knowledge.NewRevisionSource(corpus, s.p.client.PageTree)
+	rev, err := source.Revision(ctx, baseID, req.Msg.GetExpectedCommit())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&knowledgev1.GetProjectionRevisionResponse{
+		Value:        rev.Value,
+		Changed:      rev.Which,
+		Authored:     rev.Authored,
+		Derived:      rev.Derived,
+		Commit:       rev.Commit,
+		TakenAt:      timestampOrNil(rev.Taken),
+		StalePages:   int32(rev.StalePages),
+		CorpusFiles:  int32(rev.FileCount),
+		DerivedPages: int32(rev.PageCount),
+	}), nil
 }

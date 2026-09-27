@@ -649,7 +649,7 @@ func TestAnEmptyConfigurationUpdateIsRefusedRatherThanInterpreted(t *testing.T) 
 	p := newProvider(t, b, corpusFixture(t))
 
 	_, err := p.baseHandler().UpdateBaseConfig(context.Background(), connect.NewRequest(&knowledgev1.UpdateBaseConfigRequest{
-		Ref: &knowledgev1.BaseRef{Name: "docs"},
+		BaseId: "docs",
 	}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous between them",
@@ -663,7 +663,7 @@ func TestUpdateBaseRefusesToChangeTheCorpusRootsOverRPC(t *testing.T) {
 	p := newProvider(t, b, corpusFixture(t))
 
 	_, err := p.baseHandler().UpdateBase(context.Background(), connect.NewRequest(&knowledgev1.UpdateBaseRequest{
-		Ref:         &knowledgev1.BaseRef{Name: "docs"},
+		BaseId:      "docs",
 		CorpusRoots: []*knowledgev1.CorpusRootSpec{{Name: "other", Path: "/elsewhere"}},
 	}))
 	require.Error(t, err)
@@ -681,7 +681,7 @@ func TestIngestionSeriesRefusesAnUnrecognisedGranularity(t *testing.T) {
 	p := newProvider(t, b, corpusFixture(t))
 
 	_, err := p.baseHandler().GetBaseIngestionSeries(context.Background(), connect.NewRequest(&knowledgev1.GetBaseIngestionSeriesRequest{
-		Ref: &knowledgev1.BaseRef{Name: "docs"}, Granularity: "fortnight", Buckets: 5,
+		BaseId: "docs", Granularity: "fortnight", Buckets: 5,
 	}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not one of hour, day, week or month",
@@ -695,7 +695,7 @@ func TestIngestionSeriesRefusesAnUnboundedRequest(t *testing.T) {
 	p := newProvider(t, b, corpusFixture(t))
 
 	_, err := p.baseHandler().GetBaseIngestionSeries(context.Background(), connect.NewRequest(&knowledgev1.GetBaseIngestionSeriesRequest{
-		Ref: &knowledgev1.BaseRef{Name: "docs"}, Granularity: "day",
+		BaseId: "docs", Granularity: "day",
 	}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rather than defaulted")

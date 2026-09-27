@@ -47,7 +47,7 @@ func (s *baseService) ListBases(ctx context.Context, _ *connect.Request[knowledg
 
 // GetBase returns one base, addressed by identifier or by alias.
 func (s *baseService) GetBase(ctx context.Context, req *connect.Request[knowledgev1.GetBaseRequest]) (*connect.Response[knowledgev1.GetBaseResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (s *baseService) CreateBase(ctx context.Context, req *connect.Request[knowl
 
 // UpdateBase changes a base's name or description.
 func (s *baseService) UpdateBase(ctx context.Context, req *connect.Request[knowledgev1.UpdateBaseRequest]) (*connect.Response[knowledgev1.UpdateBaseResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (s *baseService) UpdateBase(ctx context.Context, req *connect.Request[knowl
 
 // DeleteBase deletes a base and reports what it destroyed.
 func (s *baseService) DeleteBase(ctx context.Context, req *connect.Request[knowledgev1.DeleteBaseRequest]) (*connect.Response[knowledgev1.DeleteBaseResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (s *baseService) DeleteBase(ctx context.Context, req *connect.Request[knowl
 
 // GetBaseConfig reads a base's configuration.
 func (s *baseService) GetBaseConfig(ctx context.Context, req *connect.Request[knowledgev1.GetBaseConfigRequest]) (*connect.Response[knowledgev1.GetBaseConfigResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (s *baseService) GetBaseConfig(ctx context.Context, req *connect.Request[kn
 // an update is how a re-tag silently clears a field, and a caller that cannot tell "I did not
 // mention it" from "I meant to empty it" will not attempt a partial update at all.
 func (s *baseService) UpdateBaseConfig(ctx context.Context, req *connect.Request[knowledgev1.UpdateBaseConfigRequest]) (*connect.Response[knowledgev1.UpdateBaseConfigResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (s *baseService) UpdateBaseConfig(ctx context.Context, req *connect.Request
 // overwriting a field it did not know about has silently changed behaviour. A reset asks the server
 // what it wants.
 func (s *baseService) ResetBaseConfig(ctx context.Context, req *connect.Request[knowledgev1.ResetBaseConfigRequest]) (*connect.Response[knowledgev1.ResetBaseConfigResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (s *baseService) ResetBaseConfig(ctx context.Context, req *connect.Request[
 
 // GetBaseStats reports a base's size and composition.
 func (s *baseService) GetBaseStats(ctx context.Context, req *connect.Request[knowledgev1.GetBaseStatsRequest]) (*connect.Response[knowledgev1.GetBaseStatsResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +304,7 @@ func (s *baseService) GetBaseStats(ctx context.Context, req *connect.Request[kno
 // GetBaseIngestionSeries reports how a base has grown.
 func (s *baseService) GetBaseIngestionSeries(ctx context.Context, req *connect.Request[knowledgev1.GetBaseIngestionSeriesRequest]) (*connect.Response[knowledgev1.GetBaseIngestionSeriesResponse], error) {
 	msg := req.Msg
-	if _, err := s.p.resolveBase(ctx, msg.GetRef().GetName()); err != nil {
+	if _, err := s.p.resolveBase(ctx, msg.GetBaseId()); err != nil {
 		return nil, err
 	}
 	if msg.GetBuckets() <= 0 {
@@ -314,7 +314,7 @@ func (s *baseService) GetBaseIngestionSeries(ctx context.Context, req *connect.R
 				"deserve different answers, and the caller knows which it wants",
 		}
 	}
-	series, err := s.p.client.IngestionSeries(ctx, msg.GetRef().GetName(), msg.GetGranularity(), int(msg.GetBuckets()))
+	series, err := s.p.client.IngestionSeries(ctx, msg.GetBaseId(), msg.GetGranularity(), int(msg.GetBuckets()))
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,7 @@ func (s *baseService) GetBaseIngestionSeries(ctx context.Context, req *connect.R
 
 // ListBaseAliases returns a base's friendly names.
 func (s *baseService) ListBaseAliases(ctx context.Context, req *connect.Request[knowledgev1.ListBaseAliasesRequest]) (*connect.Response[knowledgev1.ListBaseAliasesResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +346,7 @@ func (s *baseService) ListBaseAliases(ctx context.Context, req *connect.Request[
 
 // AddBaseAlias gives a base a friendly name.
 func (s *baseService) AddBaseAlias(ctx context.Context, req *connect.Request[knowledgev1.AddBaseAliasRequest]) (*connect.Response[knowledgev1.AddBaseAliasResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +370,7 @@ func (s *baseService) AddBaseAlias(ctx context.Context, req *connect.Request[kno
 
 // SetPrimaryBaseAlias marks an alias as the one to display.
 func (s *baseService) SetPrimaryBaseAlias(ctx context.Context, req *connect.Request[knowledgev1.SetPrimaryBaseAliasRequest]) (*connect.Response[knowledgev1.SetPrimaryBaseAliasResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func (s *baseService) SetPrimaryBaseAlias(ctx context.Context, req *connect.Requ
 
 // RemoveBaseAlias removes a friendly name.
 func (s *baseService) RemoveBaseAlias(ctx context.Context, req *connect.Request[knowledgev1.RemoveBaseAliasRequest]) (*connect.Response[knowledgev1.RemoveBaseAliasResponse], error) {
-	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetRef().GetName())
+	baseID, err := s.p.resolveBaseForRead(ctx, req.Msg.GetBaseId())
 	if err != nil {
 		return nil, err
 	}

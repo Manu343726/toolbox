@@ -1753,6 +1753,16 @@ The two names invert what the paths suggest. This is called out in `CancelOperat
 because the alternative reading — that a cancel is a request the backend may not honour — is what
 the naming invites, and the operation is a hard stop while the record survives.
 
+**A tag group discriminates on its JSON key, and there is no wrapper.** The four alternatives of
+the `oneof` reach the wire as bare objects: a leaf is `{"tags": [...]}`, an `and` is
+`{"and": [...]}`, an `or` is `{"or": [...]}`, a `not` is `{"not": {...}}`. There is no `type`
+field and no `leaf` wrapper, because the generator's oneof handling is symmetric — it marshals
+and unmarshals the same bare shape. Two consequences worth stating: the *outbound* direction the
+adapter writes is therefore correct as written and needed no change, and the *inbound* direction
+fails with `data failed to match schemas in anyOf(...)` on a wrapped form, which is a decode error
+naming the type rather than an empty trigger. Also: **`not` takes a leaf and not an arbitrary
+group**, so the algebra is shallower than a recursive tree suggests.
+
 **Three reads declare an empty response schema**, which is why the generated client returns
 `interface{}` for them: a single fact (`GetMemory`), a fact's history (`GetObservationHistory`) and
 a model's refresh history (`GetMentalModelHistory`). A generator that invented a type for these
@@ -2074,6 +2084,42 @@ contract regenerates the descriptor, and the generated files are gitignored**, s
 without FUSE still builds the subsystem, still serves all thirteen services including
 `MountService`, and `EnableMount` returns `Unimplemented` naming the tag. That is M-6, and it
 is why the mount is an RPC without putting FUSE in every build (§5.9).
+
+**Two methods were in the contract, registered, classified — and not implemented.** `ExportWiki`
+and `GetProjectionRevision` returned `unimplemented`, because an embedded
+`Unimplemented...Handler` is a real type that satisfies the interface. No unit test noticed: the
+handler tests call the handlers they are testing, and a handler that was never written has no
+handler test. Both are now implemented — `ExportWiki` composes `ProjectWiki` over the walked
+corpus and the backend's own page bundle rather than rendering a second copy, and
+`GetProjectionRevision` is `RevisionSource` over the same two probes the mount uses.
+
+**Three more, found the same way.**
+
+- **`QueryService.PreviewPrompts` never sent the body the endpoint requires.** The endpoint takes
+  the operation whose prompts to render, one of `retain`, `consolidation` or `reflect`, and the
+  adapter sent none of it — so the call failed against any real backend. It now sends the
+  operation, defaults it to `retain`, and **refuses an operation outside the three**: the default
+  is `retain` and a caller shown the extractor's prompts when they meant the reasoner has been
+  told something false about the system. `PreviewPromptsRequest` gained the two fields it needs
+  and documents why there is deliberately nothing else to set.
+- **`KnowledgeBaseService` addressed a base with a `BaseRef` message while the other twelve
+  services used `base_id`.** Two shapes for one thing, and the two said different things —
+  `BaseRef.name` was "identifier or alias" and `base_id` was "the base to read from", which are
+  the same because `resolveBaseForRead` takes either. `BaseRef` is gone.
+- **The MCP gateway ran a binary from the day before.** `scripts/toolbox-mcp.sh` rebuilt only
+  when the binary was *missing*, so a gateway stayed up answering for a tree that no longer
+  existed, and every call succeeded while describing a subsystem that was not there. It now
+  compares the binary against the hand-written sources and rebuilds when the source is newer, and
+  `TOOLBOX_MCP_NO_BUILD=1` refuses rather than serving a build that is out of date.
+
+**The test that found all of it**, and what it is for: `scripts/mcp_knowledge_test.py` and
+`scripts/mcp_knowledge_sweep.py`. The sweep calls every tool the policy exposes and reports which
+answer, which refuse, and which are `unimplemented`; the test asserts the parts that a Go test
+cannot see — that the exposure footprint is exactly the read-only set, that a missing backend
+arrives classified rather than as `internal`, and that a write through `call_rpc` is refused by
+naming the method and the policy. `scripts/hindsight_stub.py` is the backend it runs against,
+serving the required-field shapes the generated client insists on, so a change to those
+requirements shows up as a decode error naming a field rather than as a silently empty response.
 
 **One change outside the knowledge tree, and it was a real bug.** The host assumed every
 factory returns a server. A factory that reports "nothing to start" — a contributor, or a
