@@ -2100,6 +2100,22 @@ is why the mount is an RPC without putting FUSE in every build (§5.9).
 matching each RPC against the test files, not by reading. "Every method somebody thought to test
 was tested" was true and was not what the previous claim meant.
 
+**The reconcile had never been executed. Running it found that it could not be.** `PlanReconcile`
+resolves the commit when the caller omits it — `commitOf` falls through to `git rev-parse HEAD`.
+`ApplyReconcile` did not: it passed the request's `commit` field, empty, straight into the
+recomputation it compares the confirmation against. So the plan a caller read was fingerprinted over
+the resolved commit and the plan the apply recomputed was fingerprinted over none, the two digests
+could never agree, and **every apply was refused** with *"the corpus has changed since the plan was
+computed"* — a message that reads as the reconciler being unreliable rather than as the two halves
+disagreeing about which commit they are talking about.
+
+It survived every Go test because every one of them passed a `commit` explicitly. The only thing
+that could find it was a harness that plans, reads the plan and confirms the digest it was given,
+which is what a caller does and what no unit test does.
+`scripts/mcp_knowledge_reconcile.py` does exactly that, and now also pins that a commit which
+genuinely moved between the plan and the apply is *still* refused — the fix must not have weakened
+the check into "always applies".
+
 **`pkg/knowledge` was at 73.7% and `projectionfs.go` — the entire read path — was at zero.** The
 design puts the projection logic in the root package over a plain `io/fs` for exactly one reason:
 so that no test needs a mount. That reasoning had not been carried through, and the consequence

@@ -142,7 +142,22 @@ python3 scripts/mcp_knowledge_sweep.py     # per-tool reachability
 python3 scripts/mcp_knowledge_test.py      # the assertions
 python3 scripts/mcp_knowledge_dump.py content__list_content   # one full response, untruncated
 python3 scripts/mcp_knowledge_mount.py     # the mount, and the failure path
+python3 scripts/mcp_knowledge_reconcile.py # a reconcile, with a policy that grants it
 ```
+
+`mcp_knowledge_reconcile.py` is the only one that needs a policy that permits writes, and it writes
+a policy naming **two methods by name** rather than a whole service. That is deliberate: granting
+`CorpusService/*` would also grant `RebuildCorpus`, and the harness's closing check — that every
+other write is still absent from the tool surface — would then be asserting nothing. Exposure cannot
+override a policy, so the grant has to be in the document, and a grant narrow enough to be a claim
+is a grant worth making.
+
+It makes the corpus a git checkout on purpose. The commit is what the reconcile records, so it is
+what makes *"the index matches the merge"* checkable; without a checkout the field is legitimately
+empty, by design, and the harness would be asserting nothing. The stub's routing is keyed by method
+as well as suffix for the same reason the Go stub's is — `/memories` and `POST /memories` share a
+path and only the method tells them apart, and answering a retain with the *list* body is a decoding
+error that reads exactly like a reconciler bug.
 
 The projection read path is tested over a plain `io/fs` in `pkg/knowledge/projectionfs_test.go`
 and needs nothing at all — which is the whole reason that logic lives in a root package rather than

@@ -114,6 +114,12 @@ is left is what the specification itself records as open.
       conversion, which was the one place a second backend would have found
       duplication, now goes through the domain.
 - [ ] Decide the §15 open questions this implementation did not settle.
+- [ ] The 29 writes that a *default* policy denies are now covered by Go tests and by a granted
+      policy for the reconciler. The rest — page and mental-model CRUD, directive CRUD, import and
+      export, operation retry and cancel — are tested at the handler and through the stub, but no
+      harness has driven them through the gateway with a grant. The reconciler is the one that
+      mattered enough to build, because it is the longest path and the one a deployment runs
+      unattended.
 - [ ] The subsystem package is at 61%. Most of the remainder is the projection, the registry, the
       state store and the git plumbing, all of which the subsystem tests reach only indirectly.
       The domain underneath is at 90.9% with no function untested, so this is about which

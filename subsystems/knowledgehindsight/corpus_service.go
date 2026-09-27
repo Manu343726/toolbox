@@ -152,9 +152,25 @@ func (s *corpusService) ApplyReconcile(ctx context.Context, req *connect.Request
 	if err != nil {
 		return nil, err
 	}
+	// The commit is resolved the way `PlanReconcile` resolves it, and it has to be: the apply
+	// recomputes the plan and compares digests, so the two plans are only comparable if they were
+	// computed over the same commit.
+	//
+	// Passing the request's `commit` straight through — which is what this did — made the
+	// headline operation unusable for any caller who relied on the default. `PlanReconcile`
+	// resolves the commit when the caller omits it, so a caller who planned, read the plan and
+	// confirmed the digest it was given got a recomputed plan over a *different* commit, and every
+	// apply was refused with "the corpus has changed since the plan was computed". Which reads as
+	// the reconciler being unreliable rather than as the two halves disagreeing about which commit
+	// they are talking about, and it only shows up when a caller omits the field — every Go test
+	// passed one.
+	commit, err := s.p.commitOf(ctx, msg.GetCommit())
+	if err != nil {
+		return nil, err
+	}
 	recomputed, err := knowledge.NewPlanner(state.corpus).Plan(ctx, state.record, knowledge.PlanOptions{
 		BaseID:    baseID,
-		Commit:    msg.GetCommit(),
+		Commit:    commit,
 		Owner:     owner,
 		Namespace: state.identity.Namespace,
 		Prune:     msg.GetPrune(),
@@ -173,7 +189,7 @@ func (s *corpusService) ApplyReconcile(ctx context.Context, req *connect.Request
 
 	opts := knowledge.ApplyOptions{
 		BaseID:      baseID,
-		Commit:      msg.GetCommit(),
+		Commit:      commit,
 		Owner:       owner,
 		Namespace:   state.identity.Namespace,
 		Identity:    state.identity,

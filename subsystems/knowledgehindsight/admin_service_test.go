@@ -27,11 +27,22 @@ import (
 
 func newAdminProvider(t *testing.T, responses map[string]string) (*Provider, *backend) {
 	t.Helper()
+	return newAdminProviderAt(t, responses, corpusFixture(t))
+}
+
+// newAdminProviderAt is `newAdminProvider` over a corpus the caller made.
+//
+// Separate because a test about *which commit* a reconcile used has to hand the provider the very
+// directory it made the checkout in. Building the provider over a different corpus than the one
+// under test does not fail — it reconciles that other corpus, and the assertion about the commit
+// then fails for a reason that has nothing to do with the commit.
+func newAdminProviderAt(t *testing.T, responses map[string]string, dir string) (*Provider, *backend) {
+	t.Helper()
 	b := newBackend(t)
 	for suffix, body := range responses {
 		b.responses[suffix] = body
 	}
-	return newProvider(t, b, corpusFixture(t)), b
+	return newProvider(t, b, dir), b
 }
 
 // --- MemoryService.

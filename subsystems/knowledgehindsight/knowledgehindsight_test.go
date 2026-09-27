@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -186,6 +187,70 @@ func newProvider(t *testing.T, b *backend, dir string) *Provider {
 	})
 	require.NoError(t, err)
 	return p
+}
+
+// corpusFixtureAt writes the same corpus into a directory the caller chose.
+//
+// Separate from `corpusFixture` because a test about *which commit* a reconcile used has to own
+// the directory it made the checkout in — a `t.TempDir()` behind a `git init` in a helper would
+// work, but then the fixture and the history would live in different places and the test would be
+// asserting a relationship between two directories it had not checked.
+func corpusFixtureAt(t *testing.T, dir string) {
+	t.Helper()
+	files := map[string]string{
+		"index.md":                 "---\ntitle: Index\n---\n\n# Index\n\nStart here.\n",
+		"runbooks/restore.md":      "---\nid: wiki:restore\nkind: procedure\n---\n\n# Restore\n\nDrop it.\n",
+		"architecture/overview.md": "---\nkind: architecture\n---\n\n# Overview\n\nOne base.\n",
+	}
+	for name, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
+		require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
+	}
+}
+
+// The git helpers. Identity is fixed rather than read from the machine, because a test that
+// depends on whether this runner has a global user.name is a test that fails on somebody else's
+// machine and nowhere else.
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+	env := gitEnv(t, dir)
+	cmd := exec.Command("git", "init", "-q", dir)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git init: %s", out)
+	gitCommit(t, dir, "the corpus")
+}
+
+func gitCommit(t *testing.T, dir, message string) {
+	t.Helper()
+	env := gitEnv(t, dir)
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", message}} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+}
+
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	cmd.Env = gitEnv(t, dir)
+	out, err := cmd.Output()
+	require.NoError(t, err, "the corpus is not a checkout: %v", err)
+	return strings.TrimSpace(string(out))
+}
+
+func gitEnv(t *testing.T, dir string) []string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed, so a test about which commit a reconcile used cannot run here")
+	}
+	return append(os.Environ(),
+		"GIT_AUTHOR_NAME=toolbox", "GIT_AUTHOR_EMAIL=toolbox@example.invalid",
+		"GIT_COMMITTER_NAME=toolbox", "GIT_COMMITTER_EMAIL=toolbox@example.invalid",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 }
 
 // --- base resolution.

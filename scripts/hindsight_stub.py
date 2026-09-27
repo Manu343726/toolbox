@@ -169,6 +169,13 @@ ROUTES = [
     ("/directives", DIRECTIVES),
     ("/entities", ENTITY_LIST),
     ("/memories", FACTS),
+    # A retain is a POST to the same path as the listing, and its response is a different shape.
+    # Keying by suffix alone gave a retain the *list* body, which the generated client rejects for
+    # a missing `success` — a failure about the stub that reads exactly like a failure about the
+    # reconcile, and is why the apply had never actually been run.
+    ("POST /memories", {"success": True, "bank_id": "docs", "items_count": 3, "async": True,
+                        "operation_id": "op-retain-1"}),
+    ("DELETE /memories", {"success": True, "deleted_count": 0}),
     ("/operations", OPERATIONS),
     ("/observations/scopes", SCOPES),
     ("/aliases", ALIASES),
@@ -198,16 +205,38 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def handle_request(self, method):
-        self._body()
+        body = self._body()
         path = self.path.split("?")[0]
-        best, body = None, {}
-        for suffix, payload in ROUTES:
-            if path.endswith(suffix) and (best is None or len(suffix) > len(best)):
-                best, body = suffix, payload
+
+        # Every write is recorded, because a harness that cannot see what was sent cannot assert
+        # that the *right* thing was sent — only that something was.
+        if method in ("POST", "PATCH", "PUT", "DELETE"):
+            WRITES.append({"method": method, "path": path,
+                           "body": body.decode("utf-8", "replace")})
+
+        best, best_body, best_qualified = None, {}, False
+        for entry in ROUTES:
+            key, payload = entry
+            route_method, suffix = "", key
+            qualified = False
+            if " " in key:
+                route_method, suffix = key.split(" ", 1)
+                qualified = True
+            if route_method and route_method != method:
+                continue
+            if not path.endswith(suffix):
+                continue
+            # A method-qualified key beats an unqualified one of the same length. Without that
+            # rule, which of `/memories` and `POST /memories` answers is decided by list order —
+            # and the wrong answer is a shape the client rejects, which reads as a code defect.
+            better = (best is None or len(suffix) > len(best)
+                      or (qualified and not best_qualified and len(suffix) == len(best)))
+            if better:
+                best, best_body, best_qualified = suffix, payload, qualified
         if best is None:
-            self._respond(404, {"detail": f"the probe stub has no route for {path}"})
+            self._respond(404, {"detail": f"the probe stub has no route for {method} {path}"})
             return
-        self._respond(200, body)
+        self._respond(200, best_body)
 
     def do_GET(self):
         self.handle_request("GET")
@@ -220,6 +249,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         self.handle_request("DELETE")
+
+
+# WRITES records every mutating request the code under test sent, in order.
+#
+# A harness that cannot see what was sent can only assert that the code returned a number, which is
+# a much weaker claim than asserting that the right documents were sent with the right mode.
+WRITES = []
+
+
+def writes_to(suffix, method=None):
+    """The recorded writes whose path ends with a suffix, optionally of one method."""
+    return [w for w in WRITES
+            if w["path"].endswith(suffix) and (method is None or w["method"] == method)]
+
+
+def reset_writes():
+    del WRITES[:]
 
 
 class StubBackend:
