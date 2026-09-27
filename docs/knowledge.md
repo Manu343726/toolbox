@@ -1328,12 +1328,12 @@ real use.
 
 ## 17. Sources
 
-- **The integration design this implements**, held outside the repository at
-  `~/Downloads/hindsight-human-wiki-integration.md`. It settled the corpus
-  layering, the source-of-truth invariant, the frontmatter contract, the
-  commit-correspondence property, the two ingestion modes, and the retrieval
-  authority directives. Where this document differs it is because the backend's
-  machine-readable description was consulted and the design document's open
+- **The integration design this implements**:
+  [`investigations/hindsight-human-wiki-integration.md`](investigations/hindsight-human-wiki-integration.md).
+  It settled the corpus layering, the source-of-truth invariant, the frontmatter
+  contract, the commit-correspondence property, the two ingestion modes, and the
+  retrieval authority directives. Where this document differs it is because the
+  backend's machine-readable description was consulted and the design's open
   question about replacement semantics has since been answered — see §5.4 and
   D-8.
 - The investigation that preceded both:
@@ -1350,7 +1350,7 @@ real use.
 
 The integration design says, correctly, to verify the backend's update semantics
 before building a production sync and not to assume old facts disappear. Checked
-against the description for 0.10.1:
+against the description for 0.10.1, which settles it:
 
 > If a memory item has a `document_id` that already exists, the old document and
 > its memory units will be deleted before creating new ones (upsert behavior).

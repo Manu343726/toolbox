@@ -6,6 +6,10 @@
 > the reasoning about the `fs mount` direction are the evidence behind it, and
 > because §5.2's check of *why* a page cannot hold authored text is the reason
 > the specification's ingest is a reconcile rather than a write.
+>
+> See also [`hindsight-human-wiki-integration.md`](hindsight-human-wiki-integration.md),
+> the corpus design written after this one, and
+> [`README.md`](README.md) for how the three documents relate.
 
 **Status: investigation. Nothing here is a decision.** No ADR is proposed, no
 code exists, and no contract has been written. This document records what was
