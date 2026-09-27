@@ -101,9 +101,32 @@ outside it.
 
 ### Knowledge base
 
-Deliberately not tracked here. The subsystem is specified in full in
-[`knowledge.md`](knowledge.md), and that specification is the plan; a checklist
-that paraphrases it would be a second thing to keep in step with the first.
+Deliberately not tracked as a checklist. The subsystem is specified in full in
+[`knowledge.md`](knowledge.md) and that specification is the plan; a checklist
+that paraphrases it would be a second thing to keep in step with the first. It is
+implemented — the contract, the provider, and the corpus engine behind it — so what
+is left is what the specification itself records as open.
+
+- [ ] Add a second backend as a second mount of `pkg/knowledge`. The rule is
+      load-bearing here: the subsystem holds no logic, so a second provider is a
+      second adapter rather than a second subsystem. Nothing in the design prevents
+      it and nothing in the tree yet demonstrates it.
+- [ ] Add the compound trigger the backend supports. A trigger filters by a
+      recursive tag-group tree; `PageTrigger` carries a flat list and a match mode,
+      which maps exactly onto one leaf. A `oneof` over the same four cases
+      `TagGroup` already uses for retrieval would close the gap.
+- [ ] Move the `Content` conversion out of the provider and into
+      `pkg/knowledge`. The provider builds `knowledgev1.Content` straight from
+      `knowledge.File`, `knowledge.OwnershipEntry` and the adapter's `Document`, so
+      `pkg/knowledge.Content` — with its `Valid` invariant, its `Mutability`
+      classification and its three-way `Location` — is not on the path. Framework
+      rule 4 says a provider converts messages *from* a root package. Nothing is
+      broken; it is one adapter wide, and a second backend is what would expose it.
+- [ ] Decide the §15 open questions this implementation did not settle.
+
+Not to be done, and recorded so it is not proposed again: a second, in-memory
+reference provider. The contract is the deliverable and one honest provider beats
+two, one of which is a fiction.
 
 ### Tool execution
 

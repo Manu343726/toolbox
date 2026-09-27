@@ -16,6 +16,7 @@ implicitly while implementing features.
 - [ADR-0011: Deployment configuration](0011-deployment-configuration.md)
 - [ADR-0012: Logging](0012-logging.md)
 - [ADR-0013: A composition is extensible by the subsystems in it](0013-composition-contributions.md)
+- [ADR-0014: A knowledge base is a corpus, an engine, and a mount](0014-knowledge-corpus-and-engine.md)
 
 An ADR is *proposed* while its outstanding decisions are open, and *accepted* once
 they are answered; acceptance is a claim about the decision, and implementation

@@ -356,11 +356,16 @@ func (a *Applier) ingestAll(
 		chunk := writes[start:end]
 
 		p := prepared{entries: chunk}
-		var keyMaterial strings.Builder
-		fmt.Fprintf(&keyMaterial, "%s\x00%s\x00", opts.BaseID, opts.Commit)
+		// The key is computed *after* the batch is built, from the entries that survived.
+		//
+		// Deriving it from the chunk as it went in looked equivalent and was not: an entry
+		// whose file could not be read is dropped from the batch, and a key that still
+		// covered it described work that was never sent. So a later run that read the file
+		// successfully would produce a different key for a payload the backend had never
+		// seen, and — the other direction — two runs whose batches differed only in an entry
+		// that failed to read would claim the same key for different payloads, and the
+		// backend would skip the difference.
 		for _, e := range chunk {
-			fmt.Fprintf(&keyMaterial, "%s\x00%s\x00", e.ID, e.Digest)
-
 			if e.Binary {
 				raw, err := a.readBinary(e)
 				if err != nil {
@@ -430,7 +435,7 @@ func (a *Applier) ingestAll(
 		if len(p.entries) == 0 {
 			continue
 		}
-		p.key = idempotencyKey(keyMaterial.String())
+		p.key = batchKey(opts.BaseID, opts.Commit, p.entries)
 		batches = append(batches, p)
 	}
 
@@ -641,16 +646,36 @@ func idempotencyKey(material string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// IdempotencyKeyForBatch exposes the key derivation, so that a caller can
-// compute the key a batch would use and assert that re-applying a plan is
-// idempotent without a backend.
-func IdempotencyKeyForBatch(baseID, commit string, entries []PlanEntry) string {
+// batchKey is the idempotency key for one batch: a function of the base, the commit and the
+// *set* of entries actually sent.
+//
+// Sorted, because a set has no order and a key that depended on one would make a reconcile
+// whose plan was listed differently re-ingest everything it had already done — which is the one
+// thing the key exists to prevent. And computed from `p.entries` rather than from the chunk it
+// started as, because an entry dropped for being unreadable was not sent and a key covering it
+// would name a batch the backend never received.
+func batchKey(baseID, commit string, entries []PlanEntry) string {
+	lines := make([]string, 0, len(entries))
+	for _, e := range entries {
+		lines = append(lines, e.ID+"\x00"+e.Digest)
+	}
+	sort.Strings(lines)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\x00%s\x00", baseID, commit)
-	for _, e := range entries {
-		fmt.Fprintf(&b, "%s\x00%s\x00", e.ID, e.Digest)
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteByte(0)
 	}
 	return idempotencyKey(b.String())
+}
+
+// IdempotencyKeyForBatch exposes the key derivation, so that a caller can compute the key a
+// batch would use and assert that re-applying a plan is idempotent without a backend.
+//
+// It is the same derivation `Apply` uses, so a test asserting against it asserts against the
+// real thing rather than against a parallel implementation that could drift.
+func IdempotencyKeyForBatch(baseID, commit string, entries []PlanEntry) string {
+	return batchKey(baseID, commit, entries)
 }
 
 func report(fn func(ApplyProgress), p ApplyProgress) {

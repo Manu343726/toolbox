@@ -1,6 +1,6 @@
 # Subsystem catalog
 
-The repository contains nineteen subsystem modules. The
+The repository contains twenty subsystem modules. The
 implementations are reference implementations intended to validate contracts and
 composition; they are not yet production storage or AI execution engines.
 
@@ -57,12 +57,23 @@ it is a provider, and a deployment names it from its `logging:` section.
 | `apigrpc`      | `toolbox.api.v1.ApiParserService`, `ApiInvokerService`   | Parses protobuf contracts from a FileDescriptorSet or from live reflection, and invokes methods over Connect, gRPC, or gRPC-Web |
 | `apimcp`       | `toolbox.api.v1.ApiParserService`, `ApiAdapterService`, `ApiInvokerService` | Reads a live MCP server's tool list, renders a description as an MCP tool manifest, and calls a tool |
 | `logfile`      | none — it has no operations to address                   | A rotating-file `slog.Handler` through lumberjack, and the `loghandler` declaration that makes it discoverable in the catalog |
+| `knowledgehindsight` | `toolbox.knowledge.v1.ContentService`, `QueryService`, `CorpusService`, `MountService`, `KnowledgeBaseService`, `MemoryService`, `PageService`, `MentalModelService`, `DirectiveService`, `ObservationService`, `EntityService`, `TemplateService`, `OperationService` | Mounts `pkg/knowledge` and the `pkg/knowledge/hindsight` adapter behind a thirteen-service contract: content reads, recall and reflection, a reconciled markdown corpus, and the whole backend surface over it. 79 RPCs. FUSE is behind a build tag, so a host without it still serves every method |
 
 `apitools` is a feature subsystem and can be adopted on its own; the providers work
 without it, and a deployment can run providers in other processes. The provider
 subsystems are optional in the same way: a single-process deployment calls
 `pkg/protocontract` and `pkg/openapi` directly, and a distributed one serves them
 over the contracts.
+
+`knowledgehindsight` is the largest of them and the clearest case for the rule: it holds
+no behaviour of its own. The content model, the frontmatter parser, the reconcile planner and
+the applier live in `pkg/knowledge`; the translation of the backend's 195 schemas and 99
+methods lives in `pkg/knowledge/hindsight`. What the subsystem does is convert the contract's
+messages to and from those, and a second backend would be a second mount of the same two
+packages rather than a second implementation. It is also the only provider that holds a
+resource for its own lifetime: a FUSE mount outlives the call that created it, so the provider
+supervises mounts in the background for as long as the server is up. See
+[`knowledge.md`](knowledge.md) and [ADR-0014](decisions/0014-knowledge-corpus-and-engine.md).
 
 ## Current RPC surface
 
@@ -124,6 +135,44 @@ over the contracts.
 - `GetDocumentation`
 - `ListDocumentation`
 
+### Knowledge
+
+Thirteen services, 79 RPCs. Grouped by the question they answer rather than alphabetically,
+because the grouping is what a caller chooses between.
+
+**What does it know** — `ContentService`: `ListContent`, `GetContent`, `GetContentBody`,
+`GetContentTree`, `GetProjectionRevision`, `Search`, `ExportWiki`, `WriteContent`,
+`DeleteContent`.
+
+**What does it think** — `QueryService`: `Recall`, `Reflect`, `Extract`, `GetPrompts`,
+`GetExtractionSettings`.
+
+**What was written** — `CorpusService`: `PlanReconcile`, `ApplyReconcile`, `GetCorpusStatus`,
+`ReadCorpusFile`, `RebuildCorpus`.
+
+**What it is made of** — `MemoryService`, `EntityService`: `GetMemory`, `CurateMemory`,
+`GetMemoryHistory`, `GetMemoryGraph`, `ListEntities`, `GetEntity`, `GetEntityGraph`.
+
+**What it maintains** — `PageService`, `MentalModelService`: `CreatePageFolder`, `CreatePage`,
+`UpdatePageNode`, `RefreshPage`, `PreviewPageRefresh`, `ExportPageBundle`, `DeletePage`,
+`ListMentalModels`, `CreateMentalModel`, `UpdateMentalModel`, `DeleteMentalModel`,
+`GetMentalModelHistory`, `ClearMentalModel`.
+
+**What governs it** — `DirectiveService`, `ObservationService`, `TemplateService`: `ListDirectives`,
+`CreateDirective`, `GetDirective`, `UpdateDirective`, `DeleteDirective`, `ListObservationScopes`,
+`PreviewConsolidation`, `TriggerConsolidation`, `RecoverConsolidation`, `ClearBaseObservations`,
+`GetTemplateSchema`, `ExportTemplate`, `ImportTemplate`, `ExportBase`, `ImportBase`, `CloneBase`.
+
+**What it is and how it is configured** — `KnowledgeBaseService`: `ListBases`, `GetBase`,
+`CreateBase`, `UpdateBase`, `DeleteBase`, `GetBaseConfig`, `UpdateBaseConfig`,
+`ResetBaseConfig`, `GetBaseStats`, `GetBaseIngestionSeries`, `ListBaseAliases`, `AddBaseAlias`,
+`SetPrimaryBaseAlias`, `RemoveBaseAlias`.
+
+**What is happening to it** — `OperationService`: `ListOperations`, `GetOperation`,
+`CancelOperation`, `RetryOperation`, `DeleteOperation`.
+
+**How you read it as files** — `MountService`: `GetMountStatus`, `EnableMount`, `DisableMount`.
+
 ## Foundation packages
 
 | Package | Responsibility |
@@ -136,6 +185,8 @@ over the contracts.
 | `pkg/mcp` | MCP servers generated from reflected services, with introspection and exposure control |
 | `pkg/cliapp` | Shared standalone command runner |
 | `pkg/host` | Explicit composition of subsystem factories |
+| `pkg/knowledge` | Knowledge content model, frontmatter, corpus walk, ownership record, reconcile planner and applier, and the whole-wiki projection over a plain `io/fs` |
+| `pkg/knowledge/hindsight` | Adapter over the backend's official Go client: 99 methods, 195 schemas, and one error classification |
 
 ## Dependency rules
 

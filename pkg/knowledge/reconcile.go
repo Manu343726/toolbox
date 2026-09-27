@@ -178,6 +178,19 @@ type PlanOptions struct {
 	// It is optional: a reconcile that was given none reports no drift, rather
 	// than reporting that there is none.
 	Derived []DerivedClaim
+	// FollowBinary includes attachments in the plan. It is off by default, and
+	// the default is a decision rather than an omission: a corpus of a thousand
+	// documents may hold a few thousand images, and none of them is prose. An
+	// attachment is ingested as a byte string beside the chunk it belongs to
+	// rather than extracted from, so including them all means paying for a large
+	// number of documents nobody referenced.
+	//
+	// It is here because the walk already classified every file either way —
+	// `File.Binary` is set whether or not the file is returned — so the only
+	// question is whether the plan carries it, and putting the question at the
+	// walk alone would have made every caller that wanted an attachment rewrite
+	// the corpus's own options.
+	FollowBinary bool
 }
 
 // DerivedClaim is one piece of derived knowledge, as far as drift detection is
@@ -210,7 +223,11 @@ func NewPlanner(c *Corpus) *Planner { return &Planner{corpus: c} }
 // record is an input here and an output of ApplyReconcile, which is what makes a
 // plan safe to compute over a directory that a person is actively editing.
 func (p *Planner) Plan(ctx context.Context, rec *OwnershipRecord, opts PlanOptions) (Plan, error) {
-	walk, err := p.corpus.Walk(ctx, WalkOptions{Prior: rec, TrustModTime: true})
+	walk, err := p.corpus.Walk(ctx, WalkOptions{
+		Prior:        rec,
+		TrustModTime: true,
+		FollowBinary: opts.FollowBinary,
+	})
 	if err != nil {
 		return Plan{}, err
 	}

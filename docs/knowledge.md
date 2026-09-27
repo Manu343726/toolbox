@@ -316,15 +316,16 @@ is reading. See §5.9.
 
 | # | Requirement |
 |---|---|
-| M-1 | **The whole-wiki projection can be mounted as a FUSE filesystem**, so `cat`, `rg`, an editor and an agent's file tools all work against it with no vocabulary of their own. (U) |
+| M-1 | **The whole-wiki projection can be mounted as a FUSE filesystem**, so `cat`, `rg`, an editor and an agent's file tools all work against it with no vocabulary of their own. The mount is an RPC — `EnableMount` — not a command, so an agent can perform it and choose the mountpoint. §5.9 records why the original text said otherwise and what was wrong with the reasoning. (U) |
 | M-2 | **The mount is strictly read-only.** Every write path returns `EROFS`. A writable mount would suggest the wiki is editable, which X-6 and W-15 both forbid, and an edit that vanishes on the next regeneration is worse than one that was refused. (W) |
 | M-3 | **A change invalidates the kernel's cache for what changed, not just the next poll.** Content changes call `NotifyContent`, removals call `NotifyDelete`, and a changed tree calls `NotifyEntry` on the affected names. See §5.9 for what this does and does not tell an editor. (H) |
 | M-4 | **Staleness is bounded even where notification is unavailable.** The mount sets short `AttrTimeout` and `EntryTimeout` values, so a kernel or filesystem without `FUSE_NOTIFY_INVAL_INODE` still converges, and the bound is a stated number rather than "eventually". (H) |
 | M-5 | **The change signal is a revision, not a diff.** One cheap call reports whether the projection changed and which half changed; the mount re-fetches the whole projection when it did. §5.9. (U) |
-| M-6 | **The mount is a client, and the FUSE dependency is in the binary and not in the provider.** A host with no FUSE, no `/dev/fuse`, or no `fusermount3` still builds the subsystem, still serves the contract, and still exports the same bundle. The mount failing is never the subsystem failing. (U) |
-| M-7 | **A mount that cannot start says why and exits non-zero**, naming the missing piece — `fusermount3` absent, `/dev/fuse` absent, the path already mounted, the policy refusing — and never leaves a stale mountpoint behind. (H) |
+| M-6 | **The mount is a client, and the FUSE dependency is in the binary and not in the provider.** A host with no FUSE, no `/dev/fuse`, or no `fusermount3` still builds the subsystem, still serves the contract — all thirteen services, `MountService` included — and still exports the same bundle. The mount failing is never the subsystem failing. Concretely: the FUSE code is behind a `fuse` build tag, `GetMountStatus` reports `fuse_available` and names the tag, and the mutating methods return `Unimplemented` naming it. (U) |
+| M-7 | **A mount that cannot start says why, and says which piece is missing** — `fusermount3` absent, `/dev/fuse` absent, the path already mounted, a path that is not a directory, the policy refusing — and never leaves a stale mountpoint behind. It is a refusal rather than an exit code because there is no process to exit: the mount is a resource the subsystem holds, and a caller learns about the failure from the call that asked for it. (H) |
 | M-8 | **The mount serves exactly what `ExportWiki` serves**, filtered by the same policy. There is no second read path with a different authorization, because a filesystem that shows more than the API does is a hole in the policy boundary. (U) |
-| M-9 | **The mount is optional and nothing depends on it.** `ExportWiki` is the feature; the mount is one way to consume it. A deployment that never mounts loses nothing. (U) |
+| M-9 | **The mount is optional and nothing depends on it.** `ExportWiki` is the feature; the mount is one way to consume it. A deployment that never mounts loses nothing, and a caller can read `GetMountStatus` and discover there is no mount without attempting one. (U) |
+| M-10 | **A mount is told where it is.** `EnableMount` and `GetMountStatus` both report the host the mountpoint is on, because the mountpoint is a path on the machine running the *subsystem* and a caller on another machine has nothing it can resolve. The alternative — reporting only a path — is a report a caller cannot check, which is the failure mode §5.9's namespace caveat is about. (U) |
 
 ### The memory half — ingestion
 
@@ -998,16 +999,46 @@ a thing you read, and for a person auditing what a system believes it is the
 difference between looking and reading. M-1 is a FUSE mount of the same
 projection.
 
-**The mount is a client, not an RPC, and that placement is the load-bearing
-decision.** A mount lives in the filesystem namespace of whoever runs it, so an
-RPC cannot create one that the caller can see — if the subsystem runs on another
-host, the mountpoint it created would be on the wrong machine. So the contract
-exposes the *data* (`ExportWiki`) and the *change signal* (`GetProjectionRevision`),
-and a command in the subsystem's own `cmd/` consumes them. The generated command
-path builds the RPC commands; `mount` is not an RPC, so it is hand-written, and
-it is the one hand-written command in this subsystem (M-6). The FUSE library
-goes in that command's package, never in the provider, so the provider's module
-graph stays free of it and a host without FUSE still builds and serves.
+**The mount is an RPC, and the reason it is not a command is worth recording
+because the original reasoning pointed the other way.** An earlier version of
+this document said the mount could not be an RPC: *"a mount lives in the
+filesystem namespace of whoever runs it, so an RPC cannot create one that the
+caller can see — if the subsystem runs on another host, the mountpoint it
+created would be on the wrong machine."*
+
+That is true and it is not a reason to refuse. The premise it rests on is that
+the caller and the subsystem are on different machines, and in the deployment
+this exists for they are not: the mount is for a person auditing what a system
+believes, on the machine where they work, against a deployment that is often
+local. And the premise is checkable rather than assumed — `MountStatus` reports
+the host, so a caller on another machine is *told* rather than silently given a
+mountpoint it cannot see. The earlier text turned a real property into a
+design constraint, and the cost of that was that the one operation needing a
+filesystem namespace was the one operation an agent could not perform.
+
+So the contract carries `MountService` — `GetMountStatus`, `EnableMount`,
+`DisableMount` — and the caller chooses the mountpoint. A command in the
+subsystem's `cmd/` is not needed for it, and a mount that outlives an RPC is
+supervised by the provider for the life of the server, which a command's
+lifetime could not have given it.
+
+**The namespace caveat, stated rather than left to be found.** The mountpoint is
+a path on the machine running the **subsystem**, not on the machine holding the
+`toolbox` binary. An agent whose transport is stdio is in the same namespace and
+sees it; one connected over HTTP is not, and on a different machine entirely
+there is nothing to see. `EnableMount` therefore states which host it mounted
+on, and `GetMountStatus` reports it on every read — so a caller asking "is it
+mounted?" always learns where, and never has to infer it from a path it cannot
+resolve.
+
+**FUSE stays out of the provider's module graph (M-6), behind a build tag.** The
+`fuse` tag is what makes both placements true at once: the RPC exists in the
+contract and is served by every build, and `EnableMount` on a build without the
+tag returns `Unimplemented` *naming the tag*, while `GetMountStatus` reports
+`fuse_available: false` and says so. A host without FUSE therefore still builds
+this subsystem, still serves all thirteen services, and still exports the same
+bundle — and a caller that tries to mount learns precisely what to rebuild
+rather than failing obscurely.
 
 **Change notification, precisely.** The honest version of this feature is that
 "notified" means two different things and only one of them is reliable:
@@ -1039,11 +1070,16 @@ change feed, and M-5 therefore reports a revision rather than a diff:
   matters at three thousand files.
 
 `GetProjectionRevision` returns that revision, which half moved, and the commit
-the corpus half reflects. The mount polls it; on a change it re-fetches
-`ExportWiki` and invalidates. Polling one small call is also why **no streaming
-RPC is added**: N-9 keeps this tree unary, and a watch stream would be the only
-streaming contract in the repository for a feature that a two-second poll serves
-(§15 records the rejection).
+the corpus half reflects. A caller polling it re-fetches `ExportWiki` and
+invalidates on a change; the mount, which lives inside the subsystem, computes the
+same revision through the same two probes and does not go out over the wire to ask
+its own host. One implementation, two callers: a projection that reported one
+revision over RPC and another in process would disagree exactly when it mattered.
+
+Polling one small call is also why **no streaming RPC is added**: N-9 keeps this
+tree unary, and a watch stream would be the only streaming contract in the
+repository for a feature that a two-second poll serves (§15 records the
+rejection).
 
 **It must not be a second read path.** M-8 is the requirement that keeps the
 policy boundary honest: the mount reads through the same calls, under the same
@@ -1054,8 +1090,9 @@ the mount inside the policy boundary is cheaper than auditing it afterwards.
 **What it costs to run.** `fusermount3` is setuid on most distributions, so an
 unprivileged user can mount; a container without `/dev/fuse` cannot, and neither
 can a host whose kernel lacks `FUSE_NOTIFY_INVAL_INODE` (Linux 7.13+) for the
-fast path. M-7 says a failed mount says which of these it was and exits
-non-zero, and M-6 says it never affects the subsystem. Per the repository's own
+fast path. M-7 says a failed mount says which of these it was — a refusal with a reason,
+not an exit code, because there is no process to exit — and M-6 says it never
+affects the subsystem. Per the repository's own
 testing rule, **no test may require a mount to work** — the mount's logic is
 tested over a plain `io/fs` filesystem with a fake revision source, and the FUSE
 wiring is exercised by hand.
@@ -1667,21 +1704,62 @@ argument supported it.
 The client is `github.com/vectorize-io/hindsight/hindsight-clients/go`, generated
 by openapi-generator from the same `openapi.json` this specification is written
 against — so it is not a second opinion of the API, it is the API. It is also
-close to free: its own `go.mod` requires Go 1.24.0 and two modules
-(`stretchr/testify`, `gopkg.in/yaml.v3`). It covers every operation this
-specification needs, and the ones §15 has not decided yet as well:
+close to free: its own `go.mod` declares **Go 1.18** and three modules
+(`stretchr/testify`, `gopkg.in/validator.v2`, and `go.yaml.in/yaml/v3` as an
+indirect). An earlier version of this document said 1.24.0 and named yaml.v3
+directly; both were read off the wrong file, and the pin is a commit rather than
+a tag so there is no version to check them against. It covers every operation this
+specification needs, and the ones §15 has not decided yet as well. Sixteen API
+services, 99 methods, and every one of them was reachable; the mapping is:
 
-| Need | Client method |
+| Need | Client service and method |
 |---|---|
-| Ingest | `RetainMemories`, `FileRetain` |
-| Read facts | `RecallMemories`, `ListMemories`, `GetMemory`, `UpdateMemory` |
-| Read the original text | `GetDocument`, `GetChunk`, `ListDocumentChunks`, `DownloadFile` |
-| Documents | `ListDocuments`, `DeleteDocument`, `ReprocessDocument`, `UpdateDocument` |
-| Pages | `GetKnowledgePage`, `CreateKnowledgePage`, `UpdateKnowledgeNode`, `DeleteKnowledgeNode`, `GetKnowledgeBaseTree`, `SearchKnowledgeBase`, `ExportKnowledgeBase` |
-| Page refresh, and P-13's report | `RefreshMentalModel`, `DryRunRefreshMentalModel`, `GetMentalModelHistory` |
-| Directives | `ListDirectives`, `CreateDirective`, `UpdateDirective`, `DeleteDirective` |
-| Re-derive | `TriggerConsolidation`, `ClearMemoryObservations`, `ClearObservations`, `RecoverConsolidation` |
-| Configuration | `CreateOrUpdateBank`, `GetBankConfig`, `UpdateBankConfig` |
+| Ingest | `Memory.RetainMemories`, `Files.FileRetain` |
+| Read facts | `Memory.RecallMemories`, `Memory.ListMemories`, `Memory.GetMemory`, `Memory.UpdateMemory` |
+| Correct a fact, and its history | `Memory.UpdateMemory`, `Memory.GetObservationHistory` |
+| Read the original text | `Documents.GetDocument`, `Documents.GetChunk`, `Documents.ListDocumentChunks` |
+| Documents | `Documents.ListDocuments`, `Documents.DeleteDocument`, `Documents.ReprocessDocument`, `Documents.UpdateDocument` |
+| Pages | `KnowledgeBase.GetKnowledgePage`, `CreateKnowledgePage`, `CreateKnowledgeFolder`, `UpdateKnowledgeNode`, `DeleteKnowledgeNode`, `GetKnowledgeBaseTree`, `SearchKnowledgeBase`, `ExportKnowledgeBase` |
+| Page refresh, and P-13's report | `MentalModels.RefreshMentalModel`, `DryRunRefreshMentalModel`, `GetMentalModelHistory` |
+| Directives | `Directives.ListDirectives`, `CreateDirective`, `UpdateDirective`, `DeleteDirective` |
+| Entities | `Entities.ListEntities`, `GetEntity`, `GetEntityGraph` |
+| Re-derive | `Banks.TriggerConsolidation`, `RecoverConsolidation`, `ClearObservations`; `Memory.PreviewConsolidationStrategies`, `ListObservationScopes`, `ClearMemoryObservations` |
+| Asynchronous work | `Operations.ListOperations`, `GetOperationStatus`, `CancelOperation`, `RetryOperation`, `DeleteOperation` |
+| Configuration | `Banks.GetBankConfig`, `UpdateBankConfig`, `ResetBankConfig`, `UpdateBankDisposition` |
+| Templates | `BankTemplates.ExportBankTemplate`, `ImportBankTemplate`, `GetBankTemplateSchema` |
+| Statistics | `Banks.GetAgentStats`, `GetMemoriesTimeseries`; `Monitoring`, `Audit`, `LLMTraces` |
+
+### 12.2 Four shapes the backend does not give, and what was done about them
+
+These are recorded because each one changed a contract method rather than being absorbed
+in the adapter, and a reader comparing this specification to the code needs to know which is
+which. All four were found by implementing against the client, not by reading the description.
+
+**A trigger filters by a tag-group tree, not a flat tag list.** `MentalModelTriggerInput` carries
+`tag_groups` — a recursive `leaf` / `and` / `or` / `not` — plus `tags_match`, and no `tags`. So
+"these two tags, or all three of those" is expressible on a trigger and is not expressible here.
+`PageTrigger` therefore carries a flat list and a match mode, which the adapter maps to a single
+leaf. That is exact for everything the contract can say, so nothing is lost in the translation —
+only in what can be said, and a compound trigger is the thing that cannot be. Adding it is a
+`oneof` over the same four cases `TagGroup` already uses for retrieval.
+
+**A page read does not report which mental model maintains it.** `GetKnowledgePage` returns the
+node's identity, tags and body; `mental_model_id` is on `KnowledgeNode`, which only the tree
+carries. Since a model's trigger is what decides whether a refresh is full or incremental, an
+operation that needs the model has to read the tree. `RefreshPage` and `PreviewPageRefresh` do.
+
+**Cancel is `DELETE /operations/{id}` and the record removal is `DELETE /operations/{id}/delete`.**
+The two names invert what the paths suggest. This is called out in `CancelOperation`'s own comment
+because the alternative reading — that a cancel is a request the backend may not honour — is what
+the naming invites, and the operation is a hard stop while the record survives.
+
+**Three reads declare an empty response schema**, which is why the generated client returns
+`interface{}` for them: a single fact (`GetMemory`), a fact's history (`GetObservationHistory`) and
+a model's refresh history (`GetMentalModelHistory`). A generator that invented a type for these
+would have been wrong about the API, so it did not. Each is decoded through the one declared
+sibling that has the shape — `MemoryUnitListItem` for the two fact reads — and the inference is
+documented at the point it is made, because it is the only assumption in the adapter worth
+flagging.
 
 **What the adapter still has to do, which is the part the client cannot do for
 us.** The generated error type implements `Error() string` and nothing else; the
@@ -1911,6 +1989,28 @@ track the backend by hand for every one of the following twelve.
    different defaults and the distinction is invisible in the API. Two services
    is more faithful and costs a concept; one is cheaper and loses the distinction
    a reader of the contract may want.
+
+   **5 and 6 are settled by the implementation, and the reasoning is worth keeping
+   because it is the kind of thing a later reader would otherwise re-litigate.** Both
+   went to `ObservationService` and `MentalModelService` — the *narrower* home in
+   each case, against the "the base is the subject" argument.
+
+   The argument for the narrow home is that the grouping must be a question a caller
+   can ask *before* it knows what it is asking. An operator reaching for
+   `ClearBaseObservations` is reaching for it because something looked wrong in the
+   consolidation layer, and that is a different conversation from "what does this base
+   know" — so putting it in `KnowledgeBaseService` would make every base read require
+   the rights to rebuild the base's beliefs. The same applies to a mental model: a
+   model is the synthesized *document* and a page is a position in a tree that one
+   maintains, and a deployment that never uses the page tree still wants to reason
+   and to see what it reasoned.
+
+   The cost is a concept — thirteen services, not eleven — and it is paid knowingly.
+   What the implementation also found is that the two are not as close as the
+   question assumed: a page *is* a mental model in the backend, and `CreatePage`
+   reports both identifiers. So the distinction is not invisible in the API; it is
+   invisible in the *request*, which is why the services are separate and
+   `CreatePageResponse` still names both.
 7. **Provenance tag namespace — now only half open.** The *structural*
    dimensions are settled by what a base already has to filter on, and reusing
    their established spelling costs nothing: `vault:`, `folder:` (one per
@@ -1937,31 +2037,84 @@ track the backend by hand for every one of the following twelve.
 
 Not a plan; a list, so the size is visible before anyone starts.
 
-**New:** `pkg/knowledge/`, `pkg/knowledge/hindsight/` (an adapter over
-`github.com/vectorize-io/hindsight/hindsight-clients/go`, pinned to a commit —
-see §12.1 for why the pin is a commit and not a version),
-`subsystems/knowledgehindsight/` (contract, implementation, `docs_embed.go`,
-`Makefile`, `go.mod`, command, tests), this document's siblings — a CI matrix
-row, which is hand-written and whose absence fails nothing, and an ADR.
+All of the following exists. The list is kept because the next change needs to know what a
+change to one of these costs.
 
-**Changed:** the knowledge contract (new), `docs/README.md` (this document),
-`docs/feature-spec.md` (§4 and F-021, already updated), `docs/subsystems.md`,
-`docs/status.md`, `docs/todos.md`, `AGENTS.md` if a rule falls out.
+**`pkg/knowledge/`** — the content model, the frontmatter parser, the corpus walk, file
+identity, the ownership record, the reconcile planner, the applier, the projection and the
+whole-wiki view. Tested over a plain `io/fs`, so no test requires a mount or a backend.
 
-**One dependency outside the contract's path.** `github.com/hanwen/go-fuse/v2`
-is imported by the `mount` subcommand's package and by nothing else. It is not
-in the provider, not in the contract, and not in any package a server imports, so
-a host without FUSE still builds the subsystem. That is M-6, and it is the reason
-the mount is a command rather than an RPC (§5.9).
+Coverage is **73.7%**, and the shape of what is missing is worth saying rather than rounding up.
+The uncovered part is the read-only `io/fs` surface — `Open`, `ReadDir`, `ReadFile`, `Read`,
+`sizeOf`, `Stat` and the projection cache's `Current` / `RefreshIfChanged`. Those are the paths a
+FUSE mount takes and a test cannot take without a mount, which is the repository's own rule: no
+test may require a mount to work. Everything with a decision in it — the planner's move detection
+and drift, the applier's batching and ownership guard, the identity rules, the frontmatter, the
+projection's composition — is covered, and the batch key derivation in particular was found
+*wrong* by a test written after this number was first stated (see below).
 
-**Phasing.** Evaluate through the backend's own surfaces first — they need none
-of this and they answer whether the backend fits the work at all. Then decide
-§15 items 1–5, which are the ones that change the contract's shape. Then
-`pkg/knowledge` and the client, tested against the real API description rather
-than a live server so the suite stays deterministic and offline. Then the
-provider. Then ingest and templates, which are last because they are the parts
-that involve a person and the parts most likely to change shape after a first
-real use.
+**A change to the reconcile touches the planner, the applier, the ownership record and every
+test that asserts a plan's digest** — and the digest is what `ApplyReconcile`'s confirmation is
+checked against, so it is a compatibility surface of its own.
+
+**`pkg/knowledge/hindsight/`** — the adapter over
+`github.com/vectorize-io/hindsight/hindsight-clients/go`, pinned to a commit (see §12.1 for
+why the pin is a commit and not a version). **A backend API version change lands here first**,
+and §12.2 lists the four places the client cannot help: three untyped reads and the tag-group
+trigger. The `trigger.go` translation is the one to watch — it is the only place where what
+this contract can express is narrower than what the backend accepts.
+
+**`subsystems/knowledgehindsight/`** — the contract (13 services, 79 RPCs), the
+implementation, `docs_embed.go`, `Makefile`, `go.mod`, `cmd/`, tests. **A change to the
+contract regenerates the descriptor, and the generated files are gitignored**, so a change to
+`knowledge.proto` is a `.proto` diff plus a `make proto` run and never a staged `.pb.go`.
+
+**One dependency outside the contract's path.** `github.com/hanwen/go-fuse/v2` is imported by
+`mount_fuse.go` and by nothing else, and that file is behind a `fuse` build tag. So a host
+without FUSE still builds the subsystem, still serves all thirteen services including
+`MountService`, and `EnableMount` returns `Unimplemented` naming the tag. That is M-6, and it
+is why the mount is an RPC without putting FUSE in every build (§5.9).
+
+**One change outside the knowledge tree, and it was a real bug.** The host assumed every
+factory returns a server. A factory that reports "nothing to start" — a contributor, or a
+provider this deployment has not configured — answers `(nil, nil)`, and the knowledge
+provider's does exactly that when there is no corpus. Every phase dereferenced it, so a
+deployment with no knowledge backend could not build a command tree: the failure was "cannot
+print help" and nothing pointed at the absent subsystem. Fixed once, where the list is built,
+in `pkg/host/host.go`.
+
+**Two things this implementation found in `pkg/knowledge` itself**, both fixed, both worth
+recording because a test is what found them and a reader would otherwise assume they had always
+been so:
+
+- **The batch key covered entries the batch never sent.** `Apply` derived the idempotency key
+  from the chunk as it went in, so an entry whose file could not be read — dropped from the batch —
+  was still in the key. Two runs whose batches differed only in a failed read would claim the same
+  key for different payloads, and the backend would skip the difference with nothing reporting it.
+  The key is now derived from the entries that survived, and sorted, so it is a function of the
+  *set*. `TestTheBatchKeyCoversWhatWasSentAndNotWhatWasAttempted` pins it.
+- **`PlanOptions` had no way to follow a binary file, so the whole binary path was unreachable.**
+  `WalkOptions.FollowBinary` existed and the applier implemented a batch that carries an
+  attachment as bytes beside its chunk, but the planner passed `WalkOptions` without it, so nothing
+  could ever set it. `PlanOptions.FollowBinary` now exists, defaults to false — an attachment is
+  ingested beside a chunk rather than extracted from, and a corpus of a thousand documents may hold
+  a few thousand images — and is what reaches the path.
+
+**Not built, on purpose.** The reference in-memory provider. §12 states why, and §15 records it as
+a decision to confirm rather than an oversight.
+
+**Not yet on the path, and it is a gap against framework rule 4.** `pkg/knowledge.Content` — the
+type carrying the `Valid` invariant, the `Mutability` classification and the three-way `Location` —
+is the content model this document names as the place the behaviour lives, and the provider does
+not produce it. `ContentService` converts from `knowledge.File`, `knowledge.OwnershipEntry` and
+`kh.Document` straight into protobuf messages, so the mapping sits in the provider; rule 4 says a
+provider mounts a package and converts messages *from* it, which puts that conversion one level
+down.
+
+It is a refactor of a passing suite rather than a design change, and it is the first thing to do
+before a second backend — because a second backend is exactly what would expose the duplication.
+Nothing is wrong with what ships: the contract is served, the model is tested, and the duplication
+is one adapter wide. But it is duplication, and a reader of rule 4 arriving here should be told.
 
 ## 17. Sources
 

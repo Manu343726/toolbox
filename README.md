@@ -330,7 +330,11 @@ Early and actively developed. What works end to end today:
   contract, an OpenAPI document, or the tools a third-party MCP server already
   publishes — and published back out in a format you did not write it in;
 - what an agent may call is a policy document you can read, edit, and keep under
-  version control.
+  version control;
+- a knowledge base can be served whole — a markdown wiki you keep in a repository,
+  reconciled into a base, and read back as files through a read-only mount, with
+  every answer citing the document it came from. See
+  [`docs/knowledge.md`](docs/knowledge.md).
 
 The daemon mode is designed and being built: a long-lived core that subsystems
 join by registering with it, serving one MCP to every client instead of a

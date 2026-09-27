@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -80,8 +81,14 @@ func (e *recordingEngine) DeleteContent(_ context.Context, _, id string) error {
 func (e *recordingEngine) keys() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := make([]string, 0, len(e.retains))
+	out := make([]string, 0, len(e.retains)+len(e.binaries))
 	for _, r := range e.retains {
+		out = append(out, r.IdempotencyKey)
+	}
+	// A batch carrying an attachment goes out through `RetainBinary`, so reading only the
+	// text requests would drop half of what was sent — and a test asserting on a batch's
+	// identity would then assert on a batch that never existed.
+	for _, r := range e.binaries {
 		out = append(out, r.IdempotencyKey)
 	}
 	return out
@@ -573,4 +580,101 @@ func TestApplyCarriesForwardFilesThisPlanDidNotCover(t *testing.T) {
 		"reconciling a second directory must not delete the first one's documentation")
 	assert.Contains(t, res.Ownership.Files, "beta:b.md")
 	_ = dirA
+}
+
+// The key covers the batch that was *sent*, not the chunk the batch started as.
+//
+// An entry dropped for being unreadable is not in the batch, and a key that still covered it
+// named work the backend never received. The failure is quiet in both directions: a later run that
+// read the file successfully looks like new work under a key the backend has already used, and two
+// runs whose batches differed only in an entry that failed to read claim the same key for different
+// payloads — so the backend skips the difference and the corpus and the base disagree with nothing
+// reporting it.
+func TestTheBatchKeyCoversWhatWasSentAndNotWhatWasAttempted(t *testing.T) {
+	t.Parallel()
+
+	// A `.md` file whose contents are binary is the shape the binary path exists for: the walk
+	// takes markdown by extension and then classifies the content, so a file named as prose that
+	// is not prose would either be mangled by the extractor or rejected by it. It is sent as
+	// bytes beside its chunk instead.
+	dir := writeCorpus(t, map[string]string{"a.md": "# A\n", "export.md": "PNG\x00\r\n\x1a\n"})
+	corpus := mustCorpus(t, dir)
+
+	// Following binaries is off by default, because an attachment is ingested beside its chunk
+	// rather than extracted from and a corpus of a thousand documents may hold a few thousand
+	// images. This test needs one, so it asks — which is the only way to reach the binary path
+	// at all, and that alone is worth a test existing for.
+	plan, err := knowledge.NewPlanner(corpus).Plan(t.Context(), emptyRecord(t), knowledge.PlanOptions{
+		BaseID: "test", Commit: "c1", Owner: "toolbox", FollowBinary: true,
+	})
+	require.NoError(t, err)
+	applyOpts := applyOptions(t)
+	applyOpts.BatchSize = 10
+
+	// A batch carrying an attachment goes out whole through the binary path, so both files
+	// share one key and losing one of them is visible in it.
+	engine := newEngine()
+	first, err := knowledge.NewApplier(engine, corpus).Apply(t.Context(), plan, emptyRecord(t), applyOpts)
+	require.NoError(t, err)
+	require.Equal(t, 2, first.Ingested)
+	require.NotEmpty(t, engine.binaries, "the batch went out as bytes, not as prose")
+	firstKey := onlyKey(t, engine)
+	require.Len(t, plan.ChangedFiles(), 2)
+
+	// The file is gone between the plan and the apply. It is dropped, the batch goes out with
+	// what is left of it, and the key covers what is left.
+	require.NoError(t, os.Remove(filepath.Join(dir, "export.md")))
+	engine2 := newEngine()
+	second, err := knowledge.NewApplier(engine2, corpus).Apply(t.Context(), plan, emptyRecord(t), applyOpts)
+	require.NoError(t, err)
+	assert.Equal(t, 1, second.Ingested, "the readable file is still ingested")
+	assert.Equal(t, 1, second.Failed)
+	secondKey := onlyKey(t, engine2)
+
+	assert.NotEqual(t, firstKey, secondKey,
+		"a batch that lost an entry is a different batch; a key that did not change would have the backend skip a payload it has never seen")
+
+	// The dropped entry is gone from the record, so the next reconcile plans it again rather
+	// than believing a corpus it never read.
+	_, stillThere := second.Ownership.Files[knowledge.SourceKey("docs", "export.md")]
+	assert.False(t, stillThere, "a file this apply could not read is not recorded, so the next plan retries it")
+
+	// A file whose content changed after the plan was computed is refused rather than sent,
+	// and that is stronger than a new key would be. The plan is what a person confirmed; a
+	// digest that no longer matches the file means the confirmation was for different content,
+	// so the answer is to re-plan rather than to ingest something nobody saw.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "export.md"), []byte("PNG-changed\x00\r\n\x1a\n"), 0o644))
+	engine3 := newEngine()
+	third, err := knowledge.NewApplier(engine3, corpus).Apply(t.Context(), plan, emptyRecord(t), applyOpts)
+	require.NoError(t, err)
+	assert.Equal(t, 1, third.Ingested, "the unchanged file is still ingested")
+	assert.Equal(t, 1, third.Failed)
+	require.NotEmpty(t, third.Warnings)
+	assert.Contains(t, strings.Join(third.Warnings, " "), "changed since the plan was computed")
+	assert.Equal(t, secondKey, onlyKey(t, engine3),
+		"the batch that did not change keeps its key, so the backend recognises work it already did")
+
+	// A plan recomputed over the changed file produces a different key for the same set,
+	// because the digest moved. This is the half the refusal depends on: if the key ignored
+	// digests, a re-plan would claim work already done and the change would never land.
+	replanned, err := knowledge.NewPlanner(corpus).Plan(t.Context(), second.Ownership, knowledge.PlanOptions{
+		BaseID: "test", Commit: "c1", Owner: "toolbox", FollowBinary: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, replanned.ChangedFiles(), 1, "only the changed file is still outstanding")
+	engine4 := newEngine()
+	_, err = knowledge.NewApplier(engine4, corpus).Apply(t.Context(), replanned, second.Ownership, applyOpts)
+	require.NoError(t, err)
+	assert.NotEqual(t, secondKey, onlyKey(t, engine4),
+		"a re-plan over changed content is new work and needs a new key, or the backend would skip the change")
+}
+
+// onlyKey is the one key a run sent, and it fails rather than guessing when there is not exactly
+// one. A helper that returned the first of several would let a test assert on a batch that was not
+// the one under discussion.
+func onlyKey(t *testing.T, e *recordingEngine) string {
+	t.Helper()
+	keys := e.keys()
+	require.Len(t, keys, 1, "this test is about one batch")
+	return keys[0]
 }

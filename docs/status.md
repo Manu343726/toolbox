@@ -17,7 +17,7 @@ by every agent, workflow, and model.
 
 | Foundation                        | State today                                                          | Remaining                                                                 |
 | --------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Knowledge base and retrieval      | Not implemented; specified in [`knowledge.md`](knowledge.md)         | The whole subsystem: a memory backend, retrieval, and an authoritative markdown wiki |
+| Knowledge base and retrieval      | A thirteen-service, 79-RPC contract with a Hindsight provider and a reconciled markdown corpus | A second backend as a second mount of `pkg/knowledge`; the compound trigger the backend supports and the contract does not; the reference in-memory provider deliberately not built |
 | External tool calls               | Declared tool capabilities and policy-gated invocation               | Real capability manifests, permission scopes, sandboxing, typed results    |
 | Multi-agent definition and coordination | Versioned agent profiles with capability references             | Coordination contract, handoffs, shared-context rules, escalation, loop guards |
 | Workflow definition               | Versioned workflow definitions with validation                       | Execution, branching, retries, approvals, auditable run record            |
