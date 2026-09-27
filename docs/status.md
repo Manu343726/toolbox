@@ -17,7 +17,7 @@ by every agent, workflow, and model.
 
 | Foundation                        | State today                                                          | Remaining                                                                 |
 | --------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Knowledge base and retrieval      | Knowledge sources and deterministic metadata search                 | Ingestion, chunking, embeddings, indexes, reranking, source ACLs           |
+| Knowledge base and retrieval      | Not implemented; specified in [`knowledge.md`](knowledge.md)         | The whole subsystem: a memory backend, retrieval, and an authoritative markdown wiki |
 | External tool calls               | Declared tool capabilities and policy-gated invocation               | Real capability manifests, permission scopes, sandboxing, typed results    |
 | Multi-agent definition and coordination | Versioned agent profiles with capability references             | Coordination contract, handoffs, shared-context rules, escalation, loop guards |
 | Workflow definition               | Versioned workflow definitions with validation                       | Execution, branching, retries, approvals, auditable run record            |
@@ -75,17 +75,16 @@ P0/P1 roadmap.
 
 ### Reference subsystems
 
-Sixteen subsystem modules exist:
+Nineteen subsystem modules exist:
 
 ```text
 agent
-apitools
-apiopenapi
 apigrpc
 apimcp
+apiopenapi
+apitools
 documentation
 health
-knowledge
 logfile
 logger
 model
@@ -93,6 +92,8 @@ policy
 prompt
 registry
 skill
+skilldirectory
+skillgit
 testecho
 tool
 workflow
@@ -134,8 +135,6 @@ combined host registration.
 - Workflow execution is not implemented; workflows are stored and validated.
 - Agent profiles do not yet execute model calls.
 - The model service has a deterministic reference provider only.
-- Knowledge search does not yet perform ingestion, embeddings, vector search,
-  or reranking.
 - Tool invocation is a local reference boundary, not a sandboxed execution
   system.
 - Policy rules and approval signaling are intentionally minimal.

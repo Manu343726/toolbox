@@ -5,7 +5,7 @@ binds and clients dial, the address the Model Context Protocol endpoint binds, t
 the deployment authorises with, and how the daemon's lifecycle is managed.
 
 It does not describe a workspace. Agent definitions, skills, prompt templates and knowledge
-sources are not deployment, and neither is the workspace selector — that differs per
+bases are not deployment, and neither is the workspace selector — that differs per
 invocation rather than per installation, so it is a flag and never a file key. A file that
 tries to state it is refused.
 
@@ -103,7 +103,7 @@ A client that finds no core answering **starts one** and waits for the address t
 The daemon is detached, so it outlives the command that started it.
 
 ```
-$ toolbox knowledge put-source --source.id notes --source.location mem://notes
+$ toolbox skill add-skill --ref local.greet --confirm
 toolbox: daemon at 127.0.0.1:9180 (default)
 toolbox: no core at 127.0.0.1:9180; starting one
 { … }
@@ -125,7 +125,7 @@ The client **never starts a daemon and never falls back** to a private instance 
 configured core does not answer. It says the core did not answer and stops.
 
 ```
-$ toolbox knowledge search --query notes
+$ toolbox skill find-skill --query greet
 the core at 127.0.0.1:9421 did not answer, and daemon.launch is "explicit" so this command
 will not start one and will not serve the call from this process instead: connection refused
 ```
@@ -209,7 +209,7 @@ a configuration file is rather than about logging:
 ## The workspace selector
 
 `--scope` and `TOOLBOX_SCOPE` exist, and a configuration file may not carry them. A
-workspace is which project's agents, skills and knowledge a client works in; it differs per
+workspace is which project's agents, skills and knowledge bases a client works in; it differs per
 invocation, so a file that described the installation would make every project on a machine
 share one.
 

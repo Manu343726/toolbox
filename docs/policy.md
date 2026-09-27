@@ -15,7 +15,7 @@ One rule per line, and nothing else:
 # Comments start with a hash. Blank lines are ignored.
 allow *                              read
 deny  registry/**                    write read unclassified
-allow  knowledge/**                  write read unclassified
+allow  skill/**                      write read unclassified
 allow  apimcp/**                     read
 ```
 
@@ -33,7 +33,7 @@ which is the direction that gets noticed last.
 An operation identifier is `<api>/<service>/<method>`:
 
 ```text
-knowledge/toolbox.knowledge.v1.KnowledgeService/Search
+skill/toolbox.skill.v1.SkillService/FindSkill
 ```
 
 The API is part of it because three subsystems serve the same contract, and naming
@@ -51,8 +51,8 @@ has, and a prefix does not match. A wildcard mixed with other text inside one
 segment is refused rather than treated as a prefix match, because it does not look
 like what it would do.
 
-`knowledge/**` is every operation of the knowledge API. It is written that way
-rather than `knowledge/*/*` because the second form knows how many segments an
+`skill/**` is every operation of the skills API. It is written that way
+rather than `skill/*/*` because the second form knows how many segments an
 identifier has, and that is easy to get subtly wrong.
 
 ## Evaluation

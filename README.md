@@ -60,10 +60,13 @@ trust.
 
 ### A knowledge base with retrieval
 
-Your reference material lives in the toolbox, not in a prompt. Assistants
-search what they need and work from sources they can point to, so knowledge is
-curated once and shared by every assistant and workflow. Access to sources is
-governed like everything else, so a restricted document stays restricted.
+Your reference material stays where you already keep it — a directory of
+markdown you own and review — and the toolbox imports it into a base that
+assistants can search, cite and reason over. Every fact traces back to the
+document it came from, so a wrong answer names the file to fix. Assistants also
+accumulate what they learn in the same base, and the two are told apart.
+Access is governed like everything else, so a restricted document stays
+restricted.
 
 *Removes:* re-pasting and re-curating context for every assistant.
 
@@ -109,7 +112,7 @@ Common ways people start:
 
 | You want                        | You take                                            | What you get                                                             |
 | ------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
-| A knowledge base for your agents| Just the knowledge capability                        | Shared, searchable, governed knowledge — nothing else to run or maintain |
+| A knowledge base for your agents| Just the knowledge capability                        | Shared, searchable, governed knowledge over a wiki you already keep — nothing else to run or maintain |
 | Your tools available to agents  | Just the tools capability, plus policies             | Declared actions with approval boundaries, no other machinery            |
 | A process assistants follow     | Workflows, plus whichever capabilities the steps use | A versioned plan instead of per-agent instructions                      |
 | Coordination between agents     | Agents, workflows, and the capabilities they need   | Defined roles and handoffs without adopting the whole environment       |
@@ -134,10 +137,10 @@ not separately deployable. See [`docs/architecture.md`](docs/architecture.md) an
 | Building block | What it holds                                              | Why it matters                                                    |
 | -------------- | ---------------------------------------------------------- | ----------------------------------------------------------------- |
 | Workflows      | Versioned plans: steps, order, branching, approvals       | The process, written down and reviewable                           |
-| Agents         | Roles referencing the skills, knowledge, tools they may use | Who does what, defined once and reused                            |
+| Agents         | Roles referencing the skills, knowledge bases, and tools they may use | Who does what, defined once and reused                    |
 | Skills         | A directory of files, in the standard agent-skills format, served over the MCP Skills extension | Know-how that improves once for everyone, and reads the same in every client |
 | Prompts        | Parameterised templates                                    | Consistent instructions without hand-editing each time             |
-| Knowledge      | The sources assistants may search                          | One current body of reference material                            |
+| Knowledge      | A markdown wiki you keep, imported into a searchable base | One current body of reference material, and the agents remember it too |
 | Models         | The models available to the team                           | Work stays portable across providers and budgets                  |
 | Tools          | Declared actions, each with its own requirements            | What an assistant can actually do                                 |
 | Policies       | The document deciding what an agent may call, and what needs approval | Limits enforced by the system, not requested in a prompt          |
@@ -193,8 +196,8 @@ See [ADR-0013](docs/decisions/0013-composition-contributions.md) and
 ## A day in the environment
 
 > Someone asks for the weekly report. An assistant loads the report workflow,
-> which names the prompt template, the knowledge sources, and the review step.
-> The assistant searches the sources, drafts with the template, and reaches the
+> which names the prompt template, the knowledge base, and the review step.
+> The assistant searches the base, drafts with the template, and reaches the
 > publish step — which requires approval, so it hands off to a reviewer instead
 > of sending anything itself. The workflow records which versions of the
 > template, sources and policy it used, so the result can be explained and
@@ -242,7 +245,7 @@ read and edit:
 allow *                read
 
 # …and the writes this team is allowed to make.
-allow  knowledge/**    write
+allow  skill/**        write
 deny   registry/**     write
 ```
 
@@ -258,13 +261,13 @@ Start with an empty surface and let the assistant ask for what it needs as it go
 ```
 
 The same operations are commands, with the same flags, for you rather than for an
-assistant — `toolbox knowledge search --query …` reaches the knowledge subsystem, and a
+assistant — `toolbox skill find-skill --query …` reaches the skills subsystem, and a
 policy does not stand between you and your own deployment. A core keeps the state between
 invocations, and one starts itself the first time you need it, the way a tmux server does:
 
 ```sh
-./bin/toolbox knowledge put-source --source.id notes --source.location mem://notes
-./bin/toolbox knowledge get-source --id notes                  # a different process, same data
+./bin/toolbox skill add-skill --ref local.greet --confirm
+./bin/toolbox skill get-skill --ref local.greet               # a different process, same data
 ```
 
 How an installation is wired is a small file, and it covers the addresses, the policy, and
@@ -287,14 +290,14 @@ where a call goes, and what they refuse.
 Take only the capabilities you want — from the host:
 
 ```sh
-./bin/toolbox mcp --component knowledge
-./bin/toolbox mcp --component knowledge --component policy
+./bin/toolbox mcp --component skill
+./bin/toolbox mcp --component skill --component policy
 ```
 
 …or run one on its own, with no host at all:
 
 ```sh
-./bin/knowledge mcp
+./bin/skill mcp
 ```
 
 Point the toolbox at a core it did not start, with a fixed address every command

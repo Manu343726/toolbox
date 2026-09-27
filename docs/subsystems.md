@@ -1,6 +1,6 @@
 # Subsystem catalog
 
-The repository currently contains sixteen subsystem modules. The
+The repository contains nineteen subsystem modules. The
 implementations are reference implementations intended to validate contracts and
 composition; they are not yet production storage or AI execution engines.
 
@@ -16,7 +16,6 @@ subsystem without a `cmd/` directory. See [`logging.md`](logging.md).
 | `agent` | `toolbox.agent.v1.AgentService` | Store versioned provider-neutral agent profiles and tool references | `agent.New(agent.Options{})` | Reference CRUD |
 | `skill` | `toolbox.skill.v1.SkillService` | Store versioned reusable skills and the names they require | `skill.New(skill.Options{})` | Reference CRUD |
 | `prompt` | `toolbox.prompt.v1.PromptService` | Store versioned templates and render simple variables | `prompt.New(prompt.Options{})` | Reference CRUD/rendering |
-| `knowledge` | `toolbox.knowledge.v1.KnowledgeService` | Store sources and perform deterministic metadata search | `knowledge.New(knowledge.Options{})` | Reference metadata search |
 | `model` | `toolbox.model.v1.ModelService` | List provider-neutral models and invoke a deterministic reference provider | `model.New(model.Options{})` | Reference provider |
 | `tool` | `toolbox.tool.v1.ToolService` | Declare tools and invoke explicitly registered local implementations | `tool.New(tool.Options{})` | Reference capability gateway |
 | `policy` | `toolbox.policy.v1.PolicyService` | Evaluate simple allow/approval rules by policy ID | `policy.New(policy.Options{})` | Reference evaluator |
@@ -92,12 +91,6 @@ over the contracts.
 - `GetPrompt`
 - `ListPrompts`
 - `RenderPrompt`
-
-### Knowledge
-
-- `PutSource`
-- `GetSource`
-- `Search`
 
 ### Model
 

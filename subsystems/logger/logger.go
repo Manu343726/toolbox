@@ -319,7 +319,7 @@ func (h *Handler) Log(ctx context.Context, req *connect.Request[loggerv1.LogRequ
 	record := slog.NewRecord(h.clock(), levelFromProto(msg.GetLevel()), msg.GetMessage(), 0)
 
 	// The component is an attribute rather than a field of its own, because that is where a
-	// route matches it: "everything the knowledge subsystem said" is a route, not a special
+	// route matches it: "everything the skill subsystem said" is a route, not a special
 	// case in the router.
 	if component := strings.TrimSpace(msg.GetLogger()); component != "" {
 		record.AddAttrs(slog.String(LoggerKey, component))

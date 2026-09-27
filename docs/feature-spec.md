@@ -81,7 +81,7 @@ ConnectRPC and runtime discovery.
 
 ### Explicit composition
 
-A workflow refers to services, capabilities, skills, prompts, knowledge sources,
+A workflow refers to services, capabilities, skills, prompts, knowledge bases,
 and policies by stable identifiers. It does not embed provider-specific client
 objects or hard-coded process addresses.
 
@@ -115,7 +115,7 @@ domain-pack/
 ├── agents/
 ├── skills/
 ├── prompts/
-├── knowledge/
+├── knowledge/          # the authoritative markdown wiki
 └── policies/
 ```
 
@@ -139,7 +139,7 @@ An agent profile declares:
 - instruction or prompt references;
 - skill references;
 - tool capability references;
-- knowledge source references;
+- knowledge base references;
 - policy references.
 
 The profile does not select a provider-specific model implementation. Model
@@ -173,12 +173,24 @@ specific tools and policies. Skills are versioned and independently addressable.
 A prompt is a provider-neutral template with declared variables. The reference
 implementation performs simple `{{variable}}` substitution.
 
-### Knowledge source
+### Knowledge base
 
-A knowledge source identifies a document collection or ingestion input. The
-reference implementation stores source metadata and performs deterministic
-metadata search. Production ingestion, embeddings, vector indexes, and reranking
-are behind the same service contract.
+A knowledge base is a governed body of knowledge an agent can search, cite and
+reason over, held in named bases that isolate one subject from another. A base
+holds documents, the facts extracted from them, the observations consolidated
+from those facts, the mental models synthesized from those observations, and the
+pages that render them as documents.
+
+A **document** is the container for retained content and the unit of provenance:
+a fact can be traced to the document and chunk it came from. An **observation**
+is a consolidated, deduplicated, evidence-bearing belief. A **mental model** is
+a synthesized document answering a question, rebuilt when its scope changes. A
+**page** is a mental model configured as a living document in a folder tree.
+
+The authoritative body of a project's knowledge is a **markdown wiki** the project
+itself owns. It is the source of truth about what was written; the base is the
+reconciled, retrievable projection of it. See [`knowledge.md`](knowledge.md) for
+the full specification, which this section summarises.
 
 ### Capability and tool
 
@@ -267,7 +279,7 @@ support:
 | F-006 | Protobuf documentation extraction | Implemented |
 | F-007 | Schema-driven CLI generation | Implemented for unary methods |
 | F-008 | Workflow definition storage and validation | Reference implementation |
-| F-009 | Agent, skill, prompt, and knowledge catalogs | Reference implementation |
+| F-009 | Agent, skill, and prompt catalogs | Reference implementation |
 | F-010 | Model-provider abstraction | Reference catalog/provider |
 | F-011 | Tool capability catalog and invocation boundary | Reference implementation |
 | F-012 | Policy evaluation and approval signal | Reference implementation |
@@ -279,7 +291,7 @@ support:
 | F-018 | MCP introspection and runtime feature exposure | Implemented |
 | F-019 | Independent and aggregated MCP deployment | Implemented |
 | F-020 | Session-isolated MCP exposure over HTTP | Not implemented |
-| F-021 | Knowledge ingestion, embeddings, retrieval, and source ACLs | Not implemented |
+| F-021 | Knowledge base: memory backend, retrieval, and markdown wiki ingestion | Not implemented; specified in [`knowledge.md`](knowledge.md) |
 | F-025 | Standard API description with open format and transport identifiers | Implemented |
 | F-026 | Parser, adapter, and invoker provider contracts as independent subsystems | Implemented for OpenAPI and gRPC |
 | F-027 | API catalog with format and transport index | Implemented |

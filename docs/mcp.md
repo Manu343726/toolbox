@@ -138,7 +138,7 @@ The combined host exposes one MCP over all selected built-in subsystems:
 ```sh
 ./bin/toolbox mcp --all
 ./bin/toolbox mcp --component workflow --component agent
-./bin/toolbox mcp --service toolbox.knowledge.v1.KnowledgeService
+./bin/toolbox mcp --service toolbox.skill.v1.SkillService
 ./bin/toolbox mcp --all --minimal
 ```
 
@@ -202,7 +202,7 @@ builds it from the catalog instead, after registering every started subsystem fr
 the contract that subsystem serves:
 
 ```sh
-toolbox mcp --mcp-source catalog --component apitools --component knowledge
+toolbox mcp --mcp-source catalog --component apitools --component skill
 ```
 
 Both name the same operations identically, so switching the source renames nothing

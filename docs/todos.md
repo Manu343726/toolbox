@@ -32,7 +32,7 @@ reproducible event/artifact trail.
 ### Add persistence interfaces
 
 - [ ] Define storage interfaces for workflow definitions, agent profiles,
-      skills, prompts, knowledge sources, and runs.
+      skills, prompts, knowledge bases, and runs.
 - [ ] Provide SQLite adapters for local deployments.
 - [ ] Add migrations, transaction boundaries, and concurrency tests.
 - [ ] Keep storage interfaces independent from ConnectRPC handlers.
@@ -76,7 +76,7 @@ and tools participated in a run.
 
 - [ ] Add a coordination contract declaring agent roles, permitted handoffs, and
       the artifact each handoff carries.
-- [ ] Add shared-context rules: which knowledge, skills, and tool capabilities
+- [ ] Add shared-context rules: which knowledge bases, skills, and tool capabilities
       transfer on a handoff and which stay private.
 - [ ] Add escalation targets for approval, failure, and ambiguity.
 - [ ] Evaluate the receiving profile's reach and the active policy snapshot
@@ -99,12 +99,11 @@ outside it.
 - [ ] Add timeouts, token accounting, retries, and provider error mapping.
 - [ ] Add deterministic fake providers for tests.
 
-### Knowledge ingestion
+### Knowledge base
 
-- [ ] Add source adapters for files, URLs, and databases.
-- [ ] Add chunking, metadata extraction, embeddings, indexes, and reranking.
-- [ ] Add source ACLs and policy-aware retrieval.
-- [ ] Add ingestion retries and observability.
+Deliberately not tracked here. The subsystem is specified in full in
+[`knowledge.md`](knowledge.md), and that specification is the plan; a checklist
+that paraphrases it would be a second thing to keep in step with the first.
 
 ### Tool execution
 

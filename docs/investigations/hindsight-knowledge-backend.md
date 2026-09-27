@@ -1,5 +1,12 @@
 # Investigation: using Hindsight as the knowledge subsystem's backend
 
+> **Superseded.** This investigation fed into
+> [`docs/knowledge.md`](../knowledge.md), which is the specification. Where they
+> differ, `docs/knowledge.md` is right. It is kept because the API survey and
+> the reasoning about the `fs mount` direction are the evidence behind it, and
+> because §5.2's check of *why* a page cannot hold authored text is the reason
+> the specification's ingest is a reconcile rather than a write.
+
 **Status: investigation. Nothing here is a decision.** No ADR is proposed, no
 code exists, and no contract has been written. This document records what was
 found, what the constraints are, and what the open questions are, so that a

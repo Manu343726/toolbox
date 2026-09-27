@@ -81,16 +81,16 @@ A subsystem may call another subsystem. Resolve the callee with a
 
 ```go
 resolver, err := core.NewRegistryResolver(registryEndpoint, nil)
-endpoint, err := resolver.Resolve(ctx, "toolbox.knowledge.v1.KnowledgeService")
+endpoint, err := resolver.Resolve(ctx, "toolbox.skill.v1.SkillService")
 if err != nil {
-    return fmt.Errorf("knowledge is not available: %w", err)
+    return fmt.Errorf("skills are not available: %w", err)
 }
 client, err := core.Bind(ctx, core.NewClient(core.ClientOptions{Resolver: resolver}),
-    "toolbox.knowledge.v1.KnowledgeService", knowledgev1connect.NewKnowledgeServiceClient)
+    "toolbox.skill.v1.SkillService", skillv1connect.NewSkillServiceClient)
 if err != nil {
-    return fmt.Errorf("bind knowledge: %w", err)
+    return fmt.Errorf("bind skills: %w", err)
 }
-response, err := client.Search(ctx, connect.NewRequest(&knowledgev1.SearchRequest{...}))
+response, err := client.FindSkill(ctx, connect.NewRequest(&skillv1.FindSkillRequest{Query: "greet"}))
 ```
 
 The call is an RPC, so the callee need not be running for the caller to load and a

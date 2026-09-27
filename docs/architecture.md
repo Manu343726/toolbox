@@ -303,7 +303,7 @@ A **policy** says which of those a deployment permits:
 ```text
 allow *                              read
 deny  registry/**                    write read unclassified
-allow  knowledge/**                  write read unclassified
+allow  skill/**                      write read unclassified
 ```
 
 Each line is a decision, a pattern over operation identifiers, and the effect
@@ -389,7 +389,7 @@ A standalone subsystem also exposes itself independently to agents, so a user
 can adopt one capability without running any other:
 
 ```sh
-./bin/knowledge mcp
+./bin/skill mcp
 ```
 
 ### Selected mode

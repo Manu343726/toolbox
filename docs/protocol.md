@@ -15,7 +15,7 @@
 - Service names are fully qualified and end in `Service`.
 - RPC methods use imperative PascalCase names.
 - Subsystem names are stable lowercase identifiers such as `workflow`.
-- Capability names are namespaced strings such as `knowledge.search`.
+- Capability names are namespaced strings such as `skill.find`.
 
 ## Errors
 
