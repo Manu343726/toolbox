@@ -12,6 +12,7 @@ require (
 	github.com/Manu343726/toolbox/subsystems/apitools v0.0.0
 	github.com/Manu343726/toolbox/subsystems/documentation v0.0.0
 	github.com/Manu343726/toolbox/subsystems/health v0.0.0
+	github.com/Manu343726/toolbox/subsystems/knowledgehindsight v0.0.0-00010101000000-000000000000
 	github.com/Manu343726/toolbox/subsystems/logfile v0.0.0
 	github.com/Manu343726/toolbox/subsystems/logger v0.0.0
 	github.com/Manu343726/toolbox/subsystems/model v0.0.0
@@ -35,6 +36,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/hanwen/go-fuse/v2 v2.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -45,6 +47,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/vectorize-io/hindsight/hindsight-clients/go v0.0.0-20260926141444-ccfe85b48519 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.59.0 // indirect
@@ -56,6 +59,7 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	gopkg.in/validator.v2 v2.0.1 // indirect
 )
 
 replace github.com/Manu343726/toolbox => ../..
@@ -97,3 +101,5 @@ replace github.com/Manu343726/toolbox/subsystems/testecho => ../../subsystems/te
 replace github.com/Manu343726/toolbox/subsystems/logger => ../../subsystems/logger
 
 replace github.com/Manu343726/toolbox/subsystems/logfile => ../../subsystems/logfile
+
+replace github.com/Manu343726/toolbox/subsystems/knowledgehindsight => ../../subsystems/knowledgehindsight

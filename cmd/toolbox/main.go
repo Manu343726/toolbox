@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/Manu343726/toolbox/pkg/config"
 	"github.com/Manu343726/toolbox/pkg/core"
 	"github.com/Manu343726/toolbox/pkg/host"
+	"github.com/Manu343726/toolbox/pkg/knowledge"
 	toolboxmcp "github.com/Manu343726/toolbox/pkg/mcp"
 	"github.com/Manu343726/toolbox/pkg/protocontract"
 	"github.com/Manu343726/toolbox/pkg/subsystem"
@@ -30,6 +32,7 @@ import (
 	apitools "github.com/Manu343726/toolbox/subsystems/apitools"
 	documentation "github.com/Manu343726/toolbox/subsystems/documentation"
 	health "github.com/Manu343726/toolbox/subsystems/health"
+	knowledgehindsight "github.com/Manu343726/toolbox/subsystems/knowledgehindsight"
 	logger "github.com/Manu343726/toolbox/subsystems/logger"
 	model "github.com/Manu343726/toolbox/subsystems/model"
 	policy "github.com/Manu343726/toolbox/subsystems/policy"
@@ -506,6 +509,28 @@ func buildHost(plan hostComposition) (*host.Host, *sharedCatalog, error) {
 		"skillgit": func() (*subsystem.Server, error) {
 			return skillgit.New(skillgit.Options{DataDir: skillgit.DefaultDataDir()})
 		},
+		// The knowledge provider is registered but not started unconditionally: it needs a
+		// backend to be useful and a corpus to be worth anything, and a deployment with
+		// neither should not get a listener. With neither configured the factory reports
+		// nothing to start rather than failing the whole deployment, which is the same
+		// treatment the contributors get.
+		//
+		// The corpus is the deployment's, not a project's: a base outlives the project that
+		// first named it, and its ownership record is bound to an absolute path, so moving
+		// it with a project would make the record refuse itself on the next run.
+		"knowledgehindsight": func() (*subsystem.Server, error) {
+			roots, rerr := knowledgeCorpusRoots()
+			if rerr != nil || len(roots) == 0 {
+				return nil, nil
+			}
+			return knowledgehindsight.New(knowledgehindsight.Options{
+				BackendEndpoint: envOrDefault("HINDSIGHT_API_URL", "http://127.0.0.1:8888"),
+				APIKey:          strings.TrimSpace(os.Getenv("HINDSIGHT_API_TOKEN")),
+				CorpusRoots:     roots,
+				StateDir:        knowledgehindsight.DefaultStateDir(),
+				Owner:           strings.TrimSpace(os.Getenv("TOOLBOX_KNOWLEDGE_OWNER")),
+			})
+		},
 		// A contributor rather than a service: it decides what a catalog provider should be
 		// serving and exposes nothing. With nothing configured it contributes nothing and is
 		// never started, so registering it here costs a deployment with no configured
@@ -576,6 +601,10 @@ func providerRecords(h *host.Host) []api.Provider {
 		"apiopenapi": apiopenapi.Providers(endpoints["apiopenapi"]),
 		"apimcp":     apimcp.Providers(endpoints["apimcp"]),
 		"skillgit":   skillgit.Providers(endpoints["skillgit"]),
+		// The knowledge provider is a contributor-plus-service: a base whose corpus is not
+		// configured is not started, and contributes nothing, rather than registering an
+		// endpoint that answers not-found for everything.
+		"knowledgehindsight": knowledgehindsight.Providers(endpoints["knowledgehindsight"]),
 	}
 	records := make([]api.Provider, 0, 9)
 	for subsystem, provided := range claims {
@@ -707,4 +736,46 @@ func renewRegistrations(ctx context.Context, client registryv1connect.RegistrySe
 			}
 		}
 	}
+}
+
+// knowledgeCorpusRoots reads the configured corpus roots for the knowledge provider.
+//
+// A root is `name=path` and the name is required, for the same reason the standalone command
+// requires it: a namespace inferred from a path would depend on where the repository was cloned,
+// and an ownership record bound to that would refuse itself on the next run in a different
+// directory.
+//
+// No roots means the deployment contributes no knowledge provider, which is a normal state rather
+// than a misconfiguration — a deployment that serves a wiki it has not been given a path to is not
+// broken, it has nothing to serve.
+func knowledgeCorpusRoots() ([]knowledge.CorpusRoot, error) {
+	raw := strings.TrimSpace(os.Getenv("TOOLBOX_KNOWLEDGE_CORPUS_ROOTS"))
+	if raw == "" {
+		one := strings.TrimSpace(os.Getenv("TOOLBOX_KNOWLEDGE_CORPUS"))
+		if one == "" {
+			return nil, nil
+		}
+		return []knowledge.CorpusRoot{{Name: "docs", Path: filepath.Clean(one)}}, nil
+	}
+	var out []knowledge.CorpusRoot
+	for _, entry := range strings.Split(raw, string(filepath.ListSeparator)) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		name, path, found := strings.Cut(entry, "=")
+		name, path = strings.TrimSpace(name), strings.TrimSpace(path)
+		if !found || name == "" || path == "" {
+			return nil, fmt.Errorf("the corpus root %q is not name=path", entry)
+		}
+		out = append(out, knowledge.CorpusRoot{Name: name, Path: filepath.Clean(path)})
+	}
+	return out, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }
