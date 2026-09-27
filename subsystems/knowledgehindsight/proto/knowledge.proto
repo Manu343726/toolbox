@@ -1814,3 +1814,1157 @@ message RemoveBaseAliasResponse {
   // The alias that became primary as a result, so a caller showing the display name updates.
   BaseAlias new_primary = 2;
 }
+
+// A fact is a statement the system extracted. It is not content: it is a claim, with a
+// provenance chain behind it and an identifier that a replace invalidates. Reading a fact and
+// reading the document it came from are different questions at different fidelities, which is why
+// this is its own service rather than another read on `ContentService`.
+message Memory {
+  string id = 1;
+  string base_id = 2;
+  // The statement.
+  string text = 3;
+  // `world` for an objective claim, `experience` for something the base itself did. Quoting an
+  // experience fact as a documented claim is a category error a reader cannot see.
+  string fact_type = 4;
+  // The document the fact was extracted from. Empty for a fact that came from consolidation rather
+  // than from anything retained, and a caller that needs it to be non-empty should filter.
+  string document_id = 5;
+  repeated string entities = 6;
+  repeated string tags = 7;
+  google.protobuf.Timestamp observed_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  // Whether a curated correction has replaced what the extractor produced, and what it said before.
+  bool curated = 10;
+  string superseded_text = 11;
+}
+
+// MemoryService reads and corrects the facts a base holds.
+//
+// It has no query. `Recall` and `Reflect` moved to `QueryService` because they are queries, and a
+// query that lives next to storage tends to acquire storage's concerns.
+service MemoryService {
+  // @toolbox.side-effects read_only
+  // GetMemory reads one fact.
+  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
+
+  // @toolbox.side-effects update
+  // CurateMemory corrects a fact in place, and everything consolidated from it re-derives.
+  //
+  // This is the cheapest of the three ways a person can make something stick: the correction lives
+  // in the base and nowhere else. It is also the one with the shortest reach — a corrected fact is
+  // still an inference, and `WriteContent` in the corpus is the way to have the base cite a person
+  // for a claim. `superseded_text` records what the extractor said, because a correction with no
+  // record of what it replaced is indistinguishable from one somebody changed by accident.
+  rpc CurateMemory(CurateMemoryRequest) returns (CurateMemoryResponse);
+
+  // @toolbox.side-effects read_only
+  // GetMemoryHistory returns what a fact has said, and when.
+  //
+  // It is the answer to "why does the base believe this", which is a different question from "what
+  // does it believe" and the one a person asks when they are about to argue with it.
+  rpc GetMemoryHistory(GetMemoryHistoryRequest) returns (GetMemoryHistoryResponse);
+
+  // @toolbox.side-effects read_only
+  // GetMemoryGraph returns the fact and entity links around a fact.
+  //
+  // It is a read of structure rather than of meaning: it answers "what else is connected to this"
+  // and not "what does this say". A person fixing a wrong answer usually wants the second, and a
+  // tool tracing an inference wants the first.
+  rpc GetMemoryGraph(GetMemoryGraphRequest) returns (GetMemoryGraphResponse);
+}
+
+message GetMemoryRequest {
+  string base_id = 1;
+  string memory_id = 2;
+}
+
+message GetMemoryResponse {
+  Memory memory = 1;
+}
+
+message CurateMemoryRequest {
+  string base_id = 1;
+  string memory_id = 2;
+  // The corrected statement.
+  string text = 3;
+  // Why. Required, and recorded on the fact.
+  string reason = 4;
+}
+
+message CurateMemoryResponse {
+  Memory memory = 1;
+  // What the correction cost downstream: the observations consolidated from this fact are
+  // re-derived, and the pages built from those are re-derived again.
+  CascadeReport cascade = 2;
+}
+
+message GetMemoryHistoryRequest {
+  string base_id = 1;
+  string memory_id = 2;
+}
+
+message GetMemoryHistoryResponse {
+  repeated MemoryRevision revisions = 1;
+}
+
+message MemoryRevision {
+  string text = 1;
+  google.protobuf.Timestamp at = 2;
+  // What produced this version: the extractor, or a person.
+  string source = 3;
+  string reason = 4;
+}
+
+message GetMemoryGraphRequest {
+  string base_id = 1;
+  string memory_id = 2;
+  // How far to walk. Zero means one hop.
+  int32 depth = 3;
+  // Most links per node. Zero means the server's default.
+  int32 limit = 4;
+}
+
+message GetMemoryGraphResponse {
+  repeated GraphNode nodes = 1;
+  repeated GraphLink links = 2;
+  // Whether the walk was cut short. A graph that silently stopped early is a graph a reader
+  // will over-read.
+  bool truncated = 3;
+  // What was actually walked, when the request asked for something narrower than the
+  // backend offers. The backend's graph has no root, depth or limit parameter, so a caller
+  // naming a fact gets the whole graph filtered locally and this says so — rather than
+  // silently returning the whole thing under a method that promised a neighbourhood.
+  string walked = 4;
+}
+
+message GraphNode {
+  // The fact or entity identifier.
+  string id = 1;
+  // `memory` or `entity`.
+  string kind = 2;
+  string label = 3;
+}
+
+message GraphLink {
+  string from = 1;
+  string to = 2;
+  // What kind of link this is, from a fixed vocabulary this contract owns.
+  string kind = 3;
+  float weight = 4;
+}
+
+// PageNode is a node in the derived page tree: a folder or a page.
+message PageNode {
+  string id = 1;
+  string base_id = 2;
+  // `folder` or `page`.
+  string kind = 3;
+  string name = 4;
+  string parent_id = 5;
+  // The mental model that maintains a page's body. Empty for a folder.
+  string backing_model_id = 6;
+  // The tags the page is built from. They are a filter, not a label: a page whose tags describe
+  // things it was not given matches nothing.
+  repeated string tags = 7;
+  // The backend reports the page has not been refreshed since its inputs changed. A stale page is
+  // included and flagged rather than hidden: a reader is better served by a stale page that says it
+  // is stale than by its absence.
+  bool is_stale = 8;
+  google.protobuf.Timestamp timestamp = 9;
+  google.protobuf.Timestamp last_refresh_failed_at = 10;
+  string description = 11;
+  // When refreshes are triggered. Every field is a filter on what the page is built from, which is
+  // what makes a page a projection rather than a document.
+  PageTrigger trigger = 12;
+}
+
+message PageTrigger {
+  // `delta` or `all`.
+  string mode = 1;
+  repeated string fact_types = 2;
+  bool exclude_mental_models = 3;
+  bool refresh_after_consolidation = 4;
+  repeated string tags = 5;
+  // `any`, `all`, `any_strict` or `all_strict`.
+  string tags_match = 6;
+  string cron = 7;
+}
+
+// PageService creates, configures and refreshes the projection.
+//
+// It lost its read methods. `GetPageTree` became `GetContentTree`, which walks authored and derived
+// content together, and `SearchPages` became `Search` with a scope. What is left is what is
+// genuinely page-specific: creating a folder, creating a page, changing how it is built, and
+// refreshing it. A service whose reads were a subset of a wider surface would make a caller choose
+// where to look before it knows what it is looking for.
+service PageService {
+  // @toolbox.side-effects create
+  // CreatePageFolder creates a folder in the page tree.
+  rpc CreatePageFolder(CreatePageFolderRequest) returns (CreatePageFolderResponse);
+
+  // @toolbox.side-effects create
+  // CreatePage creates a page: a folder path, a name, the question it answers, and what it is built
+  // from.
+  //
+  // The body is not a parameter, and cannot be. A page *is* a mental model, and its body is always
+  // synthesized by a model from the question it is given; there is no writable body field anywhere in
+  // the backend's public surface. The flag that reads like the escape hatch — documented as
+  // "hand-authored" — occurs once in the whole API description, in a response-only structure, in no
+  // request, and is reserved. Authored prose becomes a document, not a page; see §5.1 of the
+  // specification this contract implements.
+  rpc CreatePage(CreatePageRequest) returns (CreatePageResponse);
+
+  // @toolbox.side-effects update
+  // UpdatePageNode renames a node or changes what a page is built from.
+  //
+  // It changes the trigger and the tags, never the body. A page's body is what the system believes,
+  // and a configuration that could put a different body there would make the tree a place a tool
+  // writes prose and calls it the system's beliefs.
+  rpc UpdatePageNode(UpdatePageNodeRequest) returns (UpdatePageNodeResponse);
+
+  // @toolbox.side-effects update
+  // RefreshPage rebuilds a page from its current inputs.
+  //
+  // It is a write even though its input is a read, and it is classified as one for exactly that
+  // reason: a refresh rewrites a document. `PreviewPageRefresh` is how a caller sees the cost
+  // without paying it.
+  rpc RefreshPage(RefreshPageRequest) returns (RefreshPageResponse);
+
+  // @toolbox.side-effects read_only
+  // PreviewPageRefresh reports what a refresh would do, and does nothing.
+  //
+  // A refresh spends a model call, so previewing it is a read and is the only affordable way to
+  // find out whether a page is worth rebuilding before rebuilding it.
+  rpc PreviewPageRefresh(PreviewPageRefreshRequest) returns (PreviewPageRefreshResponse);
+
+  // @toolbox.side-effects read_only
+  // ExportPageBundle returns the backend's own page bundle.
+  //
+  // It is the same `{path, content}` shape as `ExportWiki` and it is the same bytes, which is why
+  // the two can be composed without a second translation: the whole-wiki view reuses this rather
+  // than rendering the pages again.
+  rpc ExportPageBundle(ExportPageBundleRequest) returns (ExportPageBundleResponse);
+
+  // @toolbox.side-effects delete
+  // DeletePage removes a node from the page tree.
+  //
+  // It takes a folder as readily as a page, which is why it is here rather than in
+  // `MentalModelService`: a folder has no mental model behind it, and `DeleteMentalModel` is about
+  // a synthesized document rather than a position in a tree. Removing a folder removes what is
+  // under it, so the response says what went — the notes are the only record of it, and a caller
+  // that wanted to keep a page has to read them first.
+  rpc DeletePage(DeletePageRequest) returns (DeletePageResponse);
+}
+
+message DeletePageRequest {
+  string base_id = 1;
+  string node_id = 2;
+}
+
+message DeletePageResponse {
+  bool deleted = 1;
+  // What went with it. A folder removal is recursive and the response does not enumerate the
+  // subtree, so a caller that wants to know what is gone asks before it commits rather than
+  // after.
+  repeated string notes = 2;
+}
+
+message CreatePageFolderRequest {
+  string base_id = 1;
+  // The folder path to create, slash-separated. A path whose parent does not exist is refused
+  // rather than created: a typo that silently makes a tree is a typo nobody finds.
+  string tree_path = 2;
+  string name = 3;
+  repeated string tags = 4;
+  string description = 5;
+}
+
+message CreatePageFolderResponse {
+  PageNode node = 1;
+}
+
+message CreatePageRequest {
+  string base_id = 1;
+  // The folder the page sits in, slash-separated. Empty for the root.
+  string parent_path = 2;
+  string name = 3;
+  // The question the page answers. It is what the body is synthesized from, so it is the whole of
+  // what a page is given.
+  string source_query = 4;
+  // What the page is built from. This is a filter, not a label: a page tagged with descriptive
+  // terms it was not given matches nothing, and the page will be empty.
+  repeated string tags = 5;
+  // Defaults are the backend's, and they are not nothing: incremental refresh after every
+  // consolidation, over observations, excluding mental models. They are stated here so a caller can
+  // see what a page does before it creates it.
+  PageTrigger trigger = 6;
+  string description = 7;
+}
+
+message CreatePageResponse {
+  PageNode node = 1;
+}
+
+message UpdatePageNodeRequest {
+  string base_id = 1;
+  string node_id = 2;
+  // Absent leaves it; present changes it. There is no body field, by design.
+  optional string name = 3;
+  PageTrigger trigger = 4;
+  repeated string tags = 5;
+  optional string description = 6;
+}
+
+message UpdatePageNodeResponse {
+  PageNode node = 1;
+}
+
+message RefreshPageRequest {
+  string base_id = 1;
+  string page_id = 2;
+  // Rebuild from scratch rather than incrementally. A full generation has no previous document to
+  // edit, so it is the only way a page's first build happens and the slower way to change an
+  // existing one.
+  bool full = 3;
+}
+
+message RefreshPageResponse {
+  PageNode node = 1;
+  string operation_id = 2;
+  // What the refresh is about to change, for a caller that wants to record it.
+  repeated string notes = 3;
+}
+
+message PreviewPageRefreshRequest {
+  string base_id = 1;
+  string page_id = 2;
+  bool full = 3;
+}
+
+message PreviewPageRefreshResponse {
+  // Whether the backend would do anything.
+  bool would_refresh = 1;
+  // What it would use, which is the thing worth seeing: a page whose trigger matches nothing is a
+  // page that will stay empty however many times it is refreshed.
+  repeated string input_tags = 2;
+  repeated string input_fact_types = 3;
+  bool is_stale = 4;
+  repeated string notes = 5;
+}
+
+message ExportPageBundleRequest {
+  string base_id = 1;
+  string subtree = 2;
+}
+
+message ExportPageBundleResponse {
+  repeated ProjectedFile files = 1;
+  repeated string skipped = 2;
+}
+
+// A mental model is the synthesized document behind a page. It is kept and rewritten as the base
+// changes, which is the property that makes it a projection and not authority.
+message MentalModel {
+  string id = 1;
+  string base_id = 2;
+  string name = 3;
+  // The question it answers.
+  string source_query = 4;
+  // The body, as markdown. It is what the system currently believes and it changes without review.
+  string text = 5;
+  bool has_text = 6;
+  repeated string tags = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  // When its last refresh failed. A model that has not been refreshed since its inputs changed, and
+  // one whose last refresh failed, are different problems with different fixes, so the failure is
+  // its own field rather than a flag on the staleness the caller reads elsewhere.
+  google.protobuf.Timestamp last_refresh_failed_at = 9;
+}
+
+// MentalModelService manages the synthesized documents themselves.
+//
+// It is separate from `PageService` because a model is not a page: a model is the document, a page
+// is a position in a tree that a model maintains. A deployment that never uses the page tree still
+// wants to reason and to see what it reasoned.
+service MentalModelService {
+  // @toolbox.side-effects read_only
+  // ListMentalModels returns the synthesized documents a base holds.
+  rpc ListMentalModels(ListMentalModelsRequest) returns (ListMentalModelsResponse);
+
+  // @toolbox.side-effects create
+  // CreateMentalModel creates one directly, without putting it in a page tree.
+  rpc CreateMentalModel(CreateMentalModelRequest) returns (CreateMentalModelResponse);
+
+  // @toolbox.side-effects update
+  // UpdateMentalModel changes a model's question, tags or trigger.
+  //
+  // Not its body. The body is regenerated from the question, and accepting a body here would make
+  // the model's current beliefs something a caller chose rather than something the system derived.
+  rpc UpdateMentalModel(UpdateMentalModelRequest) returns (UpdateMentalModelResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteMentalModel removes a model and the document it maintains.
+  rpc DeleteMentalModel(DeleteMentalModelRequest) returns (DeleteMentalModelResponse);
+
+  // @toolbox.side-effects read_only
+  // GetMentalModelHistory returns a model's refresh history.
+  //
+  // It is the record of how the system's beliefs about a question moved, which is a different thing
+  // from the beliefs themselves and the thing a person wants when the current answer looks wrong.
+  rpc GetMentalModelHistory(GetMentalModelHistoryRequest) returns (GetMentalModelHistoryResponse);
+
+  // @toolbox.side-effects update
+  // ClearMentalModel empties a model's body, leaving the model and its configuration.
+  //
+  // It is a write even though it leaves a document in place, because what it destroys is derived
+  // content, and a model that is empty and a model that does not exist are different states with
+  // different next steps.
+  rpc ClearMentalModel(ClearMentalModelRequest) returns (ClearMentalModelResponse);
+}
+
+message ListMentalModelsRequest {
+  string base_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListMentalModelsResponse {
+  repeated MentalModel models = 1;
+  string next_page_token = 2;
+}
+
+message CreateMentalModelRequest {
+  string base_id = 1;
+  string name = 2;
+  string source_query = 3;
+  repeated string tags = 4;
+  PageTrigger trigger = 5;
+  string description = 6;
+}
+
+message CreateMentalModelResponse {
+  MentalModel model = 1;
+}
+
+message UpdateMentalModelRequest {
+  string base_id = 1;
+  string model_id = 2;
+  optional string name = 3;
+  optional string source_query = 4;
+  PageTrigger trigger = 5;
+  repeated string tags = 6;
+  optional string description = 7;
+}
+
+message UpdateMentalModelResponse {
+  MentalModel model = 1;
+}
+
+message DeleteMentalModelRequest {
+  string base_id = 1;
+  string model_id = 2;
+}
+
+message DeleteMentalModelResponse {
+  bool deleted = 1;
+  repeated string notes = 2;
+}
+
+message GetMentalModelHistoryRequest {
+  string base_id = 1;
+  string model_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message GetMentalModelHistoryResponse {
+  repeated ModelRevision revisions = 1;
+  string next_page_token = 2;
+}
+
+message ModelRevision {
+  string text = 1;
+  google.protobuf.Timestamp at = 2;
+  // What prompted the rewrite: a consolidation, a scheduled run, or a person.
+  string trigger = 3;
+  // Whether the refresh failed. A history that reports only successes reads as a model that has
+  // never been wrong.
+  bool failed = 4;
+  string failure = 5;
+}
+
+message ClearMentalModelRequest {
+  string base_id = 1;
+  string model_id = 2;
+}
+
+message ClearMentalModelResponse {
+  bool cleared = 1;
+  repeated string notes = 2;
+}
+
+// A directive is a hand-written rule the reasoning step must follow. It is never rewritten by the
+// system, which is what distinguishes it from everything else in a base.
+message Directive {
+  string id = 1;
+  string base_id = 2;
+  string text = 3;
+  repeated string tags = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  // Whether it is active. A disabled directive is retained rather than deleted, so a rule somebody
+  // turned off can be turned back on with its text intact.
+  bool enabled = 7;
+}
+
+// DirectiveService manages the rules the reasoning step follows.
+//
+// It is a small service and it is separate because the thing it manages is categorically different:
+// a directive is the only content in a base a person writes and the system never rewrites.
+service DirectiveService {
+  // @toolbox.side-effects read_only
+  // ListDirectives returns a base's directives.
+  rpc ListDirectives(ListDirectivesRequest) returns (ListDirectivesResponse);
+
+  // @toolbox.side-effects create
+  // CreateDirective adds a rule.
+  rpc CreateDirective(CreateDirectiveRequest) returns (CreateDirectiveResponse);
+
+  // @toolbox.side-effects read_only
+  // GetDirective reads one rule.
+  rpc GetDirective(GetDirectiveRequest) returns (GetDirectiveResponse);
+
+  // @toolbox.side-effects update
+  // UpdateDirective changes a rule's text, tags or whether it is active.
+  rpc UpdateDirective(UpdateDirectiveRequest) returns (UpdateDirectiveResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteDirective removes a rule.
+  //
+  // It is a refusal-with-a-way-forward rather than a disable: a rule that is quietly retained after
+  // somebody believes they removed it is a rule that keeps governing answers, and nothing in the base
+  // would say so. `UpdateDirective` with `enabled = false` is how a rule is turned off on purpose.
+  rpc DeleteDirective(DeleteDirectiveRequest) returns (DeleteDirectiveResponse);
+}
+
+message ListDirectivesRequest {
+  string base_id = 1;
+  repeated string tags = 2;
+  bool enabled_only = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListDirectivesResponse {
+  repeated Directive directives = 1;
+  string next_page_token = 2;
+}
+
+message CreateDirectiveRequest {
+  string base_id = 1;
+  string text = 2;
+  repeated string tags = 3;
+}
+
+message CreateDirectiveResponse {
+  Directive directive = 1;
+}
+
+message GetDirectiveRequest {
+  string base_id = 1;
+  string directive_id = 2;
+}
+
+message GetDirectiveResponse {
+  Directive directive = 1;
+}
+
+message UpdateDirectiveRequest {
+  string base_id = 1;
+  string directive_id = 2;
+  optional string text = 3;
+  repeated string tags = 4;
+  optional bool enabled = 5;
+}
+
+message UpdateDirectiveResponse {
+  Directive directive = 1;
+}
+
+message DeleteDirectiveRequest {
+  string base_id = 1;
+  string directive_id = 2;
+  // Confirm the removal, so a deletion of a governing rule is always deliberate.
+  bool confirm = 3;
+}
+
+message DeleteDirectiveResponse {
+  bool deleted = 1;
+}
+
+// An observation is a consolidated, deduplicated, evidence-bearing belief synthesised from facts.
+message Observation {
+  string id = 1;
+  string base_id = 2;
+  string text = 3;
+  // The facts it was consolidated from. They are what a reader checks when they disagree with it.
+  repeated string fact_ids = 4;
+  repeated string entities = 5;
+  repeated string tags = 6;
+  google.protobuf.Timestamp observed_at = 7;
+  // How many facts support it. A high count is not a high confidence; it is a number, and it is
+  // reported because a reader deciding whether to argue with a claim wants it.
+  int32 support_count = 8;
+}
+
+// ObservationService is administration over the consolidation layer.
+//
+// It is separate from the query services because consolidation is the expensive, asynchronous,
+// occasionally-wrong part of a base, and an operator reaching for it is usually reaching for it
+// because something looked wrong. Those are different conversations from "what does this base know".
+service ObservationService {
+  // @toolbox.side-effects read_only
+  // ListObservationScopes reports the consolidation scopes in use.
+  //
+  // It matters more than it looks: a corpus is mostly provenance tags, and how many consolidation
+  // passes a tagged memory gets decides whether observations are fragmented by those tags. Reporting
+  // the scopes is how somebody finds out.
+  rpc ListObservationScopes(ListObservationScopesRequest) returns (ListObservationScopesResponse);
+
+  // @toolbox.side-effects read_only
+  // PreviewConsolidation reports what a set of candidate strategies would claim, without
+  // consolidating.
+  //
+  // It is a preview of a *proposal*, not of a base. The backend's endpoint answers "given these
+  // strategies, which facts would each one take", so a preview that named no strategies would
+  // be asking the backend to guess the answer and would have nothing to compare a plan against.
+  // That is why this takes the strategies rather than a fact list: the claims are a function of
+  // the strategies, and a fact list is a property of the base rather than of the proposal.
+  //
+  // It cannot report the observations a pass would produce. Consolidation is an LLM pass, and
+  // predicting its output without running it would be inventing it.
+  rpc PreviewConsolidation(PreviewConsolidationRequest) returns (PreviewConsolidationResponse);
+
+  // @toolbox.side-effects update
+  // TriggerConsolidation starts a consolidation pass.
+  //
+  // It is asynchronous, because consolidation is an LLM pass over a base's facts and cannot be a
+  // synchronous call. It returns an operation rather than a result.
+  rpc TriggerConsolidation(TriggerConsolidationRequest) returns (TriggerConsolidationResponse);
+
+  // @toolbox.side-effects update
+  // RecoverConsolidation resumes an interrupted consolidation.
+  //
+  // It is separate from triggering a new one because the two answer different questions: a new pass
+  // starts from scratch, and recovery resumes one that stopped half-way — and starting a new one to
+  // achieve the second is how a base loses the work the first had already done.
+  rpc RecoverConsolidation(RecoverConsolidationRequest) returns (RecoverConsolidationResponse);
+
+  // @toolbox.side-effects delete
+  // ClearBaseObservations removes a base's observations, keeping its facts.
+  //
+  // It is the middle of the three clear operations, and it exists because it is the one an operator
+  // reaches for: facts are expensive to produce and cheap to keep, observations are the other way
+  // round, and dropping the observations is what makes a base's derived beliefs be rebuilt from
+  // facts that are still there.
+  rpc ClearBaseObservations(ClearBaseObservationsRequest) returns (ClearBaseObservationsResponse);
+}
+
+message ListObservationScopesRequest {
+  string base_id = 1;
+}
+
+message ListObservationScopesResponse {
+  repeated ObservationScope scopes = 1;
+}
+
+message ObservationScope {
+  string id = 1;
+  string base_id = 2;
+  // `per_tag`, `combined` or `shared`.
+  string mode = 3;
+  repeated string tags = 4;
+  int32 observation_count = 5;
+  google.protobuf.Timestamp last_consolidated_at = 6;
+}
+
+message PreviewConsolidationRequest {
+  string base_id = 1;
+  // The candidate strategies. At least one, because a preview of nothing is a preview of
+  // whatever the backend decides a default is — which is the thing a caller is trying to avoid
+  // having to find out by consolidating.
+  repeated ConsolidationStrategy strategies = 2;
+}
+
+message ConsolidationStrategy {
+  // What the strategy is for, in prose. Empty means the base's own mission, and it is
+  // reported as empty rather than filled in so that a caller can see whether it was set.
+  string mission = 1;
+  // Which facts the strategy would draw from, as patterns over the tag namespace.
+  //
+  // These are the flat `TagPattern` and not the recursive `TagGroup` above, because that is
+  // the shape the backend's own consolidation scope uses — a set of tags and how they combine.
+  // A consolidation scope cannot be a boolean tree, so expressing it as one would be a
+  // translation that could not be inverted.
+  repeated TagPattern scopes = 2;
+  // The most observations the strategy would produce per scope. Zero means the backend's own
+  // limit, and it is reported back as whatever the backend says rather than as the zero that
+  // was sent.
+  int32 max_observations_per_scope = 3;
+}
+
+message TagPattern {
+  // A strategy applies to a pattern when the base's facts match it this way. `any`, `all`,
+  // `any_strict` or `all_strict`; absent means the backend's own, and it is reported back
+  // rather than assumed.
+  optional string tags_match = 1;
+  repeated string tags = 2;
+}
+
+message PreviewConsolidationResponse {
+  // One entry per strategy, in the order the strategies were given. Order is preserved rather
+  // than sorted so that a caller comparing a preview against the plan it is checking keeps
+  // them aligned.
+  repeated StrategyClaim claims = 1;
+  // How many scopes the backend looked at, which is the denominator a claim is a fraction of.
+  int32 scopes_scanned = 2;
+  // Whether the backend had everything it needed. A preview that stopped early says so, because
+  // a claim computed from half the base is a number about half a base.
+  bool complete = 3;
+  repeated string notes = 4;
+}
+
+message StrategyClaim {
+  // The strategy's position in the request. The backend identifies strategies by index and
+  // carries no name, so the index is the only way to line a claim up with the strategy that
+  // produced it — which is the whole use of a preview.
+  int32 index = 1;
+  // Whether the strategy would run at all. An inactive one claims nothing, and reporting its
+  // zero beside an active one's zero would read as the two being equal.
+  bool active = 2;
+  // Facts this strategy would take, all of its scopes together. Two strategies claiming the
+  // same fact is fragmentation, and it is visible here rather than discovered in the
+  // observations afterwards.
+  int32 facts_claimed = 3;
+  // One entry per scope the strategy would consolidate. A scope that matched and was dropped is
+  // reported with a zero rather than omitted, because that is where a proposal is quietly
+  // doing nothing and a list of successful scopes would not show it.
+  repeated ClaimedScopeRule rules = 4;
+}
+
+message ClaimedScopeRule {
+  // Facts this scope selects, and how many the strategy would keep of them. They differ when a
+  // strategy discards, and a caller reading only the kept count would not know the scope was
+  // mostly noise.
+  int32 matched = 1;
+  int32 taken = 2;
+  // Observations this scope would produce. Zero with a non-zero `matched` is a scope that was
+  // selected and dropped.
+  int32 observations = 3;
+  // Which scopes these were, with how many facts each holds. A caller finding the scope that
+  // matched nothing needs the tag set to search for, not a count.
+  repeated string scopes = 4;
+}
+
+message TriggerConsolidationRequest {
+  string base_id = 1;
+  repeated string fact_ids = 2;
+  string observation_scope = 3;
+}
+
+message TriggerConsolidationResponse {
+  string operation_id = 1;
+}
+
+message RecoverConsolidationRequest {
+  string base_id = 1;
+  // The scope to resume. Empty resumes whatever is actually interrupted.
+  string observation_scope = 2;
+}
+
+message RecoverConsolidationResponse {
+  string operation_id = 1;
+  repeated string notes = 2;
+}
+
+message ClearBaseObservationsRequest {
+  string base_id = 1;
+  // The scopes to clear. Empty clears every scope in the base.
+  repeated string observation_scopes = 2;
+}
+
+message ClearBaseObservationsResponse {
+  int32 cleared = 1;
+  repeated string notes = 2;
+}
+
+// EntityService reads the entity graph.
+//
+// An entity is a name the extractor found and resolved, and the graph is how a fact connects to
+// things outside its own text. It is named here rather than imported from the backend's vocabulary,
+// because it is a provider-neutral word and the backend's is not.
+service EntityService {
+  // @toolbox.side-effects read_only
+  // ListEntities returns the entities a base knows.
+  rpc ListEntities(ListEntitiesRequest) returns (ListEntitiesResponse);
+
+  // @toolbox.side-effects read_only
+  // GetEntity reads one entity, its type and what it is mentioned in.
+  rpc GetEntity(GetEntityRequest) returns (GetEntityResponse);
+
+  // @toolbox.side-effects read_only
+  // GetEntityGraph returns the entity graph.
+  //
+  // This is the structural read behind "how do these two things relate", and it is worth naming
+  // that it is a graph and not a search: it answers what is connected, not what is relevant, and a
+  // caller that wants relevance wants `Recall`.
+  rpc GetEntityGraph(GetEntityGraphRequest) returns (GetEntityGraphResponse);
+}
+
+message Entity {
+  string id = 1;
+  string base_id = 2;
+  string name = 3;
+  // What kind of thing the name is. The backend reports no type of its own and this is empty
+  // unless the base's own metadata carries one, which it says rather than reporting the
+  // canonical name as a type — a type field filled with the name reads as a classification
+  // the system never made.
+  string type = 4;
+  int32 mention_count = 5;
+  repeated string tags = 6;
+  repeated string fact_ids = 7;
+  // When the name was first and last seen, from the backend's own bookkeeping.
+  google.protobuf.Timestamp first_seen = 9;
+  google.protobuf.Timestamp last_seen = 10;
+  // Consolidated observations that mention it.
+  //
+  // A count and not a list of identifiers, because the backend's own references carry the
+  // claim's *text* rather than an identifier — there is nothing here to traverse. A list field
+  // that was always empty would be a field a caller checked and found nothing in, which reads
+  // as "this entity is in no observation" rather than as "this build cannot say which".
+  int32 observation_count = 8;
+}
+
+message ListEntitiesRequest {
+  string base_id = 1;
+  string query = 2;
+  repeated string types = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListEntitiesResponse {
+  repeated Entity entities = 1;
+  string next_page_token = 2;
+}
+
+message GetEntityRequest {
+  string base_id = 1;
+  string entity_id = 2;
+}
+
+message GetEntityResponse {
+  Entity entity = 1;
+}
+
+message GetEntityGraphRequest {
+  string base_id = 1;
+  // A starting point. Empty walks the whole graph, which on a large base is a lot; the server's
+  // limits still apply.
+  string root_entity_id = 2;
+  int32 depth = 3;
+  int32 limit = 4;
+}
+
+message GetEntityGraphResponse {
+  repeated GraphNode nodes = 1;
+  repeated GraphLink links = 2;
+  // Whether the walk was truncated. A graph that silently stopped early is a graph a reader will
+  // over-read.
+  bool truncated = 5;
+}
+
+// A template is a versioned manifest that configures a base and defines its directives and models.
+message Template {
+  string id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  // The configuration the template applies.
+  BaseConfig config = 5;
+  // The directives it defines. These are generated, not authored, which is why importing a template
+  // is a create-and-update rather than a write to the corpus.
+  repeated string directives = 6;
+  // The models it defines.
+  repeated string source_queries = 7;
+  // The schema the template's fields must satisfy, for a caller validating before applying.
+  repeated string required_fields = 8;
+}
+
+// TemplateService configures a base from a versioned manifest.
+//
+// It is separate because applying a template is configuration plus generation, and lumping it with
+// content would make every content read depend on the right to rewrite a base's settings.
+service TemplateService {
+  // @toolbox.side-effects read_only
+  // GetTemplateSchema reports the fields a template may carry and what each requires.
+  //
+  // It is a read because a template that is applied without its schema being readable produces a
+  // base nobody can configure afterwards, and the caller finds out at the worst moment.
+  rpc GetTemplateSchema(GetTemplateSchemaRequest) returns (GetTemplateSchemaResponse);
+
+  // @toolbox.side-effects read_only
+  // ExportTemplate reads a base's configuration as a template.
+  //
+  // It exports configuration, not content. The corpus is in a repository and the base is disposable,
+  // and a "backup" that included derived knowledge would be a backup of things nobody can restore.
+  rpc ExportTemplate(ExportTemplateRequest) returns (ExportTemplateResponse);
+
+  // @toolbox.side-effects create update
+  // ImportTemplate applies a template: its configuration, and the directives and models it defines.
+  //
+  // As `ApplyReconcile` is, it takes a confirmation — a template changes what a base believes about
+  // itself and what rules govern its reasoning, and a person should see that happening. The content
+  // it defines is generated, which is the difference from a corpus write.
+  rpc ImportTemplate(ImportTemplateRequest) returns (ImportTemplateResponse);
+
+  // @toolbox.side-effects read_only
+  // ExportBase returns a base's configuration and corpus identity as a portable bundle.
+  rpc ExportBase(ExportBaseRequest) returns (ExportBaseResponse);
+
+  // @toolbox.side-effects create update delete
+  // ImportBase applies an exported bundle, creating the base if it does not exist.
+  //
+  // It can replace an existing base's contents, which is why it is classified as a delete as well as
+  // a create and an update, and why it needs a confirmation with the same care.
+  rpc ImportBase(ImportBaseRequest) returns (ImportBaseResponse);
+
+  // @toolbox.side-effects create update delete
+  // CloneBase copies a base's configuration and content into a new one.
+  //
+  // The content copy is a re-ingest rather than a copy, because the derived half is not a thing that
+  // can be copied faithfully: its identifiers are a function of extraction, and a copy that looked
+  // identical would have different facts underneath.
+  rpc CloneBase(CloneBaseRequest) returns (CloneBaseResponse);
+}
+
+message GetTemplateSchemaRequest {}
+
+message GetTemplateSchemaResponse {
+  repeated TemplateField fields = 1;
+  // The template names this build understands.
+  string version = 2;
+}
+
+message TemplateField {
+  string name = 1;
+  string type = 2;
+  bool required = 3;
+  string description = 4;
+  string default = 5;
+}
+
+message ExportTemplateRequest {
+  string base_id = 1;
+  string name = 2;
+  string version = 3;
+}
+
+message ExportTemplateResponse {
+  Template template = 1;
+  // The digest of the exported template, so an import can refuse one that has changed since it was
+  // confirmed.
+  string digest = 2;
+}
+
+message ImportTemplateRequest {
+  // The base to configure. Created if it does not exist.
+  string base_id = 1;
+  Template template = 2;
+  // The template's digest, as `ExportTemplate` reported it. Required, for the same reason a
+  // reconcile's is.
+  string confirm = 3;
+}
+
+message ImportTemplateResponse {
+  Base base = 1;
+  BaseConfig config = 2;
+  // What the import actually did, as the backend reports it rather than as a read-back of the
+  // base. The distinction is the point: a directive that already existed was updated and one
+  // that did not was created, and a caller told "created" about an update would conclude a
+  // rule they had written had been replaced.
+  repeated string rules_created = 3;
+  repeated string rules_updated = 4;
+  repeated string models_created = 5;
+  repeated string models_updated = 6;
+  // Whether the template's configuration was applied. It can be refused while the directives
+  // and models went in, which leaves a base with new rules and old settings; reporting the
+  // two independently is what makes that visible.
+  bool config_applied = 7;
+  repeated string warnings = 8;
+}
+
+message ExportBaseRequest {
+  string base_id = 1;
+  // Include the ownership record, so a restore knows what it already owns. Without it a restore
+  // re-ingests everything, which is correct and slow.
+  bool include_ownership = 2;
+}
+
+message ExportBaseResponse {
+  Template template = 1;
+  // The corpus the base reconciles from, as identity rather than as content: the content is in a
+  // repository and this records which one.
+  OwnershipBinding corpus = 2;
+  string digest = 3;
+}
+
+message ImportBaseRequest {
+  // The base to create or replace.
+  string base_id = 1;
+  Template template = 2;
+  OwnershipBinding corpus = 3;
+  // The bundle's digest, as `ExportBase` reported it.
+  string confirm = 4;
+  // Replace the existing base's contents rather than merging into them.
+  bool replace = 5;
+}
+
+message ImportBaseResponse {
+  Base base = 1;
+  repeated string warnings = 2;
+  // The reconcile that should follow, because importing a base's configuration does not populate it.
+  ReconcilePlan plan = 3;
+}
+
+message CloneBaseRequest {
+  string source_base_id = 1;
+  string target_base_id = 2;
+  string name = 3;
+  bool include_ownership = 4;
+  // The clone's digest, from an `ExportBase` of the source. Required.
+  string confirm = 5;
+}
+
+message CloneBaseResponse {
+  Base base = 1;
+  repeated string warnings = 2;
+  ReconcilePlan plan = 3;
+}
+
+// Operation is a unit of asynchronous work: an extraction, a consolidation, a refresh.
+message Operation {
+  string id = 1;
+  string base_id = 2;
+  // What it is doing, from a fixed vocabulary this contract owns: `retain`, `consolidation`,
+  // `refresh`, `import`.
+  string kind = 3;
+  // `pending`, `running`, `succeeded`, `failed` or `cancelled`.
+  string status = 4;
+  // How far along, 0..100. A null progress is reported as absent rather than as zero, because "just
+  // started" and "no idea" are different states.
+  int32 progress = 5;
+  bool has_progress = 6;
+  int32 items_total = 7;
+  int32 items_done = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp started_at = 10;
+  google.protobuf.Timestamp finished_at = 11;
+  // Why it failed, when it did. A failure with no reason is the hardest kind to act on.
+  string error = 12;
+  bool retryable = 13;
+}
+
+// OperationService follows asynchronous work.
+//
+// It exists because the corpus half of this system is asynchronous by necessity — a thousand
+// documents is a thousand extractions — and a caller that started one and got an identifier needs
+// somewhere to ask what became of it.
+service OperationService {
+  // @toolbox.side-effects read_only
+  // ListOperations returns a base's operations, newest first.
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+
+  // @toolbox.side-effects read_only
+  // GetOperation reads one operation.
+  rpc GetOperation(GetOperationRequest) returns (GetOperationResponse);
+
+  // @toolbox.side-effects update
+  // CancelOperation asks for an operation to stop.
+  //
+  // It asks rather than stops, because the work is in the backend and a cancel is a request it may
+  // not honour immediately. The response reports what the backend said, and the operation is
+  // re-read afterwards, so a caller that needs certainty polls rather than believes.
+  rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
+
+  // @toolbox.side-effects create
+  // RetryOperation starts a failed operation again.
+  //
+  // It is a create rather than an update, because the retry is new work with a new identifier: a
+  // caller following the original would be told about work that is no longer happening.
+  rpc RetryOperation(RetryOperationRequest) returns (RetryOperationResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteOperation removes an operation's record.
+  //
+  // It refuses a running one, because a record removed while the work continues leaves a caller with
+  // no way to find out what happened to it.
+  rpc DeleteOperation(DeleteOperationRequest) returns (DeleteOperationResponse);
+}
+
+message ListOperationsRequest {
+  string base_id = 1;
+  // Restrict to these states. Empty means all of them.
+  repeated string statuses = 2;
+  repeated string kinds = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListOperationsResponse {
+  repeated Operation operations = 1;
+  string next_page_token = 2;
+}
+
+message GetOperationRequest {
+  string base_id = 1;
+  string operation_id = 2;
+}
+
+message GetOperationResponse {
+  Operation operation = 1;
+}
+
+message CancelOperationRequest {
+  string base_id = 1;
+  string operation_id = 2;
+}
+
+message CancelOperationResponse {
+  Operation operation = 1;
+  // Whether the backend accepted the request. A false here is not a failure: the operation may
+  // already have finished, and "I asked and it was too late" is a different answer from "it was
+  // cancelled".
+  bool accepted = 2;
+  string note = 3;
+}
+
+message RetryOperationRequest {
+  string base_id = 1;
+  string operation_id = 2;
+}
+
+message RetryOperationResponse {
+  // The new operation. It is not the one that was retried.
+  Operation operation = 1;
+}
+
+message DeleteOperationRequest {
+  string base_id = 1;
+  string operation_id = 2;
+}
+
+message DeleteOperationResponse {
+  bool deleted = 1;
+}

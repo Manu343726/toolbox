@@ -496,3 +496,59 @@ func short(digest string) string {
 	}
 	return digest
 }
+
+// corpusPlan computes the reconcile plan for a base, with this deployment's own corpus
+// configuration.
+//
+// It exists because the plan is wanted by more than the plan method. A base import answers "what
+// would populate this" and an import that cannot answer that is a caller finding out later; and both
+// need exactly the plan `PlanReconcile` produces, computed the same way over the same directory and
+// the same record. So they call the same function rather than each assembling its own, because two
+// plans of one directory that disagree are worse than no second plan.
+func (p *Provider) corpusPlan(ctx context.Context, baseID string) (*knowledgev1.ReconcilePlan, error) {
+	state, err := p.prepare(ctx, baseID, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	opts := knowledge.PlanOptions{
+		BaseID:    baseID,
+		Owner:     p.opts.Owner,
+		Namespace: state.identity.Namespace,
+	}
+	if len(state.degraded) > 0 {
+		// A record that could not be loaded cannot authorise a deletion, so pruning is
+		// switched off and the reason becomes a warning. A plan that silently omitted its
+		// deletions would read as "nothing to remove".
+		opts.Prune = false
+	}
+	plan, err := knowledge.NewPlanner(state.corpus).Plan(ctx, state.record, opts)
+	if err != nil {
+		return nil, classifyPlanError(err)
+	}
+	if state.degraded != "" {
+		plan.Warnings = append(plan.Warnings, state.degraded)
+		sort.Strings(plan.Warnings)
+	}
+	return planMessage(plan, state), nil
+}
+
+// ownershipBinding describes which corpus a base reconciles from, as identity rather than content.
+//
+// The content is in a repository and this records which one. That is the whole value: a bundle
+// restored on a machine with a different clone of the repository has a different corpus, and the
+// derived half that comes back with it is not the derived half that was there.
+func (p *Provider) ownershipBinding(baseID string) (*knowledgev1.OwnershipBinding, error) {
+	identity := p.bases.identity(p.client, baseID, defaultNamespace)
+	// The record is read so that a base with no record says so rather than reporting a binding
+	// for a corpus that has never been reconciled into it. `ownershipFor` swallows the error
+	// because a projection may show without one; here the absence is the answer.
+	if _, err := knowledge.LoadOwnership(p.bases.recordPath(identity), identity); err != nil {
+		return nil, err
+	}
+	return &knowledgev1.OwnershipBinding{
+		BackendOrigin: identity.BackendOrigin,
+		BaseId:        identity.BaseID,
+		CorpusRoot:    identity.CorpusRoot,
+		Namespace:     identity.Namespace,
+	}, nil
+}

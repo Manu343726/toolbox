@@ -120,6 +120,19 @@ func (h *Host) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("construct subsystem %q: %w", name, err)
 		}
+		// A factory may report that there is nothing to start: a subsystem that only
+		// contributes, or one this deployment has not configured, is not a failure and not
+		// a server. It is a nil with no error.
+		//
+		// It is dropped here rather than carried, because every later phase — the
+		// contributions, the start loop, the service list — reads a `*subsystem.Server` and
+		// would have to know about the case. A nil in that list turns "this deployment does
+		// not use a knowledge backend" into a crash on a path that runs while a command
+		// tree is being built, so the failure would be "cannot print help" and nothing
+		// about the subsystem that was absent.
+		if server == nil {
+			continue
+		}
 		built = append(built, server)
 	}
 
@@ -264,6 +277,11 @@ func (h *Host) ServiceNames() ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("compose subsystem %q: %w", name, err)
 		}
+		// The same case as the composition path, for the same reason: this calls a factory
+		// directly rather than reading a filtered list, so it has to drop the nil itself.
+		if server == nil {
+			continue
+		}
 		for _, service := range server.Services() {
 			if service.Name == "" || seen[service.Name] {
 				continue
@@ -281,6 +299,12 @@ func startedServiceNames(servers map[string]*subsystem.Server) []string {
 	seen := map[string]bool{}
 	var names []string
 	for _, server := range servers {
+		// Same reasoning as the composition path: a nil is a subsystem that reported
+		// nothing to start, and reading its services would turn "not configured" into a
+		// crash on a path that runs while a command tree is being built.
+		if server == nil {
+			continue
+		}
 		for _, service := range server.Services() {
 			if service.Name == "" || seen[service.Name] {
 				continue

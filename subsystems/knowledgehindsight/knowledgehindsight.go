@@ -171,6 +171,14 @@ func New(options Options) (*subsystem.Server, error) {
 	corpusPath, corpusHandler := knowledgeconnect.NewCorpusServiceHandler(p.corpusHandler())
 	mountPath, mountHandler := knowledgeconnect.NewMountServiceHandler(p.mountHandler())
 	basePath, baseHandler := knowledgeconnect.NewKnowledgeBaseServiceHandler(p.baseHandler())
+	memoryPath, memoryHandler := knowledgeconnect.NewMemoryServiceHandler(p.memoryHandler())
+	entityPath, entityHandler := knowledgeconnect.NewEntityServiceHandler(p.entityHandler())
+	pagePath, pageHandler := knowledgeconnect.NewPageServiceHandler(p.pageHandler())
+	modelPath, modelHandler := knowledgeconnect.NewMentalModelServiceHandler(p.mentalModelHandler())
+	directivePath, directiveHandler := knowledgeconnect.NewDirectiveServiceHandler(p.directiveHandler())
+	observationPath, observationHandler := knowledgeconnect.NewObservationServiceHandler(p.observationHandler())
+	templatePath, templateHandler := knowledgeconnect.NewTemplateServiceHandler(p.templateHandler())
+	operationPath, operationHandler := knowledgeconnect.NewOperationServiceHandler(p.operationHandler())
 	return subsystem.NewServer(subsystem.Config{
 		Name:          registered,
 		Version:       Version,
@@ -182,6 +190,14 @@ func New(options Options) (*subsystem.Server, error) {
 			{Name: knowledgeconnect.CorpusServiceName, Path: corpusPath, Handler: corpusHandler},
 			{Name: knowledgeconnect.MountServiceName, Path: mountPath, Handler: mountHandler},
 			{Name: knowledgeconnect.KnowledgeBaseServiceName, Path: basePath, Handler: baseHandler},
+			{Name: knowledgeconnect.MemoryServiceName, Path: memoryPath, Handler: memoryHandler},
+			{Name: knowledgeconnect.EntityServiceName, Path: entityPath, Handler: entityHandler},
+			{Name: knowledgeconnect.PageServiceName, Path: pagePath, Handler: pageHandler},
+			{Name: knowledgeconnect.MentalModelServiceName, Path: modelPath, Handler: modelHandler},
+			{Name: knowledgeconnect.DirectiveServiceName, Path: directivePath, Handler: directiveHandler},
+			{Name: knowledgeconnect.ObservationServiceName, Path: observationPath, Handler: observationHandler},
+			{Name: knowledgeconnect.TemplateServiceName, Path: templatePath, Handler: templateHandler},
+			{Name: knowledgeconnect.OperationServiceName, Path: operationPath, Handler: operationHandler},
 		},
 		// A mount has to be able to outlive an RPC, so the provider supervises them in
 		// the background for as long as the server is up. Returning blocks until the

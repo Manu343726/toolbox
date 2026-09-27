@@ -27,8 +27,16 @@ import (
 type backend struct {
 	*httptest.Server
 	requests []recordedRequest
-	// responses maps a path suffix to a canned body.
+	// responses maps a path suffix to a canned body. A key may be qualified with a method and
+	// a space — "DELETE /operations/op-1" — for the cases where one path has two readers that
+	// reject each other's fields: the generated models disallow unknown properties, so a body
+	// that satisfied a status read would fail a cancel read on the same path.
 	responses map[string]string
+	// absent names path suffixes the backend should report as missing, so a test can assert
+	// on what this build says about a thing that is not there. Without it the stub would have
+	// to answer an empty body, and an empty body is a malformed response rather than an
+	// absent one — so the test would be asserting on a decoding failure.
+	absent map[string]bool
 }
 
 type recordedRequest struct {
@@ -43,7 +51,7 @@ func newBackend(t *testing.T) *backend {
 	// response fields, so a stub answering `{}` produces "no value given for required
 	// property" and a test that would otherwise pass fails for a reason that has nothing
 	// to do with what it is testing.
-	b := &backend{responses: map[string]string{
+	b := &backend{absent: map[string]bool{}, responses: map[string]string{
 		// The defaults are the shapes the generated client requires. It validates required
 		// response fields, so a stub answering `{}` produces "no value given for required
 		// property" and a test that would otherwise pass fails for a reason that has nothing
@@ -76,9 +84,23 @@ func newBackend(t *testing.T) *backend {
 		// intermittent rather than wrong, which is worse: it fails sometimes and looks
 		// like a race in this package.
 		best, bestBody := "", "{}"
-		for suffix, canned := range b.responses {
+		for key, canned := range b.responses {
+			method, suffix := "", key
+			if m, rest, ok := strings.Cut(key, " "); ok {
+				method, suffix = m, rest
+			}
+			if method != "" && method != r.Method {
+				continue
+			}
 			if strings.HasSuffix(r.URL.Path, suffix) && len(suffix) > len(best) {
 				best, bestBody = suffix, canned
+			}
+		}
+		for suffix := range b.absent {
+			if strings.HasSuffix(r.URL.Path, suffix) && len(suffix) >= len(best) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"detail":"not found"}`))
+				return
 			}
 		}
 		_, _ = w.Write([]byte(bestBody))
@@ -102,6 +124,19 @@ func readBody(t *testing.T, r *http.Request) string {
 		}
 	}
 	return sb.String()
+}
+
+// writes returns the mutating requests the stub received, so a test can assert that a refusal
+// wrote nothing without also asserting that it read nothing — which a refusal often has to do in
+// order to name what it is refusing.
+func (b *backend) writes() []recordedRequest {
+	var out []recordedRequest
+	for _, r := range b.requests {
+		if r.Method != http.MethodGet {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (b *backend) sentTo(suffix string) []recordedRequest {

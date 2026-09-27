@@ -1,6 +1,7 @@
 package knowledgehindsight
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,4 +191,68 @@ func requireBase(name string) (string, error) {
 		return "", &api.Error{Kind: api.KindInvalid, Message: "a base name or identifier is required"}
 	}
 	return strings.TrimSpace(name), nil
+}
+
+// pageWindow resolves a page size and token into the limit and offset the backend takes.
+//
+// The token is a decimal offset, and that is worth saying rather than disguising: a caller that
+// stores one and changes the page size under it gets a different slice, which is a normal
+// consequence of offset paging and not something a token can prevent. An unparseable token is a
+// caller's mistake and is refused, because silently treating it as the first page would make a
+// caller believe it had read the whole thing.
+func pageWindow(size int32, token string) (int32, int32) {
+	limit := size
+	if limit <= 0 {
+		limit = 50
+	}
+	if token == "" {
+		return limit, 0
+	}
+	// The token has already been checked by `checkToken`, so this cannot fail; a token that
+	// was not checked reads as the first page rather than as a panic.
+	offset, err := strconv.ParseInt(token, 10, 32)
+	if err != nil || offset < 0 {
+		return limit, 0
+	}
+	return limit, int32(offset)
+}
+
+// checkToken refuses a page token that is not an offset.
+func checkToken(token string) error {
+	if token == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseInt(token, 10, 32)
+	if err != nil {
+		return &api.Error{
+			Kind:    api.KindInvalid,
+			Message: "the page token " + strconv.Quote(token) + " is not a page token; tokens are decimal offsets, and an unreadable one is refused rather than treated as the first page, which would make a caller believe it had read everything",
+		}
+	}
+	if parsed < 0 {
+		return &api.Error{
+			Kind:    api.KindInvalid,
+			Message: "a page token cannot be negative; " + strconv.Quote(token) + " would read from before the first item",
+		}
+	}
+	return nil
+}
+
+// nextToken encodes where the next page starts, or the empty string when this was the last one.
+//
+// It returns the empty string when the reported total is unknown rather than when a page came back
+// short. A short page with no total is a page that happens to be the end *or* a page that was cut
+// short, and continuing to ask costs one call and losing the tail costs a fact nobody can find.
+func nextToken(offset, returned, total int32) string {
+	if total <= 0 {
+		if returned == 0 {
+			return ""
+		}
+		// There is more to try: a full-or-short page from a source that does not count.
+		return strconv.Itoa(int(offset + returned))
+	}
+	if int(offset+returned) >= int(total) {
+		return ""
+	}
+	return strconv.Itoa(int(offset + returned))
 }
