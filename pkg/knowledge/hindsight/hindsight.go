@@ -513,46 +513,6 @@ func (c *Client) ExportPages(ctx context.Context, baseID string) ([]knowledge.Pa
 	return out, nil
 }
 
-// Documents returns the retained documents in a base, for drift detection.
-//
-// It is a read of the engine half and is never used to decide what to delete. A prune walks the
-// ownership record; this exists to answer a question about what the base holds.
-func (c *Client) Documents(ctx context.Context, baseID string) ([]Document, error) {
-	resp, httpResp, err := c.api.DocumentsAPI.ListDocuments(ctx, baseID).Execute()
-	if err != nil {
-		return nil, Classify(err, httpResp, "listing the documents of base "+baseID)
-	}
-	if resp == nil {
-		return nil, nil
-	}
-	var out []Document
-	for _, d := range resp.GetItems() {
-		out = append(out, Document{
-			ID:      d.GetId(),
-			ModTime: parseLoose(d.GetUpdatedAt()),
-		})
-	}
-	return out, nil
-}
-
-// Document is one retained document as this package needs to see it.
-type Document struct {
-	ID      string
-	ModTime time.Time
-}
-
-func parseLoose(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC()
-		}
-	}
-	return time.Time{}
-}
-
 // Classify turns a failure from the generated client into a classified error.
 //
 // The generated error implements `Error() string` and nothing else: the status code, the raw body

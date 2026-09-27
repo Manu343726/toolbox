@@ -560,3 +560,50 @@ func (p Plan) digest() string {
 	}
 	return Digest([]byte(b.String()))
 }
+
+// RestrictedTo returns the plan narrowed to one subtree of the corpus, with its digest
+// recomputed.
+//
+// The digest has to be recomputed because a confirmation refers to the plan a person read. If a
+// caller previewed one directory and then confirmed, the confirmation has to match the narrowed
+// plan they saw — not the whole-corpus plan it was derived from, which is a different document
+// and which they did not read.
+//
+// Drift is dropped rather than filtered. A derived claim is contradicted by the corpus as a whole
+// and attributing it to a directory would misattribute it, so a narrowed plan reports no drift
+// rather than a partial answer that reads like a complete one.
+func (p Plan) RestrictedTo(subtree string) Plan {
+	prefix := NormalizePath(subtree)
+	if prefix == "" {
+		return p
+	}
+	keep := func(entries []PlanEntry) []PlanEntry {
+		out := make([]PlanEntry, 0, len(entries))
+		for _, e := range entries {
+			if e.Path == prefix || strings.HasPrefix(e.Path, prefix+"/") {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	narrowed := Plan{
+		BaseID:      p.BaseID,
+		Commit:      p.Commit,
+		Created:     keep(p.Created),
+		Updated:     keep(p.Updated),
+		Unchanged:   keep(p.Unchanged),
+		Deleted:     keep(p.Deleted),
+		Warnings:    p.Warnings,
+		UnreadFiles: p.UnreadFiles,
+	}
+	for _, m := range p.Moved {
+		if m.To.Path == prefix || strings.HasPrefix(m.To.Path, prefix+"/") {
+			narrowed.Moved = append(narrowed.Moved, m)
+		}
+	}
+	// The warnings are kept whole: a warning about a file outside the preview is still true
+	// and still something the reader needs, and hiding it because it names a path they did
+	// not ask for would be the plan being tidy at the expense of being honest.
+	narrowed.PlanDigest = narrowed.digest()
+	return narrowed
+}
