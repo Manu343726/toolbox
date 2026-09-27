@@ -309,6 +309,23 @@ wants when they ask a system what it knows. See §5.8.
 | X-8 | **A projection records what it was taken from** — the base, the corpus commit it reflects, and the backend's answer on whether any page in it is stale — so a reader can tell a current view from an out-of-date one. (W) |
 | X-9 | **The projection is never a reconcile input.** The whole-wiki view is the one artifact in this system that looks exactly like a corpus and is not one, so this is stated as a requirement rather than left to W-20 to cover. (U) |
 
+### Mounting the wiki
+
+A bundle of files is useful once. A filesystem is useful for as long as somebody
+is reading. See §5.9.
+
+| # | Requirement |
+|---|---|
+| M-1 | **The whole-wiki projection can be mounted as a FUSE filesystem**, so `cat`, `rg`, an editor and an agent's file tools all work against it with no vocabulary of their own. (U) |
+| M-2 | **The mount is strictly read-only.** Every write path returns `EROFS`. A writable mount would suggest the wiki is editable, which X-6 and W-15 both forbid, and an edit that vanishes on the next regeneration is worse than one that was refused. (W) |
+| M-3 | **A change invalidates the kernel's cache for what changed, not just the next poll.** Content changes call `NotifyContent`, removals call `NotifyDelete`, and a changed tree calls `NotifyEntry` on the affected names. See §5.9 for what this does and does not tell an editor. (H) |
+| M-4 | **Staleness is bounded even where notification is unavailable.** The mount sets short `AttrTimeout` and `EntryTimeout` values, so a kernel or filesystem without `FUSE_NOTIFY_INVAL_INODE` still converges, and the bound is a stated number rather than "eventually". (H) |
+| M-5 | **The change signal is a revision, not a diff.** One cheap call reports whether the projection changed and which half changed; the mount re-fetches the whole projection when it did. §5.9. (U) |
+| M-6 | **The mount is a client, and the FUSE dependency is in the binary and not in the provider.** A host with no FUSE, no `/dev/fuse`, or no `fusermount3` still builds the subsystem, still serves the contract, and still exports the same bundle. The mount failing is never the subsystem failing. (U) |
+| M-7 | **A mount that cannot start says why and exits non-zero**, naming the missing piece — `fusermount3` absent, `/dev/fuse` absent, the path already mounted, the policy refusing — and never leaves a stale mountpoint behind. (H) |
+| M-8 | **The mount serves exactly what `ExportWiki` serves**, filtered by the same policy. There is no second read path with a different authorization, because a filesystem that shows more than the API does is a hole in the policy boundary. (U) |
+| M-9 | **The mount is optional and nothing depends on it.** `ExportWiki` is the feature; the mount is one way to consume it. A deployment that never mounts loses nothing. (U) |
+
 ### The memory half — ingestion
 
 | # | Requirement |
@@ -447,7 +464,7 @@ wants when they ask a system what it knows. See §5.8.
 | N-6 | Failures are classified with `api.ErrorKind`, and the transport maps kinds to codes in one place. (new) |
 | N-7 | A capability the deployment reports as disabled is reported as unsupported, naming the flag, rather than as a 404 from a route that was never mounted. (new) |
 | N-8 | The attachment endpoint's indistinguishability of "absent" and "invisible" is preserved; a provider must not reintroduce a probe. (new) |
-| N-9 | Streaming: there is none. Every operation is unary, and adding one would be the only streaming contract in the tree. (new) |
+| N-9 | Streaming: there is none. Every operation is unary, and adding one would be the only streaming contract in the tree. **This was tested against the one feature that most wanted a stream** — the wiki mount's change notification — and held: a polled revision covers it, and §5.9 records the rejection. (new) |
 | N-10 | The provider declares one record, not one per base, and a deployment running two backends distinguishes them by identifier. (new) |
 | N-11 | **Origin-specific behaviour is stated in the contract, not discovered.** A caller can tell from the contract what a write will do to each origin, because "edits are applied at the source and reconciled in" is a promise and a silent overwrite is a bug. (U) |
 | N-12 | **Exact-term search is on by default for a corpus-backed base.** Technical prose is full of identifiers — `OAuth 2.1`, `ADR-014`, `CustomerID` — that semantic similarity alone does not reliably find, so a base reconciling a corpus keeps its keyword and text arms enabled. A deployment may turn them off having measured the cost; the point is that turning them off is a decision rather than a default. The backend exposes this as a toggle whose own default is not stated in its description, so the provider sets it explicitly for a corpus-backed base rather than inheriting it. (W) |
@@ -941,6 +958,79 @@ terminal and the wrong one here — it is a long-running process around an expor
 endpoint this subsystem can call directly, and it projects pages only. §12.2 has
 the details and the line where its coverage stops.
 
+### 5.9 Mounting the wiki
+
+`ExportWiki` returns a bundle. A bundle is a thing you download; a filesystem is
+a thing you read, and for a person auditing what a system believes it is the
+difference between looking and reading. M-1 is a FUSE mount of the same
+projection.
+
+**The mount is a client, not an RPC, and that placement is the load-bearing
+decision.** A mount lives in the filesystem namespace of whoever runs it, so an
+RPC cannot create one that the caller can see — if the subsystem runs on another
+host, the mountpoint it created would be on the wrong machine. So the contract
+exposes the *data* (`ExportWiki`) and the *change signal* (`GetProjectionRevision`),
+and a command in the subsystem's own `cmd/` consumes them. The generated command
+path builds the RPC commands; `mount` is not an RPC, so it is hand-written, and
+it is the one hand-written command in this subsystem (M-6). The FUSE library
+goes in that command's package, never in the provider, so the provider's module
+graph stays free of it and a host without FUSE still builds and serves.
+
+**Change notification, precisely.** The honest version of this feature is that
+"notified" means two different things and only one of them is reliable:
+
+| What changed | Mechanism | What the reader gets |
+|---|---|---|
+| A page or file's **content** | `fs.Inode.NotifyContent(off, sz)` | The kernel's cached copy is dropped, so the next `read()` returns the new bytes. **`cat`, `rg` and an agent's file tools are correct immediately.** |
+| A file was **removed** | `fs.Inode.NotifyDelete(name, child)` | Cache dropped *and* an inotify event is sent, per the library's own documentation: *"equivalent to `NotifyEntry`, but also sends an event to inotify watchers."* |
+| A **name** appeared or its type changed | `fs.Inode.NotifyEntry(name)` | The next `LOOKUP` is re-run. **No inotify event.** |
+
+The row that matters is the first. `NotifyContent` invalidates the cache; it does
+**not** emit an inotify event, so a GUI editor with the file open will not be
+told to reload. That is a property of the notification API, not a bug to be
+worked around, and no amount of polling changes it. M-4 is the mitigation: short
+`AttrTimeout` and `EntryTimeout` mean a re-stat converges, so a reader that
+re-reads on focus — which is most of them — sees the new content within the
+bound. **The bound is a number the implementation states, not "eventually",**
+and this document does not claim editor reload without a test that shows it.
+
+**The change signal: two cheap probes, one revision.** There is no server-side
+change feed, and M-5 therefore reports a revision rather than a diff:
+
+- **The engine half** — one `GetKnowledgeBaseTree` call. The tree carries every
+  node's `is_stale`, `timestamp` and `last_refresh_failed_at`, so a refresh that
+  has not happened yet is visible without re-exporting anything. Hash the tree
+  into the revision.
+- **The authored half** — the corpus is a local directory this subsystem already
+  walks, so `mtime` and size per file is enough. No re-hash of content, which
+  matters at three thousand files.
+
+`GetProjectionRevision` returns that revision, which half moved, and the commit
+the corpus half reflects. The mount polls it; on a change it re-fetches
+`ExportWiki` and invalidates. Polling one small call is also why **no streaming
+RPC is added**: N-9 keeps this tree unary, and a watch stream would be the only
+streaming contract in the repository for a feature that a two-second poll serves
+(§15 records the rejection).
+
+**It must not be a second read path.** M-8 is the requirement that keeps the
+policy boundary honest: the mount reads through the same calls, under the same
+policy, as `ExportWiki`. A FUSE filesystem that shows a base's conversation
+memory to someone whose policy would refuse it over RPC is a hole, and putting
+the mount inside the policy boundary is cheaper than auditing it afterwards.
+
+**What it costs to run.** `fusermount3` is setuid on most distributions, so an
+unprivileged user can mount; a container without `/dev/fuse` cannot, and neither
+can a host whose kernel lacks `FUSE_NOTIFY_INVAL_INODE` (Linux 7.13+) for the
+fast path. M-7 says a failed mount says which of these it was and exits
+non-zero, and M-6 says it never affects the subsystem. Per the repository's own
+testing rule, **no test may require a mount to work** — the mount's logic is
+tested over a plain `io/fs` filesystem with a fake revision source, and the FUSE
+wiring is exercised by hand.
+
+**Library.** `github.com/hanwen/go-fuse/v2` (v2.11.0): pure Go, no cgo, four
+small dependencies. `bazil.org/fuse` was the alternative and its last release
+predates this by three years.
+
 ## 6. The contract
 
 ### 6.1 Services
@@ -952,7 +1042,7 @@ to decide who may call it and what the MCP gateway checks before exposing it.
 
 | Service | RPCs |
 |---|---|
-| `ContentService` | `ListContent`, `GetContent`, `WriteContent`, `CurateContent`, `DeleteContent`, `GetContentTree`, `ListContentChunks`, `ReprocessContent`, `ExportWiki` |
+| `ContentService` | `ListContent`, `GetContent`, `WriteContent`, `CurateContent`, `DeleteContent`, `GetContentTree`, `ListContentChunks`, `ReprocessContent`, `ExportWiki`, `GetProjectionRevision` |
 | `QueryService` | `Search`, `Recall`, `Reflect`, `ListTags`, `PreviewExtraction`, `PreviewPrompts` |
 | `CorpusService` | `PlanReconcile`, `ApplyReconcile`, `GetCorpusStatus`, `ReadCorpusFile`, `RebuildCorpus` |
 | `KnowledgeBaseService` | `ListBases`, `GetBase`, `CreateBase`, `UpdateBase`, `DeleteBase`, `ResetBaseConfig`, `GetBaseConfig`, `UpdateBaseConfig`, `GetBaseStats`, `GetBaseIngestionSeries`, `ListBaseAliases`, `AddBaseAlias`, `SetPrimaryBaseAlias`, `RemoveBaseAlias` |
@@ -988,6 +1078,12 @@ both halves, and a service named for pages cannot return a tree containing
 authored files. It returns the same `{path, content}` bundle shape as
 `ExportPageBundle`, which is the backend's own shape and is the reason the two
 can be composed without a second translation (X-4, §12.2).
+
+`GetProjectionRevision` sits next to it because they are one feature: the bundle
+is the data and the revision is how a client knows it changed. It is unary and
+cheap — one `GetKnowledgeBaseTree` call plus a directory stat — which is what
+lets the mount poll and lets N-9 stand (§5.9). **There is no streaming watch
+RPC**, and §15 records why rather than leaving it to be re-proposed.
 
 `CorpusService` exists at all because reconcile is not a content operation: it
 is a comparison between a directory and a base, and the answer is a plan.
@@ -1544,6 +1640,25 @@ a move would then be a delete and a create and every fact would be orphaned. The
 reconciler reports a moved file with no declared identity rather than treating it
 as two files, so the omission is visible.
 
+**Settled — the wiki is mounted by a command, not by an RPC** (§5.9). A FUSE
+mount exists in the filesystem namespace of the process that creates it, so an RPC
+whose handler runs on another host would mount it on the wrong machine. The
+contract exposes the bundle and the revision; a hand-written `mount`
+subcommand in the subsystem's own `cmd/` consumes them. The rejected
+alternative — a `MountWiki` RPC returning a handle, and the server holding the
+mount open — would only work in the single-host case, would put a filesystem in
+the lifecycle of a request, and would leave an unmountable mountpoint whenever
+the server stopped.
+
+**Settled — change notification is a polled revision, not a watch stream**
+(§5.9). A server-streaming `WatchProjection` would be the only streaming
+contract in the repository, which N-9 currently rules out, and it would be the
+first thing to break if the contract moved transports. One small unary call
+covers both halves — the backend's tree for the engine, `mtime` and size for the
+corpus — and a two-second interval is well inside what a person reading a wiki
+needs. The rejected cost is real and worth stating: a poll cannot tell a client
+the *reason* a revision moved, only that it did.
+
 **Settled — the page projection reuses the backend's own export** (§12.2). It
 exports the page tree as a markdown bundle in one call, and a CLI mount exists
 around it. Rendering pages ourselves would be a second translation of one
@@ -1620,6 +1735,12 @@ row, which is hand-written and whose absence fails nothing, and an ADR.
 `docs/feature-spec.md` (§4 and F-021, already updated), `docs/subsystems.md`,
 `docs/status.md`, `docs/todos.md`, `AGENTS.md` if a rule falls out.
 
+**One dependency outside the contract's path.** `github.com/hanwen/go-fuse/v2`
+is imported by the `mount` subcommand's package and by nothing else. It is not
+in the provider, not in the contract, and not in any package a server imports, so
+a host without FUSE still builds the subsystem. That is M-6, and it is the reason
+the mount is a command rather than an RPC (§5.9).
+
 **Phasing.** Evaluate through the backend's own surfaces first — they need none
 of this and they answer whether the backend fits the work at all. Then decide
 §15 items 1–5, which are the ones that change the contract's shape. Then
@@ -1664,7 +1785,14 @@ real use.
   `<id>.log.md`) and `DocumentExportSubmitResponse` (a transfer ZIP of facts,
   entity names, causal links and chunks, with no embeddings or database ids).
   Where the description and the prose disagree, this document says which it used;
-  see §5.1 for the one place it matters most.
+  see §5.1 for the one place it matters most. §5.9's FUSE claims are not
+  Hindsight's and are cited to the library instead:
+  `github.com/hanwen/go-fuse/v2` v2.11.0 — `fs.Inode.NotifyContent`,
+  `NotifyEntry` and `NotifyDelete` in `fs/inode.go`, the last documented as
+  *"equivalent to `NotifyEntry`, but also sends an event to inotify watchers"*
+  where the other two do not, and `fuse.EntryTimeout` / `fuse.AttrTimeout` for
+  M-4. Read out of the module rather than from memory, which is how the
+  asymmetry in §5.9's table was found.
 
 ### One open question in the source design, answered here
 
