@@ -1,5 +1,26 @@
 # Human-Authored Markdown Wiki → Hindsight
 
+> **Verified against Hindsight 0.10.1, 2026-09-27.** Every claim below was
+> checked against `https://hindsight.vectorize.io/openapi.json` and the
+> documentation site, and the corrections are made in place. Four things this
+> document got wrong or left open are now settled:
+>
+> - **The update semantics it says to verify are `replace`.** §"The critical
+>   update/delete issue" asks the right question and now answers it.
+> - **Hindsight may not keep the original text at all.** `store_document_text` is
+>   a per-base toggle and the retain docs say *"the content itself is never stored
+>   verbatim"*. This strengthens the core rule rather than weakening it.
+> - **Knowledge Pages cannot hold authored text, at any version of this API.**
+>   There is no body field on any page request. §"Alternative: use Knowledge Base
+>   pages as imported documents" is now a definite no instead of a conditional.
+> - **Two internal inconsistencies are fixed:** the `document_id` spelling, and
+>   `status: accepted`, which was not one of the three values the document itself
+>   defines.
+>
+> [`knowledge.md`](../knowledge.md) is the specification that implements this.
+> Where the two differ, the specification is right, and §17 of that document
+> records why.
+
 ## Goal
 
 Use a Git-controlled, human-authored Markdown wiki as a source of knowledge for a Hindsight-backed AI agent, while preserving a strict separation between:
@@ -82,11 +103,17 @@ The repository is synchronized into a dedicated Hindsight bank.
 Each Markdown file should have a stable `document_id`, for example:
 
 ```text
-wiki:architecture/authentication.md
-wiki:decisions/ADR-001.md
+wiki:architecture/authentication
+wiki:decisions/ADR-001
 ```
 
 That stable identity is important for incremental synchronization and updates.
+
+> **Correction.** This document used `wiki:architecture/authentication.md` here
+> and `wiki:architecture/authentication` in the frontmatter examples and the
+> sync pseudo-code, and the two must be the same string or every lookup misses.
+> The extension is not part of the identifier; the form above is the one to use
+> throughout.
 
 ## Why `retain()` is the right ingestion path
 
@@ -159,6 +186,20 @@ Use this invariant:
 If Hindsight is deleted, you should be able to rebuild it entirely from the Git repository.
 
 This is the most important architectural property.
+
+It is worth being precise about *why* it holds, because the obvious reading is
+wrong. It does not hold because Hindsight keeps a copy of your files. Hindsight's
+retain documentation says:
+
+> The content itself is never stored verbatim; what gets stored are the
+> structured facts the LLM extracts from it.
+
+Raw text is persisted only if the per-base `store_document_text` setting is on,
+and the API description does not state its default. With it off, the bank holds
+no original text at all. The repository is the source of truth not because it is
+the first copy but because it is the only copy that is *guaranteed* to exist —
+which is a much better reason, and one that survives the setting being turned
+off by someone who was tidying up.
 
 It means you can:
 
@@ -276,6 +317,21 @@ Do not simply call `retain()` indefinitely with the new version of the same Mark
 
 Your synchronization layer should explicitly handle document replacement/deletion according to the Hindsight document API and your chosen update mode.
 
+> **Answered for 0.10.1.** A repeated `document_id` **replaces**. The
+> `POST /memories` description says: *"If a memory item has a `document_id` that
+> already exists, the old document and its memory units will be deleted before
+> creating new ones (upsert behavior)."* `MemoryItem.update_mode` offers
+> `replace` (the default) and `append`; the default is stated in prose only, not
+> as a schema `default` key, so a generated client sees no default.
+>
+> One consequence this document does not draw: because the facts are deleted and
+> re-extracted rather than amended, **their identifiers change**. Every
+> observation consolidated from the old facts is re-derived, every page built on
+> those observations goes stale, and any citation that named a fact identifier
+> is left dangling. An edit to a runbook is therefore not a small write — it
+> invalidates a chain. A synchroniser should report the size of that cascade
+> rather than treating a retain as a write. See D-8 in [`knowledge.md`](../knowledge.md).
+
 Hindsight exposes document operations including:
 
 - list documents,
@@ -330,6 +386,12 @@ This can make sense if the wiki is primarily a document corpus and you want retr
 
 Hindsight documents describe `chunks` mode as skipping LLM fact extraction and storing chunks as-is.
 
+> **Precision note.** `retain_extraction_mode` is typed as a free-form nullable
+> string in the API description, not as an enum. The five documented values —
+> `concise` (default), `verbose`, `custom`, `verbatim`, `chunks` — exist only in
+> the field's description text. A generated client cannot validate against them.
+> If you wrap this, wrap it with a real enum and send the value explicitly.
+
 For a human-authored company wiki, I would generally start with normal extraction and evaluate retrieval quality before switching to chunk-only ingestion.
 
 ## Recommended hybrid approach
@@ -374,6 +436,21 @@ Use:
 Hindsight's Knowledge Base search is currently hybrid BM25 + vector search and returns whole pages with snippets.
 
 Hindsight's normal recall combines multiple retrieval strategies including semantic, keyword, graph, and temporal retrieval, followed by reranking.
+
+> **Worth knowing precisely.** "BM25" here is a family name rather than a
+> ranking function. Hindsight ships five pluggable text-search backends selected
+> by `HINDSIGHT_API_TEXT_SEARCH_EXTENSION`, and the default `native` one is
+> PostgreSQL `tsvector` + `ts_rank_cd`, which is TF-IDF and is documented as
+> *"not true BM25"*. The conclusion in this document is unaffected — keyword
+> search still has to stay on for a wiki, because `OAuth 2.1` and `ADR-014` are
+> exactly the kind of string a vector arm misses — but do not assume the scoring
+> is BM25 when you go looking for a knob to turn.
+>
+> One more asymmetry to be aware of: page search fuses **two** arms (keyword and
+> vector) with reciprocal-rank fusion and deliberately has **no** reranker, so
+> that it stays fast enough to be an agent's first call. Recall fuses **four** and
+> does rerank. Turning keyword search off removes the keyword arm from page
+> search as well, and a page-search call will silently become pure vector.
 
 Sources:
 
@@ -481,7 +558,26 @@ The second is generated/maintained by Hindsight.
 
 ## Alternative: use Knowledge Base pages as imported documents
 
-If your particular Hindsight deployment/version supports the page options you need for hand-authored pages, you can also represent the imported wiki as Knowledge Base pages.
+> **Closed for 0.10.1: not possible.** This section originally said "if your
+> particular deployment/version supports the page options you need". It does not,
+> and the reason is structural rather than a missing feature.
+>
+> `CreatePageRequest` and `UpdateNodeRequest` accept exactly `name`,
+> `source_query`, `parent_id`, `tags`, `max_tokens` and `trigger`. There is no
+> body, no content and no markdown field on either. A page's text is always
+> synthesized from `source_query` by a model, and creating one stores placeholder
+> content while a first build is scheduled.
+>
+> The flag that looks like an escape hatch is not one. `KnowledgeNode.managed` is
+> described as *"Client-set flag: true = system-owned, false = hand-authored"*,
+> and the documentation does describe it that way — but in the API description it
+> occurs **exactly once**, in `KnowledgeNode`, which is a *response* schema, and
+> in **no request anywhere**. It is readable and not settable. Designing against
+> it would be designing against nothing.
+>
+> So: **retained documents for the canonical ingestion path**, Knowledge Pages for
+> the generated projection. Not as a preference — as the only option the API
+> offers.
 
 The API exposes:
 
@@ -495,9 +591,7 @@ and page search:
 GET /v1/default/banks/{bank_id}/knowledge-base/search
 ```
 
-However, the current Knowledge Pages documentation emphasizes that pages are normally living documents generated from the bank's observations.
-
-Therefore I would use **retained documents for the canonical ingestion path** and Knowledge Pages for Hindsight-generated/readable projections unless you have a specific reason to make imported pages first-class KB nodes.
+The current Knowledge Pages documentation emphasizes that pages are normally living documents generated from the bank's observations.
 
 ## Proposed production architecture
 
@@ -545,10 +639,17 @@ A small service is enough.
 Pseudo-code:
 
 ```python
-for path in git_repo.glob("**/*.md"):
+# Walk the merge, not the working tree. This document says sync on merge; a glob
+# over the checkout will happily index a change nobody has reviewed.
+COMMIT = "abc123"   # the commit being reconciled
+
+for path in merged_tree.glob("**/*.md"):
     frontmatter, markdown = parse_frontmatter(path)
 
-    document_id = frontmatter["id"]
+    # A file with no frontmatter is still a file. Fall back to the path rather
+    # than raising: frontmatter is optional, and the identifier is derivable
+    # from the file alone either way.
+    document_id = frontmatter.get("id") or derive_id_from_path(path)
 
     content_hash = sha256(markdown.encode()).hexdigest()
 
@@ -559,11 +660,21 @@ for path in git_repo.glob("**/*.md"):
         bank_id=BANK,
         document_id=document_id,
         content=markdown,
+        # Record who wrote this. Without it the prune below cannot tell this
+        # worker's files from another worker's, and will delete them.
+        metadata={"owner": WORKER_ID, "source_commit": COMMIT},
     )
 
     manifest[document_id] = content_hash
 
+# Prune only what this worker put there. A bare
+# `previously_indexed_ids - current_ids` deletes every document in the bank that
+# this walk did not see, which is every document another worker synced. The bank
+# may legitimately be shared with an assistant's conversation memory, which is
+# not in any wiki tree at all and would simply vanish.
 for document_id in previously_indexed_ids - current_ids:
+    if owner_of(document_id) != WORKER_ID:
+        continue
     hindsight.delete_document(
         bank_id=BANK,
         document_id=document_id,
@@ -571,6 +682,21 @@ for document_id in previously_indexed_ids - current_ids:
 
 save_manifest(manifest)
 ```
+
+> **What changed here, and why it matters more than it looks.** The original was
+> correct for one worker over one directory, which is the easy case, and wrong in
+> two ways that only show up in production. It indexed the working tree rather
+> than the merge, contradicting the document's own advice four sections later. And
+> its prune was unconditional, so adding a second directory — or letting an
+> assistant retain conversation memory into the same bank — silently destroys
+> everything it did not write. Both are the kind of bug that is invisible until
+> somebody's documentation is gone.
+>
+> The `manifest` deserves a note too: it is an optimisation that avoids
+> re-extracting unchanged files, **not** a source of truth. Identity and digest
+> are both computable from the file itself, so losing the manifest costs one full
+> re-index and nothing else. Any design where the manifest is the *only* record
+> of what was indexed has made a second thing that can be lost.
 
 The exact client method for document deletion/update should be aligned with the Hindsight client version you install.
 
@@ -695,11 +821,18 @@ For decisions, I recommend adding explicit metadata:
 ---
 id: wiki:decisions/ADR-014
 kind: decision
-status: accepted
+status: active
 supersedes:
   - wiki:decisions/ADR-001
 ---
 ```
+
+> **Correction.** This example used `status: accepted`, which is not one of the
+> three values the "Suggested Markdown conventions" section of this same document
+> defines (`active | deprecated | draft`). A fourth value in one example and not
+> in the definition is how a filter quietly returns nothing. Use `active`, and if
+> a decision needs a rejected state, add it to the definition deliberately
+> rather than to one example.
 
 That makes organizational knowledge much easier for the agent to interpret.
 

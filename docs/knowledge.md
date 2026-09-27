@@ -92,7 +92,16 @@ correctly is most of the work.
 | **Stored as** | Markdown in a Git repository | The memory backend's indexes | Backend pages, and a markdown export of them |
 | **What makes it trustworthy** | Authorship and review. A named person wrote it and someone accepted it | Evidence. Every fact traces to a document, every observation to its facts | Nothing on its own. It is what the system believes *now* |
 | **If deleted** | Nothing to rebuild from — this is the loss | **Rebuilt in full from the corpus** | Rebuilt from the engine |
-| **What it cannot do** | Notice that a decision was reversed last month | Show you the sentence someone wrote | Be quoted as authority |
+| **What it cannot do** | Notice that a decision was reversed last month | Show you the sentence someone wrote **if the deployment turned raw-text persistence off**, which no default is stated for | Be quoted as authority |
+
+The middle column is worth reading twice, because it was wrong here and D-2 and
+D-5 said otherwise. The engine **does** hold a path back to the words: the client
+has `GetDocument`, `GetChunk` and `ListDocumentChunks`, so a caller can be shown
+the sentence somebody wrote. What it cannot promise is that the words are *there*
+— that depends on the per-base `store_document_text` setting, whose default the
+API description does not state. The engine is a lossy store with a
+best-effort way back to the original, which is a different claim from one that
+cannot show it at all, and only the first is true.
 
 The first two are where knowledge comes from. The third is the engine writing
 itself out. It exists because *"what does the system currently believe about
@@ -578,8 +587,10 @@ person owns.
 ### 5.1 The one direction that is not available
 
 The backend projects a base onto a folder of markdown files, and keeps that
-folder current. That direction is memory → disk, and it exists so a person can
-`ls`, `grep` and edit. Its own documentation is clear that the projection is
+folder current — `ExportKnowledgeBase` on the client, over a bundle schema whose
+files are the units. That direction is memory → disk, and it exists so a person
+can `ls`, `grep` and edit. Whether this specification uses that export or renders
+the same tree itself is §12.2's open question. Its own documentation is clear that the projection is
 derived:
 
 > A knowledge page is a **projected view** over processed memory, the way a
@@ -1285,10 +1296,9 @@ unnecessary rather than implemented.
   the provider because it is pure computation over a directory and a set of
   digests, with no backend in it at all — which is what makes it testable offline,
   and §15 question 3 turns on whether it should be its own subsystem instead.
-- **`pkg/knowledge/hindsight`** — a hand-written client for the backend's HTTP
-  API, returning `api.Errorf`-classified failures. Hand-written rather than
-  generated, because a generated client drags the whole 195-schema model into a
-  module's dependency graph and the contract must not see those types anyway.
+- **`pkg/knowledge/hindsight`** — an adapter over the backend's **official Go
+  client**, converting its types and its failures to the framework's. Not a
+  hand-written HTTP client; see §12.1 for what changed and why.
 - **`subsystems/knowledgehindsight`** — mounts the client behind the contract and
   declares one provider record. It converts messages and holds no logic, exactly
   as `subsystems/skillgit` does over `pkg/skills`.
@@ -1306,6 +1316,82 @@ registered in the API catalog, its own MCP server can be exposed, and its
 documented ingestion semantics are the ones §5 specifies. A deployment that
 wants the capability this month can have it without a line of the code above.
 That is a legitimate outcome, not a failure of the design.
+
+### 12.1 The backend client is the official Go one
+
+**This reverses an earlier decision in this document, and the earlier reasoning
+was wrong in a way worth recording.** The previous text said the client is
+hand-written *"because a generated client drags the whole 195-schema model into a
+module's dependency graph and the contract must not see those types anyway."*
+
+The second half is right and the first half does not follow from it. The contract
+must not see the backend's types — that is framework rule 8, it is not
+negotiable, and it requires a conversion layer **whether the client is generated
+or hand-written**. Converting provider types at the boundary is the requirement.
+Choosing not to use the provider's own client is not, and nothing else in the
+argument supported it.
+
+The client is `github.com/vectorize-io/hindsight/hindsight-clients/go`, generated
+by openapi-generator from the same `openapi.json` this specification is written
+against — so it is not a second opinion of the API, it is the API. It is also
+close to free: its own `go.mod` requires Go 1.24.0 and two modules
+(`stretchr/testify`, `gopkg.in/yaml.v3`). It covers every operation this
+specification needs, and the ones §15 has not decided yet as well:
+
+| Need | Client method |
+|---|---|
+| Ingest | `RetainMemories`, `FileRetain` |
+| Read facts | `RecallMemories`, `ListMemories`, `GetMemory`, `UpdateMemory` |
+| Read the original text | `GetDocument`, `GetChunk`, `ListDocumentChunks`, `DownloadFile` |
+| Documents | `ListDocuments`, `DeleteDocument`, `ReprocessDocument`, `UpdateDocument` |
+| Pages | `GetKnowledgePage`, `CreateKnowledgePage`, `UpdateKnowledgeNode`, `DeleteKnowledgeNode`, `GetKnowledgeBaseTree`, `SearchKnowledgeBase`, `ExportKnowledgeBase` |
+| Page refresh, and P-13's report | `RefreshMentalModel`, `DryRunRefreshMentalModel`, `GetMentalModelHistory` |
+| Directives | `ListDirectives`, `CreateDirective`, `UpdateDirective`, `DeleteDirective` |
+| Re-derive | `TriggerConsolidation`, `ClearMemoryObservations`, `ClearObservations`, `RecoverConsolidation` |
+| Configuration | `CreateOrUpdateBank`, `GetBankConfig`, `UpdateBankConfig` |
+
+**What the adapter still has to do, which is the part the client cannot do for
+us.** The generated error type implements `Error() string` and nothing else; the
+status code, the raw body and the unpacked model are behind `Body()` and
+`Model()` on a concrete type, so a caller has to assert to reach them. Framework
+rule 12 requires the failure to arrive as an `api.ErrorKind` that the transport
+can map. So the provider asserts, reads the body, and classifies — and that
+function is ours either way. Using the client does not remove the conversion; it
+removes the part that would have been written by hand and gone stale.
+
+**The one real cost is the pin, and it is a cost worth paying.** The client is a
+subdirectory module with no tags of its own: the repository's subdirectory tags
+cover `tools/*` and `integrations/*` and do not include `hindsight-clients/go`,
+so `go get ...@v0.10.0` fails with *unknown revision* and the module resolves
+only as a pseudo-version pinned to a commit. Three consequences, all deliberate:
+
+1. `go.mod` names a **commit, not a Hindsight release**. Nothing in the build
+   says which Hindsight it was built against, so the provider records the
+   expected version in its own configuration and compares it with the backend's
+   version endpoint at startup. Two independent facts, and the check is cheap.
+2. **An upgrade is a deliberate act** — `go get` at a chosen commit and a review
+   of the diff in generated types. For a `0.x` dependency of a system whose
+   surface moves every few weeks, that is an advantage rather than a cost, and it
+   should be written down so nobody later "fixes" it into `@latest`.
+3. `openapi-generator-cli.jar` is committed inside the module directory. It
+   lands in the module cache and never in our binary, because nothing imports
+   it, but it is roughly 30 MB of download for anyone building the provider.
+
+### 12.2 One translation, one implementation — the export question
+
+The client has `ExportKnowledgeBase` and `ImportDocuments`, and the schema
+behind them includes a knowledge-page *bundle* of files. §5.1 describes the
+projection as a markdown export of the pages, and this specification also wants
+the corpus projected from the engine (§10.3).
+
+If Hindsight can already emit the page tree as files, then there are two
+translations of one artifact — Hindsight's export, and ours — and framework rule
+11 says two translations that agree by accident stop agreeing the first time one
+of them changes. This is therefore an open question rather than a decision, and
+it is **question 9** in §15: do we project through Hindsight's own export, or do
+we render pages ourselves from the page reads, and what makes a test assert the
+two agree? The first is less code and inherits Hindsight's format decisions; the
+second is provider-neutral, which is what the rest of this design is for.
 
 ## 13. Failure and degradation
 
@@ -1356,6 +1442,16 @@ a move would then be a delete and a create and every fact would be orphaned. The
 reconciler reports a moved file with no declared identity rather than treating it
 as two files, so the omission is visible.
 
+**Settled — the backend client is the official Go one** (§12.1). The previous
+revision said it would be hand-written. The stated reason conflated two things:
+that the contract must not see provider types, which requires a conversion layer
+either way, and a preference for writing the HTTP client by hand, which nothing
+supported. The client is generated from the same description this document is
+written against and requires two modules of its own, so it is adopted. The
+rejected alternative — a hand-written client over ~15 HTTP calls this
+specification needs — would be less code only in the first month, and would
+track the backend by hand for every one of the following twelve.
+
 1. **Is `Reflect` a knowledge operation or an agent operation?** It runs a model
    loop over the base. `subsystems/agent` exists. Getting this wrong puts a
    second model-calling path in the framework, which is a boundary worth deciding
@@ -1397,12 +1493,24 @@ as two files, so the omission is visible.
    file is where this framework puts authored material. If they merge, importing
    a template becomes a rule-17 operation on the project's configuration file,
    which is a stronger reason to confirm than §5.5 already gives.
+9. **Do we project the page tree through the backend's own export, or do we
+   render it?** The client exposes `ExportKnowledgeBase` over a bundle-of-files
+   schema, and §5.1 already wanted a markdown export. Rule 11 says one artifact
+   gets one translation, so the two cannot both be allowed to exist without a
+   test that asserts they agree. The backend's export is less code and inherits
+   Hindsight's format decisions — including any it has not documented yet.
+   Rendering it ourselves from `GetKnowledgePage` and `GetKnowledgeBaseTree` is
+   provider-neutral, costs a file, and makes the format ours. This is question 9
+   rather than a decision because the answer depends on what the export actually
+   produces, which §12.2 records as unverified.
 
 ## 16. What a change would touch
 
 Not a plan; a list, so the size is visible before anyone starts.
 
-**New:** `pkg/knowledge/`, `pkg/knowledge/hindsight/`,
+**New:** `pkg/knowledge/`, `pkg/knowledge/hindsight/` (an adapter over
+`github.com/vectorize-io/hindsight/hindsight-clients/go`, pinned to a commit —
+see §12.1 for why the pin is a commit and not a version),
 `subsystems/knowledgehindsight/` (contract, implementation, `docs_embed.go`,
 `Makefile`, `go.mod`, command, tests), this document's siblings — a CI matrix
 row, which is hand-written and whose absence fails nothing, and an ADR.
