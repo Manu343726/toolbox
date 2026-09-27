@@ -98,8 +98,17 @@ type BinaryRetainRequest struct {
 }
 
 // BinaryRetainItem is one non-text file to ingest.
+//
+// Path and Content are both carried and an engine may use either. A corpus file is already on
+// disk, and the backend's own binary ingest takes a file handle rather than bytes, so passing the
+// path avoids copying a large file to hand over a large file. Content is there for a caller whose
+// bytes are not on disk, and an engine that cannot use the path writes the content somewhere
+// temporary rather than failing.
 type BinaryRetainItem struct {
-	ID      string
+	ID string
+	// Path is where the file is on disk, when it is. Preferred.
+	Path string
+	// Content is the bytes, when there is no path.
 	Content []byte
 	// Filename is the name the backend stores it under, which a reader sees.
 	Filename string
@@ -365,6 +374,7 @@ func (a *Applier) ingestAll(
 				}
 				p.binary = append(p.binary, BinaryRetainItem{
 					ID:       e.ID,
+					Path:     a.filePath(e),
 					Content:  raw,
 					Filename: path.Base(e.Path),
 					Tags:     e.Tags,

@@ -1,0 +1,1816 @@
+syntax = "proto3";
+
+package toolbox.knowledge.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Manu343726/toolbox/subsystems/knowledgehindsight/knowledgev1;knowledgev1";
+
+// The content model, and the one message it is all expressed through.
+//
+// Authored documentation, retained content and derived pages are the same type. They differ in
+// `origin` and in where `location` points, and in nothing else a reader has to branch on. That
+// is what lets an assistant read a person's runbook and a synthesized page through one call, and
+// what stops "one API" from being a slogan over two resource families.
+
+// Origin states how a piece of content came to exist.
+//
+// It is set by the operation that created the content and is never chosen by a caller: the only
+// way content becomes AUTHORED is a person writing it in a corpus file, and the only way it
+// becomes DERIVED is the system rendering it. An assistant cannot launder an inference into
+// documentation, and a person cannot mark their runbook as generated.
+enum Origin {
+  // Unset is never valid on returned content and is refused on a request that sets it.
+  ORIGIN_UNSPECIFIED = 0;
+  // Written by a person in the corpus, and edited there.
+  ORIGIN_AUTHORED = 1;
+  // Retained from a source: a conversation, an import, an attachment. Curated in place.
+  ORIGIN_RETAINED = 2;
+  // Synthesized and maintained by the system from other content. Regenerated.
+  ORIGIN_DERIVED = 3;
+}
+
+// LocationKind states which shape a Location takes.
+enum LocationKind {
+  LOCATION_KIND_UNSPECIFIED = 0;
+  // A path relative to a corpus root.
+  LOCATION_KIND_CORPUS_PATH = 1;
+  // A retained document identifier.
+  LOCATION_KIND_DOCUMENT = 2;
+  // A position in a derived page tree.
+  LOCATION_KIND_PAGE = 3;
+}
+
+// Mutability states how this origin's content may be changed.
+//
+// It is declared rather than left to be discovered, because a write that will be silently
+// overwritten later is worse than a refused one: an assistant told a page is regenerated can
+// tell the user, and one told a runbook is edited at its source goes and edits the file.
+enum Mutability {
+  MUTABILITY_UNSPECIFIED = 0;
+  // Cannot be changed through this surface. Authored content is edited at its source and
+  // reconciled in; a write would be a second source of truth the next reconcile deletes.
+  MUTABILITY_NONE = 1;
+  // May be edited in place and the edit persists. Retained content is curated.
+  MUTABILITY_CURATED = 2;
+  // Rewritten by the system whenever its scope changes. An edit is discarded, not applied.
+  MUTABILITY_REGENERATED = 3;
+}
+
+// DocKind is what sort of document a corpus file declares itself to be. It becomes a tag, so
+// retrieval can scope to "the policies" or "the decisions".
+enum DocKind {
+  DOC_KIND_UNSPECIFIED = 0;
+  DOC_KIND_ARCHITECTURE = 1;
+  DOC_KIND_POLICY = 2;
+  DOC_KIND_DECISION = 3;
+  DOC_KIND_PROCEDURE = 4;
+  DOC_KIND_REFERENCE = 5;
+  DOC_KIND_RUNBOOK = 6;
+  DOC_KIND_GLOSSARY = 7;
+  DOC_KIND_INDEX = 8;
+  DOC_KIND_LOG = 9;
+}
+
+// DocStatus is whether a document still holds. It is what lets a consumer discount a superseded
+// document without the deployment resolving anything on its behalf.
+enum DocStatus {
+  DOC_STATUS_UNSPECIFIED = 0;
+  // Holds.
+  DOC_STATUS_ACTIVE = 1;
+  // Replaced. Stays retrievable, because somebody will still ask why it used to be done this
+  // way.
+  DOC_STATUS_DEPRECATED = 2;
+  // Somebody is still writing it.
+  DOC_STATUS_DRAFT = 3;
+}
+
+// Location says where content is addressable. One field, three shapes, because "where is this" is
+// one question and a consumer should not need a second one to get an answer it can show a person.
+message Location {
+  // Which of the fields below is meaningful.
+  LocationKind kind = 1;
+  // A corpus-relative slash-separated path, or a retained document identifier.
+  string path = 2;
+  // A derived page's folder path within the page tree.
+  string tree_path = 3;
+  // A derived page's identifier.
+  string page_id = 4;
+  // The mental model that maintains a derived page's body.
+  string backing_model_id = 5;
+}
+
+// Provenance records what produced content and what it was derived from. It is queryable rather
+// than decorative: ownership is recorded as a tag, so a prune and a provenance filter cannot
+// disagree about what the documentation half owns.
+message Provenance {
+  // The origin as a value in the framework's reserved tag namespace. A caller filters on it and
+  // a deployment cannot collide with it because the prefix belongs to the framework.
+  string origin_tag = 1;
+  // The corpus file this came from, or the origin of a retained item.
+  string source = 2;
+  // The commit the content was reconciled from, when the reconciler knew it.
+  string source_revision = 3;
+  // The documents, facts or models this was derived from.
+  repeated string derived_from = 4;
+}
+
+// Revision carries a content digest and enough timestamps for a consumer to tell whether it has
+// seen a version.
+//
+// The digest decides equality. The modification time is only ever an optimisation that avoids
+// work, and a caller must not treat it as identity: a file that was touched but not changed has a
+// new time and the same digest, and one whose content changed with its timestamp restored has a
+// new digest and the same time.
+message Revision {
+  // "sha256:" followed by lowercase hex, over the content.
+  string digest = 1;
+  // The file's own modification time. An optimisation, never identity.
+  google.protobuf.Timestamp mod_time = 2;
+  // The file's own size in bytes.
+  int64 size = 3;
+  // When this subsystem last ingested the content.
+  google.protobuf.Timestamp reconciled_at = 4;
+  // The commit the content was reconciled from, so "the index matches the merge" is checkable.
+  string source_commit = 5;
+}
+
+// Content is the one addressable, readable unit of knowledge in a base.
+//
+// A wiki file, a retained document and a generated page are all Content. A consumer does not hold
+// three types and have to know which one it got; it holds this one and reads `origin`.
+message Content {
+  // Stable within the base.
+  string id = 1;
+  // The base this belongs to.
+  string base_id = 2;
+  // How it came to exist. Never chosen by a caller.
+  Origin origin = 3;
+  // For listings, and as a fallback for a missing body.
+  string title = 4;
+  // The content as markdown. Empty when the deployment does not retain the text, which
+  // `has_body` reports rather than leaving a caller to guess from an empty string.
+  string body = 5;
+  // Whether the deployment holds the text at all. A backend may keep only the facts it extracted
+  // from a document, and then a caller can be shown the sentence somebody wrote but cannot be
+  // promised it is there.
+  bool has_body = 6;
+  // What retrieval scopes by. The meaning belongs to the filter, not the content.
+  repeated string tags = 7;
+  // Where it is addressable.
+  Location location = 8;
+  // What produced it.
+  Provenance provenance = 9;
+  // Its digest and timestamps.
+  Revision revision = 10;
+  // How this origin's content may be changed.
+  Mutability mutability = 11;
+  // What a corpus file declared about itself, where it is authored. Empty otherwise.
+  CorpusFileMeta corpus_meta = 12;
+}
+
+// CorpusFileMeta is what a corpus file declared in its frontmatter.
+//
+// It is returned rather than inferred, because a person wrote it and a consumer is entitled to
+// read it rather than to reconstruct it.
+message CorpusFileMeta {
+  // The declared identity, when the file has one.
+  string declared_id = 1;
+  DocKind kind = 2;
+  DocStatus status = 3;
+  // Who stands behind the file. `human` is the default and the only value a person should write.
+  string authority = 4;
+  // Which corpus or repository it came from, when a base reconciles more than one.
+  string source = 5;
+  // Identifiers this document replaces. It is how an authored conflict stays authored: the
+  // corpus states which decision replaced which, in a reviewed file, rather than a synchroniser
+  // guessing.
+  repeated string supersedes = 6;
+  string owner = 7;
+  google.protobuf.Timestamp reviewed = 8;
+  google.protobuf.Timestamp date = 9;
+  // The author's own taxonomy, carried through beside the framework's rather than flattened
+  // into it.
+  repeated string author_tags = 10;
+}
+
+// ContentService is the unified read and write surface over a base.
+//
+// There is no per-origin service under it, and that is the point: the reads that used to be a
+// document read, a page read and a corpus read are one method, and a consumer does not ask where
+// something came from before it can read it. The two methods that remain origin-specific are
+// named as such, because chunks and reprocessing are things a retained document has and an
+// authored file or a generated page does not.
+service ContentService {
+  // @toolbox.side-effects read_only
+  // ListContent returns content of the requested origins from one base.
+  //
+  // `origins` is a filter and not a partition: asking for two origins returns both, each result
+  // carrying its own origin, and every other option on the request behaves the same either way.
+  rpc ListContent(ListContentRequest) returns (ListContentResponse);
+
+  // @toolbox.side-effects read_only
+  // GetContent reads one piece of content by identifier, whatever its origin.
+  rpc GetContent(GetContentRequest) returns (GetContentResponse);
+
+  // @toolbox.side-effects create update
+  // WriteContent writes content, and the three origins answer it differently.
+  //
+  // Retained content is written and curated in place. Authored content is refused: a corpus file
+  // has an editor, hooks, a blame view and a review process, and a tool that wrote it behind
+  // somebody's back would fight all four. It would also be a second source of truth that the
+  // next reconcile deletes. Derived content is refused because it is regenerated, and accepting
+  // the write would be accepting something that is discarded.
+  //
+  // Both refusals are `FailedPrecondition` rather than `InvalidArgument`: the request was well
+  // formed, the content just does not accept that kind of change. That answer is what keeps an
+  // assistant from writing a page or somebody's runbook.
+  rpc WriteContent(WriteContentRequest) returns (WriteContentResponse);
+
+  // @toolbox.side-effects update
+  // CurateContent corrects retained content in place.
+  //
+  // It is refused for the other two origins for the same reasons `WriteContent` is, and the
+  // refusal says which: a curated fact re-derives everything consolidated from it, while a
+  // curated corpus file is an edit the person makes in their editor.
+  rpc CurateContent(CurateContentRequest) returns (CurateContentResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteContent removes content, and what removal means differs by origin.
+  //
+  // Retained content is deleted outright. A derived page is deleted and will re-project. An
+  // authored file's content is removed by editing the file, not here, and the call is refused
+  // with a pointer to the file — because deleting an authored file's content from the base
+  // removes what a person wrote from the only place the deployment can act on it, and the file
+  // itself is the deletion.
+  rpc DeleteContent(DeleteContentRequest) returns (DeleteContentResponse);
+
+  // @toolbox.side-effects read_only
+  // GetContentTree returns one tree over the base, authored and derived content together, each
+  // node labelled with its origin.
+  //
+  // A person browsing their documentation and an assistant browsing the pages are doing the same
+  // walk, and the alternative is two trees and a consumer that has to know which to ask.
+  rpc GetContentTree(GetContentTreeRequest) returns (GetContentTreeResponse);
+
+  // @toolbox.side-effects read_only
+  // ListContentChunks returns the segments a retained document was split into before extraction.
+  //
+  // This is origin-specific and named as such: a chunk is a thing a retained document has, and an
+  // authored file or a generated page does not.
+  rpc ListContentChunks(ListContentChunksRequest) returns (ListContentChunksResponse);
+
+  // @toolbox.side-effects update
+  // ReprocessContent re-extracts a retained document from its source.
+  //
+  // Replacing a document's content changes the identifiers of the facts extracted from it, so
+  // everything consolidated from those facts is re-derived and a citation naming a fact goes
+  // dangling. The response reports that cascade rather than leaving it to be found.
+  //
+  // Retained content only, for the same reason `ListContentChunks` is.
+  rpc ReprocessContent(ReprocessContentRequest) returns (ReprocessContentResponse);
+
+  // @toolbox.side-effects read_only
+  // ExportWiki returns the whole-wiki view as a bundle: one tree spanning authored files and
+  // derived pages, with a generated index at the root and every file stating its origin in
+  // frontmatter.
+  //
+  // The two halves are handled differently on purpose. An authored file is copied verbatim,
+  // because re-rendering a reviewed document produces a *different* document and a diff between
+  // what was reviewed and what is published is a question nobody asked. A derived page comes
+  // from the backend's own page bundle, because a page is a rendering and its canonical form is
+  // whatever the backend says it is.
+  //
+  // The projection is derived and regenerable in full: an edit to it is discarded by the next
+  // projection rather than applied, and deleting the whole tree costs nothing. It is also never
+  // a reconcile input, and that is enforced rather than documented — a directory carrying a
+  // projection marker is refused as a corpus root, because it is byte-for-byte shaped like a
+  // wiki and is the one artifact a well-meaning agent could hand back to a reconcile.
+  rpc ExportWiki(ExportWikiRequest) returns (ExportWikiResponse);
+
+  // @toolbox.side-effects read_only
+  // GetProjectionRevision reports whether the whole-wiki projection changed, and which half
+  // changed.
+  //
+  // There is no server-side change feed, so this is a revision rather than a diff: two cheap
+  // probes hashed into one value. The engine half is one page-tree call, whose per-node staleness
+  // and refresh timestamps are what change when the backend's beliefs change. The authored half
+  // is a directory stat per file, never a content digest, because at three thousand files a
+  // digest per file is a full read of the corpus on every poll.
+  //
+  // It is unary and cheap on purpose. A watch stream would be the only streaming contract in the
+  // framework, serving a feature a short poll serves and a transport that cannot elicit on the
+  // HTTP endpoint; and `MountService` consumes this one to know when to invalidate.
+  rpc GetProjectionRevision(GetProjectionRevisionRequest) returns (GetProjectionRevisionResponse);
+}
+
+message ListContentRequest {
+  // The base to read from. Required.
+  string base_id = 1;
+  // Which origins to include. Empty means all three.
+  repeated Origin origins = 2;
+  // Restrict to content carrying every one of these tags.
+  repeated string tags = 3;
+  // A filter over the tag namespace, for anything an AND of tags cannot express.
+  TagGroup tag_group = 4;
+  // Restrict to content whose location is under this path or tree path.
+  string location_prefix = 5;
+  // Declared corpus kind, for authored content.
+  DocKind kind = 6;
+  // Declared corpus status, for authored content.
+  DocStatus status = 7;
+  // Most items per page. The server may return fewer.
+  int32 page_size = 8;
+  // Continue from a previous response's `next_page_token`.
+  string page_token = 9;
+  // Return the bodies as well as the metadata. Reading bodies of a large base is expensive and a
+  // listing rarely needs them.
+  bool include_bodies = 10;
+}
+
+message ListContentResponse {
+  repeated Content content = 1;
+  string next_page_token = 2;
+}
+
+message GetContentRequest {
+  // The base to read from. Required.
+  string base_id = 1;
+  // The content identifier. Required.
+  string content_id = 2;
+  // Return the body. A caller that only needs provenance or a digest should not pay for text
+  // that may not even be retained.
+  bool include_body = 3;
+}
+
+message GetContentResponse {
+  Content content = 1;
+}
+
+message WriteContentRequest {
+  // The base to write to. Required.
+  string base_id = 1;
+  // The content to write. `origin` must be RETAINED; the other two are refused with a reason.
+  Content content = 2;
+  // Replace an existing document's content rather than appending to it. The default, and the
+  // right one for a corpus: an edited runbook must stop being retrievable by the sentence it
+  // used to contain, because an assistant answering from a superseded sentence is worse than one
+  // that answers from nothing.
+  bool replace = 3;
+  // The event time, when the caller knows one. Absent means timeless, which is a claim this
+  // contract is willing to make: "unset" is the one spelling the backend accepts for a document
+  // with no date, and sending a file's change time instead would be a claim about when somebody
+  // pressed save rather than about when the described thing happened.
+  google.protobuf.Timestamp event_time = 4;
+}
+
+message WriteContentResponse {
+  Content content = 1;
+  // The backend operations doing the work, when the write was asynchronous.
+  repeated string operation_ids = 2;
+}
+
+message CurateContentRequest {
+  // The base to write to. Required.
+  string base_id = 1;
+  // The retained content to correct. Required.
+  string content_id = 2;
+  // The corrected body.
+  string body = 3;
+  // Why the correction is being made, recorded on the content's provenance.
+  string reason = 4;
+  // Correct the metadata rather than the body.
+  CurateMetadata metadata = 5;
+}
+
+message CurateMetadata {
+  // Replace the content's tags. Absent leaves them; present and empty clears them. The
+  // three-way distinction matters, because getting it wrong on an update is how a re-tag
+  // silently clears a field.
+  repeated string tags = 1;
+  // Correct the declared title.
+  string title = 2;
+}
+
+message CurateContentResponse {
+  Content content = 1;
+}
+
+message DeleteContentRequest {
+  // The base to write to. Required.
+  string base_id = 1;
+  // The content to delete. Required.
+  string content_id = 2;
+  // The origin being deleted, so that a caller cannot delete an authored file's content by
+  // passing an identifier it guessed. Optional, and a mismatch is refused.
+  Origin origin = 3;
+}
+
+message DeleteContentResponse {
+  // True when the backend removed it.
+  bool deleted = 1;
+  // What the removal meant for the rest of the base: the facts, and the observations and pages
+  // re-derived because those facts went away.
+  CascadeReport cascade = 2;
+}
+
+message GetContentTreeRequest {
+  // The base to read from. Required.
+  string base_id = 1;
+  // Restrict to one origin. Empty spans both halves.
+  Origin origin = 2;
+  // Restrict to a subtree. The root itself when empty.
+  string tree_path = 3;
+  // Include nodes the backend reports as not yet refreshed. They are included by default and
+  // flagged, because a reader is better served by a stale page that says it is stale than by its
+  // absence.
+  bool include_stale = 4;
+}
+
+message GetContentTreeResponse {
+  repeated ContentNode nodes = 1;
+}
+
+message ContentNode {
+  // The content identifier.
+  string id = 1;
+  // Path from the root of this tree, slash-separated.
+  string path = 2;
+  // The node's display name.
+  string name = 3;
+  // A node with children rather than content of its own.
+  bool is_directory = 4;
+  // How this content came to exist, for a node that is content.
+  Origin origin = 5;
+  // The backend reports this node's page has not been refreshed since its inputs changed.
+  bool is_stale = 6;
+  // The corpus-relative path, for authored content.
+  string corpus_path = 7;
+}
+
+message ListContentChunksRequest {
+  // The base to read from. Required.
+  string base_id = 1;
+  // The retained document. Required.
+  string document_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListContentChunksResponse {
+  // The text of each chunk, and the facts extracted from it.
+  repeated ContentChunk chunks = 1;
+  string next_page_token = 2;
+}
+
+message ContentChunk {
+  string id = 1;
+  // Index within the document, so a caller can say which segment produced a fact.
+  int32 index = 2;
+  // The segment's text. Empty when the deployment does not retain raw text, which is a
+  // per-base setting whose default the backend does not state.
+  string text = 3;
+  bool has_text = 4;
+}
+
+message ReprocessContentRequest {
+  // The base to write to. Required.
+  string base_id = 1;
+  // The retained document to re-extract. Required.
+  string document_id = 2;
+  // Re-extract without writing anything, and report what would change. A preview is a read, and
+  // it is the only safe way to see the cost of a re-extraction before paying for it.
+  bool dry_run = 3;
+}
+
+message ReprocessContentResponse {
+  // The document, after re-extraction.
+  Content content = 1;
+  // What the re-extraction cost downstream.
+  CascadeReport cascade = 2;
+}
+
+message CascadeReport {
+  // Facts that were removed because the document's content was replaced. Their identifiers do
+  // not come back, so a citation naming one is now dangling — which is the most expensive
+  // consequence of an edit and the least visible.
+  int32 facts_replaced = 1;
+  // Observations re-derived because the facts they were consolidated from changed.
+  int32 observations_rederived = 2;
+  // Pages re-derived for the same reason.
+  int32 pages_rederived = 3;
+  // A human-readable account, for a caller showing the consequence to a person. This is a
+  // report, not a resolved state: nothing here says the base is now correct.
+  repeated string notes = 4;
+}
+
+message ExportWikiRequest {
+  // The base to project. Required.
+  string base_id = 1;
+  // Project one origin only. Empty projects both halves into one tree.
+  Origin origin = 2;
+  // Project a subtree only, for a base with too many files to export at once.
+  string subtree = 3;
+  // Include the generated index. It is on by default and is the one file in the tree that
+  // describes the whole tree, so it must never be ingested as authored content.
+  bool include_index = 4;
+}
+
+message ExportWikiResponse {
+  // The base and corpus revision this view was taken from, so a reader can tell a current view
+  // from an out-of-date one.
+  ProjectionSource source = 1;
+  // The tree, in tree order.
+  repeated ProjectedFile files = 2;
+  // The generated index, when requested.
+  bytes index = 3;
+  // The marker document that identifies this bundle as a projection. A consumer writing it to
+  // disk gets the guarantee that the directory cannot later be mistaken for a corpus.
+  bytes marker = 4;
+  // Files skipped because their path was not projectable, so a bundle is never silently short.
+  repeated string skipped = 5;
+}
+
+message ProjectedFile {
+  // Slash-separated, relative to the projection root. The two origins are namespaced into
+  // `file/` and `generated/`, so the tree says which half a file came from before anybody opens
+  // it and two files with the same relative path cannot collide.
+  string path = 1;
+  bytes content = 2;
+  // `file` for authored content a person wrote, `generated` for a page the system rendered.
+  string origin = 3;
+  // Where the content came from: a corpus-relative path, or the backend's page path.
+  string source_path = 4;
+  // The content or page identifier.
+  string content_id = 5;
+  // "sha256:" followed by lowercase hex, over `content`.
+  string digest = 6;
+}
+
+message ProjectionSource {
+  string base_id = 1;
+  // The corpus commit this view reflects, when the reconciler knew it.
+  string commit = 2;
+  // When the view was taken.
+  google.protobuf.Timestamp taken_at = 3;
+  // Derived pages the backend reports as not yet refreshed. Non-zero means part of this view
+  // lags the facts it was built from, and the index says so where a reader will see it.
+  int32 stale_pages = 4;
+}
+
+message GetProjectionRevisionRequest {
+  // The base to probe. Required.
+  string base_id = 1;
+  // The corpus commit the caller believes is reconciled, so the response can say whether the
+  // authored half matches it.
+  string expected_commit = 2;
+}
+
+message GetProjectionRevisionResponse {
+  // The projection's state, as one digest of both halves.
+  string value = 1;
+  // Which half moved since the caller's last revision: `authored`, `derived`, `both`, or empty
+  // when nothing moved.
+  string changed = 2;
+  // The corpus half on its own.
+  string authored = 3;
+  // The engine half on its own. `unavailable` when the backend could not be reached, which
+  // differs from every known value and so correctly causes a re-fetch.
+  string derived = 4;
+  // The corpus revision the authored half reflects.
+  string commit = 5;
+  google.protobuf.Timestamp taken_at = 6;
+  int32 stale_pages = 7;
+  // What the two probes saw, so a caller can tell an empty base from a failed one.
+  int32 corpus_files = 8;
+  int32 derived_pages = 9;
+}
+
+// TagMatch is how a tag leaf's tags combine with each other.
+enum TagMatch {
+  TAG_MATCH_UNSPECIFIED = 0;
+  // The memory carries at least one of the tags.
+  TAG_MATCH_ANY = 1;
+  // The memory carries all of the tags.
+  TAG_MATCH_ALL = 2;
+  // As `ANY`, and memories with no tags at all are excluded rather than included.
+  TAG_MATCH_ANY_STRICT = 3;
+  // As `ALL`, and memories with no tags at all are excluded rather than included.
+  TAG_MATCH_ALL_STRICT = 4;
+  // The memory's tag set is exactly the leaf's.
+  TAG_MATCH_EXACT = 5;
+}
+
+// TagResolve is how a leaf's tags are compared with the base's own tags.
+enum TagResolve {
+  TAG_RESOLVE_UNSPECIFIED = 0;
+  // Literal comparison. The default.
+  TAG_RESOLVE_EXACT = 1;
+  // Compare by trigram similarity against the tags already in the base, so a misspelled filter
+  // still lands. It softens the cost of a wrong tag spelling without removing the reason to
+  // choose a namespace deliberately.
+  TAG_RESOLVE_FUZZY = 2;
+}
+
+// TagGroup is a filter over the tag namespace, and it is a boolean expression rather than a
+// list.
+//
+// A list of tag sets is the shape almost every filter API has, and it cannot express
+// "these two tags, or all three of those" without the caller running two queries and merging
+// them. A `oneof` over leaf and the three compounds is recursive, so nesting is unbounded and
+// the shape stays legible in generated CLI help and in JSON Schema.
+message TagGroup {
+  oneof group {
+    TagGroupLeaf leaf = 1;
+    TagGroup groups_and = 2;
+    TagGroup groups_or = 3;
+    TagGroup group_not = 4;
+  }
+}
+
+// A leaf is a set of tags and how they combine.
+message TagGroupLeaf {
+  repeated string tags = 1;
+  // Defaults to `ANY_STRICT`.
+  TagMatch match = 2;
+  // Defaults to `EXACT`.
+  TagResolve resolve = 3;
+}
+
+message TagGroupAnd {
+  repeated TagGroup groups = 1;
+}
+
+message TagGroupOr {
+  repeated TagGroup groups = 1;
+}
+
+message TagGroupNot {
+  TagGroup group = 1;
+}
+
+// Budget is how much work a retrieval is allowed to do, named for what it costs the reader
+// rather than for a number of tokens.
+//
+// A person choosing between these is choosing between a fast answer and a thorough one, and
+// exposing it as a token count would make it a tuning knob that looks like a configuration
+// mistake when it is a preference.
+enum Budget {
+  BUDGET_UNSPECIFIED = 0;
+  // Fast. Suits an interactive agent turn.
+  BUDGET_LOW = 1;
+  // Balanced.
+  BUDGET_MID = 2;
+  // Thorough. Suits a batch or an audit.
+  BUDGET_HIGH = 3;
+}
+
+// SearchScope narrows a search to one part of the base.
+//
+// It is a filter, not a partition: a search with no scope spans all three origins, and a result
+// always carries its own origin. This is what makes "search the knowledge base" one operation
+// rather than a choice between two before the caller knows what it is looking for.
+message SearchScope {
+  // Restrict to these origins. Empty means all of them.
+  repeated Origin origins = 1;
+  // Restrict to content carrying every one of these tags.
+  repeated string tags = 2;
+  // A filter over the tag namespace, for anything an AND of tags cannot express. Mutually
+  // exclusive with `tags`: the backend treats the two as exclusive, so this contract takes one
+  // shape rather than letting a caller send both and have the server choose.
+  TagGroup tag_group = 3;
+  // Restrict to authored content of these declared kinds and statuses.
+  repeated DocKind kinds = 4;
+  repeated DocStatus statuses = 5;
+}
+
+// RecallSource names one strategy's contribution to a recall, so a caller can see why something
+// was retrieved rather than only what was.
+message RecallSource {
+  // Which strategy found it, from a fixed vocabulary this contract owns.
+  string strategy = 1;
+  // How highly it ranked, normalised to 0..1.
+  float score = 2;
+  // The text the strategy matched on, which is what makes a wrong answer diagnosable.
+  string excerpt = 3;
+}
+
+// RecallResult is one retrieved item.
+message RecallResult {
+  // The fact's identifier.
+  string id = 1;
+  // The fact's text.
+  string text = 2;
+  // Whether the fact is about the world or about the base's own experience. An experience fact
+  // is something the system did, and quoting one as a documented claim is a category error a
+  // reader cannot see.
+  string fact_type = 3;
+  // How it came to exist.
+  Origin origin = 4;
+  // Where it is addressable, which for an authored fact resolves to a file a person can open.
+  Location location = 5;
+  // The documents the fact was extracted from.
+  repeated string derived_from = 6;
+  google.protobuf.Timestamp observed_at = 7;
+  repeated string tags = 8;
+  // Which strategies found it and how highly.
+  repeated RecallSource sources = 9;
+}
+
+// Citation is one item a reasoning answer relied on.
+//
+// A citation states its origin, because a citation that cannot tell a written decision from an
+// inferred one is worth much less: a person reading "the retry count is three" needs to know
+// whether a runbook says it or whether the system guessed.
+message Citation {
+  // The content the claim traces to.
+  string content_id = 1;
+  // Where a reader can open it: a corpus path, or a page.
+  Location location = 2;
+  // How that content came to exist.
+  Origin origin = 3;
+  // The sentence relied on, when the deployment retains the text.
+  string excerpt = 4;
+  bool has_excerpt = 5;
+  // The facts that were cited. These resolve to a file only through the reasoning trace, which
+  // is why `Reflect` resolves them itself.
+  repeated string fact_ids = 6;
+}
+
+// QueryService is one query over both halves of a base.
+//
+// Recall and reflect are here rather than on a storage service because they are queries, and a
+// query that lived next to storage tends to acquire storage's concerns.
+service QueryService {
+  // @toolbox.side-effects read_only
+  // Search returns content, pages and facts matching a query, each carrying its origin.
+  //
+  // There is no "search the wiki" versus "search the memory" for a caller to choose between, and
+  // that is the requirement rather than a convenience: a consumer that had to run two searches
+  // and merge them would have no shared ranking and no way to ask for "only what we wrote down".
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // @toolbox.side-effects read_only
+  // Recall retrieves what the base holds about a question, with the strategies that found each
+  // item.
+  rpc Recall(RecallRequest) returns (RecallResponse);
+
+  // @toolbox.side-effects read_only
+  // Reflect answers a question by reasoning over the base, and reports what it relied on.
+  //
+  // `resolve_citations` is on by default and it is why: a fact cited by a reasoning answer comes
+  // back as an identifier and its text, and **usually without the document it came from**. The
+  // document identifier is on the retrieval results inside the reasoning trace, so resolving a
+  // citation to a file takes a join against the trace — which means asking for citations makes
+  // the backend return the trace, and the trace is large.
+  //
+  // So this surface resolves the join itself and returns citations with `location` populated,
+  // rather than handing a caller an identifier and the obligation to reconstruct where it came
+  // from. Turning it off is cheaper and returns only the raw cited fact identifiers.
+  //
+  // Two questions are deliberately kept apart: `citations` is what the answer *cites* — the
+  // narrower, ordered, deduplicated set a person wants — and `trace_digest` is a handle on what
+  // it *drew on*, for a reader debugging a wrong answer. The trace-derived set is the agent's
+  // whole scratchpad, a much looser list, and presenting it as "sources" would overstate what
+  // the answer actually used.
+  rpc Reflect(ReflectRequest) returns (ReflectResponse);
+
+  // @toolbox.side-effects read_only
+  // ListTags returns the tags in use, with counts.
+  //
+  // It is the discovery surface for a filter nobody has to guess: the framework's reserved
+  // dimensions, the structural ones a corpus produces, and the author's own, separated by origin
+  // so a caller can tell which vocabulary it is looking at.
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+
+  // @toolbox.side-effects read_only
+  // PreviewExtraction reports what a write would extract, without extracting it.
+  //
+  // It is a read, and it is the only affordable way to find out that a document is too large or
+  // too ambiguous before paying for the extraction.
+  rpc PreviewExtraction(PreviewExtractionRequest) returns (PreviewExtractionResponse);
+
+  // @toolbox.side-effects read_only
+  // PreviewPrompts reports the prompts a configuration would use, so a deployment can see what
+  // its base will send to a model before it sends it.
+  rpc PreviewPrompts(PreviewPromptsRequest) returns (PreviewPromptsResponse);
+}
+
+message SearchRequest {
+  // The base to search. Required.
+  string base_id = 1;
+  // The query text. Required. An empty query is refused rather than treated as "everything",
+  // because a search that returns the whole base is not a search and would look like one.
+  string query = 2;
+  // Which origins to span. Empty spans all of them.
+  SearchScope scope = 3;
+  // How much work to do. The default differs per call: a search is a balanced lookup, a recall
+  // is fast, and a reflect is fast. Exposing one setting therefore overrides a different default
+  // on each, and the field says so rather than letting the backend's answer differ per call
+  // unremarked.
+  Budget budget = 4;
+  // Most results per page.
+  int32 page_size = 5;
+  string page_token = 6;
+  // Return the bodies of the matches as well as their metadata.
+  bool include_bodies = 7;
+}
+
+message SearchResponse {
+  repeated Content content = 1;
+  repeated RecallResult facts = 2;
+  string next_page_token = 3;
+  // What the search actually covered, so a caller can tell "nothing matched" from "the scope
+  // excluded everything".
+  SearchCoverage coverage = 4;
+}
+
+message SearchCoverage {
+  repeated Origin origins_searched = 1;
+  int32 content_considered = 2;
+  int32 facts_considered = 3;
+}
+
+message RecallRequest {
+  // The base to recall from. Required.
+  string base_id = 1;
+  // The question. Required.
+  string query = 2;
+  SearchScope scope = 3;
+  // Defaults to MID for a recall and LOW for a reflect; the backend differs, and this contract
+  // states which rather than inheriting the surprise.
+  Budget budget = 4;
+  // Include the documents the results came from, so a caller can open a source without a second
+  // call per result.
+  bool include_sources = 5;
+  int32 limit = 6;
+}
+
+message RecallResponse {
+  repeated RecallResult results = 1;
+  // The content the results were extracted from, when `include_sources` was set.
+  repeated Content sources = 2;
+}
+
+message ReflectRequest {
+  // The base to reason over. Required.
+  string base_id = 1;
+  // The question to answer. Required.
+  string query = 2;
+  SearchScope scope = 3;
+  // Defaults to LOW.
+  Budget budget = 4;
+  // Resolve the cited facts to content, at the cost of making the backend return its reasoning
+  // trace. On by default; see the note on `Reflect`.
+  bool resolve_citations = 5;
+  // Follow the base's own directives, such as requiring an answer to cite its sources.
+  bool follow_directives = 6;
+}
+
+message ReflectResponse {
+  // The synthesised answer, as markdown.
+  string text = 1;
+  // What the answer relied on, in citation order and deduplicated, with each citation's origin
+  // and a location a reader can open.
+  repeated Citation citations = 2;
+  // A handle on the reasoning trace, for a reader debugging a wrong answer. The trace itself is
+  // not returned: it is the agent's whole scratchpad, it is large, and presenting it as the
+  // answer's sources would overstate what the answer used.
+  string trace_digest = 3;
+  // The synthesized document the backend keeps and rewrites as the base changes. It is a
+  // projection and is not authority for anything.
+  string backing_model_id = 4;
+}
+
+message ListTagsRequest {
+  // The base to read from. Required.
+  string base_id = 1;
+  // Restrict to one origin's vocabulary.
+  Origin origin = 2;
+  // Only tags starting with this prefix, for reading one namespace at a time.
+  string prefix = 3;
+}
+
+message ListTagsResponse {
+  repeated TagCount tags = 1;
+}
+
+message TagCount {
+  string tag = 1;
+  int32 count = 2;
+  // Which origin contributed it, so a caller can tell the framework's namespace from a person's.
+  Origin origin = 3;
+}
+
+message PreviewExtractionRequest {
+  // The base whose extraction settings would be used. Required.
+  string base_id = 1;
+  // The text to try. Required.
+  string content = 2;
+  // The document identifier it would be ingested under, so the preview can show the identifiers
+  // the real extraction would produce — which change on a replace, and which is the most
+  // surprising consequence of an edit.
+  string document_id = 3;
+}
+
+message PreviewExtractionResponse {
+  // The facts extraction would produce, if the backend will report them without doing the work.
+  repeated PreviewFact facts = 1;
+  // What the settings in force are, so a surprising result is diagnosable.
+  ExtractionSettings settings = 2;
+  repeated string warnings = 3;
+}
+
+message PreviewFact {
+  string text = 1;
+  // `world` for an objective statement, `experience` for something the base itself did.
+  string fact_type = 2;
+  repeated string entities = 3;
+}
+
+message ExtractionSettings {
+  // One of the extraction modes, or `default` when the base has not chosen one. The values exist
+  // only in the backend's prose and not in its schema, so this contract names them as a string
+  // and says where they came from rather than pretending an enum is authoritative.
+  string mode = 1;
+  // Whether names are resolved against entities already in the base. This contract's corpus path
+  // turns it off, and the preview showing it on for a file is how somebody finds out why an
+  // authored runbook's "Acme Corp" is attached to a different "Acme".
+  bool resolve_entities = 2;
+  // `per_tag`, `combined` or `shared`. A corpus is mostly provenance tags, and `per_tag` would
+  // fragment observations accordingly, so this is chosen rather than inherited.
+  string observation_scope = 3;
+  repeated string directives = 4;
+}
+
+message PreviewPromptsRequest {
+  // The base whose prompts would be used. Required.
+  string base_id = 1;
+}
+
+message PreviewPromptsResponse {
+  repeated Prompt prompts = 1;
+}
+
+message Prompt {
+  // `extraction`, `consolidation`, `reflect`, or another stage name.
+  string stage = 1;
+  string system = 2;
+  string template = 3;
+  repeated string variables = 4;
+}
+
+// ReconcileEntry is one file's fate in a plan.
+//
+// Every field a person needs to decide is here, including the digests on both sides: a plan that
+// said "changed" without saying what it changed from is asking for trust rather than for consent.
+message ReconcileEntry {
+  // The document identifier the file is or would be ingested as.
+  string id = 1;
+  // Whether that identity was declared in the file's frontmatter rather than derived from its
+  // location. This is the difference between a move and a delete, and a plan that mixed the two
+  // would under-report what a reorganisation costs.
+  bool declared_id = 2;
+  // The corpus root's name and the path within it.
+  string root = 3;
+  string path = 4;
+  // The content digest, and the digest that was ingested last time. Equal digests mean
+  // unchanged; a plan reporting a change with equal digests would be reporting a filesystem's
+  // opinion as a fact.
+  string digest = 5;
+  string prior_digest = 6;
+  int64 size = 7;
+  google.protobuf.Timestamp mod_time = 8;
+  string title = 9;
+  repeated string tags = 10;
+  // Not text, and ingested through the backend's binary path.
+  bool binary = 11;
+  // Why a deletion, because a deletion is the outcome a person most needs explained.
+  string reason = 12;
+}
+
+// ReconcileMove is a file whose identity survived a change of location.
+//
+// It is reported rather than executed as a delete and a create because those are not the same
+// thing: re-ingesting under the same identifier preserves the facts already extracted from the
+// file, and every fact that referenced the old path stays valid.
+message ReconcileMove {
+  ReconcileEntry from = 1;
+  ReconcileEntry to = 2;
+  // True when the file declares no identity, in which case the move cost a full re-extraction and
+  // orphaned every fact that referenced the old identifier. The reconcile says so, because
+  // whoever reorganised the tree is the only person who can fix it.
+  bool orphaned_facts = 3;
+}
+
+// Drift is a piece of derived knowledge the corpus appears to contradict.
+//
+// It is reported and never resolved. The corpus is the record of what people decided, and a
+// model's belief about the same thing is a hypothesis about a document it has read; picking
+// between them is a decision this subsystem is not positioned to make, and making it silently is
+// how a base ends up confidently wrong.
+message Drift {
+  string claim_id = 1;
+  string claim_text = 2;
+  // The content the claim was built from.
+  repeated string backing_content = 3;
+  // The authored content whose text does not contain the claim.
+  repeated string conflict_content = 4;
+  // How the conflict was spotted, so a reader knows how much weight to put on it. It is a
+  // containment check and says so: consolidation rewrites a claim in the model's own words, so a
+  // claim that differs from its source is the normal case rather than a conflict.
+  string detection = 5;
+}
+
+// ReconcilePlan is what a reconcile would do, before it does any of it.
+//
+// It is a value and not a side effect: reconciling a thousand files changes what every assistant
+// in a deployment believes, and a person should see that happening before it happens.
+message ReconcilePlan {
+  string base_id = 1;
+  // The commit the plan was computed against. Recorded rather than being part of identity: a
+  // commit is a property of a run, not of a document.
+  string commit = 2;
+  repeated ReconcileEntry created = 3;
+  repeated ReconcileEntry updated = 4;
+  repeated ReconcileEntry unchanged = 5;
+  repeated ReconcileEntry deleted = 6;
+  repeated ReconcileMove moved = 7;
+  repeated Drift drift = 8;
+  // Conditions to surface that are not failures.
+  repeated string warnings = 9;
+  // Identifies this plan, so that the confirmation on `ApplyReconcile` can be shown to refer to
+  // the plan the person actually read rather than to a later one computed over a directory that
+  // has since changed.
+  string plan_digest = 10;
+  // How many files the cheap filter skipped, so a caller can tell a cheap plan from a thorough
+  // one.
+  int32 unread_files = 11;
+  // Whether the plan would change anything at all.
+  bool empty = 12;
+}
+
+// CorpusStatus is what a base currently believes, and where that belief came from.
+message CorpusStatus {
+  string base_id = 1;
+  // The corpus roots reconciled into this base.
+  repeated CorpusRootInfo roots = 2;
+  // The commit the last successful reconcile used, and when. "The index matches the merge" is a
+  // statement that can be checked rather than believed.
+  string reconciled_commit = 3;
+  google.protobuf.Timestamp reconciled_at = 4;
+  int32 owned_documents = 5;
+  // What the ownership record is bound to, and what this reconcile would need to match.
+  OwnershipBinding binding = 6;
+  // Set when the ownership record could not be loaded cleanly, naming the capability that is
+  // currently unavailable. An empty string means the record is sound.
+  string degraded = 7;
+  // Whether orphan pruning is possible right now. It is a separate fact from `degraded`, because
+  // a record can be usable and still not authorize a deletion.
+  bool can_prune = 8;
+}
+
+message CorpusRootInfo {
+  string name = 1;
+  string path = 2;
+  repeated string include_prefixes = 3;
+  repeated string exclude_prefixes = 4;
+  int32 files = 5;
+}
+
+message OwnershipBinding {
+  // The backend origin, with credentials, path and query stripped: an ownership record is a file
+  // on disk and must not hold a secret.
+  string backend_origin = 1;
+  string base_id = 2;
+  // The absolute path of the corpus root. A record from one clone of a repository does not
+  // describe another clone.
+  string corpus_root = 3;
+  // The identifier namespace. Changing it renumbers every identity, so it is bound rather than
+  // inferred.
+  string namespace = 4;
+}
+
+// CorpusService brings a corpus and a base into agreement.
+//
+// It exists at all because a reconcile is not a content operation: it is a comparison between a
+// directory and a base, and its answer is a plan rather than a result.
+//
+// It has no write for the corpus. A corpus file has an editor, hooks, a blame view and a review
+// process, and a tool that wrote it behind somebody's back would fight all four. It also means
+// the tool never has to be trusted with a person's documentation, which is a much easier property
+// to reason about than "it only writes files you approved".
+service CorpusService {
+  // @toolbox.side-effects read_only
+  // PlanReconcile walks the configured roots, compares each file's identity and digest against
+  // what the base already holds, and returns what a reconcile would do.
+  //
+  // It reads the corpus and the base and writes nothing, which is what makes it safe to compute
+  // over a directory somebody is actively editing, and what makes it the natural way to preview
+  // a change without any of it being believed.
+  rpc PlanReconcile(PlanReconcileRequest) returns (PlanReconcileResponse);
+
+  // @toolbox.side-effects create update delete
+  // ApplyReconcile applies a plan, and takes the confirmation as a field.
+  //
+  // It is the only operation in this contract that can create, update and delete in one call, and
+  // so the one whose confirmation matters most. `confirm` carries the digest of the plan the
+  // person read; a digest that does not match the plan as recomputed is refused, so a
+  // confirmation cannot be reordered against a proposal or applied to a different directory
+  // state than the one that was shown.
+  //
+  // Asynchronous, because a large corpus is thousands of extractions and cannot be a
+  // synchronous call. The operation identifiers it returns are how a caller follows it.
+  rpc ApplyReconcile(ApplyReconcileRequest) returns (ApplyReconcileResponse);
+
+  // @toolbox.side-effects read_only
+  // GetCorpusStatus reports what the base believes, which roots it reconciles from, and the commit
+  // it last reconciled.
+  rpc GetCorpusStatus(GetCorpusStatusRequest) returns (GetCorpusStatusResponse);
+
+  // @toolbox.side-effects read_only
+  // ReadCorpusFile returns a corpus file with its frontmatter, so a person reads documentation
+  // through the same tool they read everything else with.
+  //
+  // It is a read and not the only way to read a file — `GetContent` returns the same body — and
+  // it exists because a person debugging what a runbook says wants the declared metadata and the
+  // bytes together, and `GetContent` answers "what does the base hold" rather than "what does
+  // the file say".
+  rpc ReadCorpusFile(ReadCorpusFileRequest) returns (ReadCorpusFileResponse);
+
+  // @toolbox.side-effects create update delete
+  // RebuildCorpus drops the base's derived knowledge and reconciles the corpus again.
+  //
+  // It is the only operation here that destroys anything on the documentation side, and it is
+  // safe by construction rather than by promise: the corpus is the source of truth, so dropping
+  // the base loses nothing a person wrote and reproduces from the repository. What it costs is
+  // time and a re-extraction of everything, which is why it exists at all rather than as a
+  // thing to do routinely.
+  //
+  // The ownership record survives, so the rebuild is incremental rather than a full
+  // re-extraction: content whose digest has not changed is not touched.
+  rpc RebuildCorpus(RebuildCorpusRequest) returns (RebuildCorpusResponse);
+}
+
+message PlanReconcileRequest {
+  // The base to reconcile into. Required.
+  string base_id = 1;
+  // The commit the corpus is at. Recorded on the result and on everything ingested.
+  //
+  // It defaults to the resolved `HEAD` of the corpus root, and the default is deliberate: a
+  // reconcile that ran against a working tree would believe something no reviewer has seen, and
+  // the reproducibility property would be a claim rather than a fact. A caller that wants a
+  // preview of uncommitted work reads the files itself, or runs the plan, which is a read.
+  string commit = 2;
+  // The roots to reconcile. Defaults to the base's configured roots.
+  repeated CorpusRootSpec roots = 3;
+  // The identity written into content's ownership marker. Required, and it must match the owner
+  // on `ApplyReconcile`.
+  string owner = 4;
+  // Include deletions. Off by default, so a first reconcile over an existing base cannot remove
+  // anything by accident.
+  bool prune = 5;
+  // Report derived knowledge the corpus contradicts. Off by default because it costs a pass over
+  // the derived half.
+  bool report_drift = 6;
+  // Restrict to a subtree.
+  string subtree = 7;
+}
+
+message CorpusRootSpec {
+  // The directory on disk. Required.
+  string path = 1;
+  // Namespaces identifiers from this root. Required, and never defaulted from the path: the
+  // default would depend on where somebody cloned the repository, which is exactly the property
+  // the namespace exists to avoid.
+  string name = 2;
+  // Restrict to these folder prefixes. Empty means everything.
+  repeated string include = 3;
+  // Remove these folder prefixes, applied after `include` so this wins. Narrowing scope over the
+  // same destination legitimately means "these files are no longer mine", and pruning them is
+  // correct.
+  repeated string exclude = 4;
+}
+
+message PlanReconcileResponse {
+  ReconcilePlan plan = 1;
+}
+
+message ApplyReconcileRequest {
+  // The base to write to. Required.
+  string base_id = 1;
+  // The plan to apply. Required, and a plan with a different `base_id` is refused.
+  ReconcilePlan plan = 2;
+  // The digest of the plan that was shown to the person confirming it. Required.
+  //
+  // It is a field rather than a two-call handshake so that the proposal and the approval cannot
+  // be reordered, and it is checked against the plan as recomputed so that a confirmation cannot
+  // be applied to a directory that has changed since. A rule that must reach a human has to work
+  // on any transport, and a value the agent relays and the user answers works everywhere — the
+  // HTTP MCP endpoint is stateless and cannot elicit at all.
+  string confirm = 3;
+  // The identity written into content's ownership marker. Must match the plan's `owner`, and a
+  // mismatch is refused: a caller that sets one and not the other would ingest content no prune
+  // could ever remove.
+  string owner = 4;
+  // The commit, recorded on the result and on everything ingested.
+  string commit = 5;
+  // Include deletions. A caller that planned without pruning and applies with it has changed
+  // the plan, and this is refused rather than honoured.
+  bool prune = 6;
+  // Most documents per ingest request. The server has its own default.
+  int32 batch_size = 7;
+  // How many ingest requests may be in flight. Bounded by the server: an unbounded fan-out is
+  // how a reconcile turns into an outage.
+  int32 concurrency = 8;
+}
+
+message ApplyReconcileResponse {
+  int32 ingested = 1;
+  int32 replaced = 2;
+  int32 pruned = 3;
+  // Items the backend refused. They do not stop the rest: one unreadable document in a
+  // thousand-file corpus is not a reason to leave the other nine hundred and ninety-nine
+  // unreconciled.
+  int32 failed = 4;
+  repeated string operation_ids = 5;
+  repeated string warnings = 6;
+  // What the base now believes, so a caller does not need a second call to know the outcome.
+  CorpusStatus status = 7;
+  // The plan digest now recorded, which is the commit correspondence made checkable.
+  string recorded_commit = 8;
+}
+
+message GetCorpusStatusRequest {
+  // The base to report on. Required.
+  string base_id = 1;
+}
+
+message GetCorpusStatusResponse {
+  CorpusStatus status = 1;
+}
+
+message ReadCorpusFileRequest {
+  // The base whose corpus to read from. Required.
+  string base_id = 1;
+  // The corpus-relative, slash-separated path. Required.
+  string path = 2;
+  // Which configured root, when a base reconciles more than one and a path is ambiguous.
+  string root = 3;
+}
+
+message ReadCorpusFileResponse {
+  // The file's bytes exactly as read, which is what a person wants to see rather than a
+  // re-rendering of them.
+  bytes raw = 1;
+  // What the file declared, parsed.
+  CorpusFileMeta meta = 2;
+  // The declared identity, when the file has one.
+  string declared_id = 3;
+  // The identifier the reconciler would use, declared or derived.
+  string effective_id = 4;
+  string digest = 5;
+  google.protobuf.Timestamp mod_time = 6;
+  // The tags it would be ingested with, so a person can see what retrieval would scope on.
+  repeated string tags = 7;
+}
+
+message RebuildCorpusRequest {
+  // The base to rebuild. Required.
+  string base_id = 1;
+  // Report what would be dropped without dropping it. A read, and the only safe way to find out
+  // how much a rebuild costs.
+  bool dry_run = 2;
+  // The identity for the ownership marker. Required when anything is actually rebuilt.
+  string owner = 3;
+  // The commit to reconcile to. Defaults to the resolved `HEAD`.
+  string commit = 4;
+}
+
+message RebuildCorpusResponse {
+  // How much derived knowledge was dropped: facts, observations and pages.
+  int32 cleared_facts = 1;
+  int32 cleared_observations = 2;
+  int32 cleared_pages = 3;
+  // The reconcile that followed, or would follow under `dry_run`.
+  ReconcilePlan plan = 4;
+  repeated string operation_ids = 5;
+  repeated string warnings = 6;
+}
+
+// MountState is whether a mount is running.
+enum MountState {
+  MOUNT_STATE_UNSPECIFIED = 0;
+  // Requested but not yet serving, while the FUSE handshake completes.
+  MOUNT_STATE_STARTING = 1;
+  // Serving reads.
+  MOUNT_STATE_MOUNTED = 2;
+  // Stopped cleanly, by `DisableMount` or by the host shutting down.
+  MOUNT_STATE_STOPPED = 3;
+  // Asked for and could not start. `MountStatus.failure` says which piece was missing.
+  MOUNT_STATE_FAILED = 4;
+}
+
+// MountStatus is what a mount is doing, and what it could not do.
+message MountStatus {
+  // The mount's identity within the deployment, unique among mounts.
+  string mount_id = 1;
+  string base_id = 2;
+  MountState state = 3;
+  // The directory the mount appears at, **on the host running this subsystem**.
+  //
+  // This is the cost of controlling a mount over RPC, and it is worth stating rather than
+  // leaving to be discovered: a mount lives in a filesystem namespace, and an RPC creates one in
+  // the namespace of the process serving it. Calling this from another machine mounts the
+  // projection over there and nowhere near the caller. It is the right shape when the caller and
+  // the subsystem are the same machine, which is the deployment this is for — a person auditing
+  // what a system believes wants the files in front of them — and the wrong shape for a remote
+  // deployment, which should use `ExportWiki` and download the bundle instead.
+  string mountpoint = 4;
+  // Why the mount is not serving, naming the missing piece: `fusermount3` absent, `/dev/fuse`
+  // absent, the path already mounted, or this build has no FUSE support compiled in.
+  string failure = 5;
+  // How often the mount polls for a changed projection.
+  google.protobuf.Duration poll_interval = 6;
+  // The kernel attribute and entry timeout the mount sets, which is the bound on staleness where
+  // change notification is unavailable. A stated number, not "eventually".
+  google.protobuf.Duration attr_timeout = 7;
+  google.protobuf.Duration entry_timeout = 8;
+  // The projection revision the mount is currently serving.
+  string serving_revision = 9;
+  // When the projection was last re-fetched because the revision moved.
+  google.protobuf.Timestamp refreshed_at = 10;
+  int32 files = 11;
+  // How many times the revision moved and the mount re-fetched.
+  int32 refreshes = 12;
+  // Whether the mount is strictly read-only. It always is, and it is reported rather than
+  // assumed so a caller can see the guarantee rather than infer it.
+  bool read_only = 13;
+  google.protobuf.Timestamp started_at = 14;
+}
+
+// MountSpec is what a mount should serve.
+message MountSpec {
+  // The base to project. Required.
+  string base_id = 1;
+  // Where to mount it, on this host. Required, and refused if the path is not an existing
+  // directory: a mount command that creates its own mountpoint leaves a directory behind when it
+  // fails, and an empty directory that looks like a mount is worse than no mount.
+  string mountpoint = 2;
+  // Restrict the mount to one origin, or to a subtree — the same filter `ExportWiki` takes, and
+  // enforced by the same code, so the mount cannot show more than the API does.
+  Origin origin = 3;
+  string subtree = 4;
+  // How often to poll. Defaults to two seconds, which is short enough to feel live and long
+  // enough that polling is not the load.
+  google.protobuf.Duration poll_interval = 5;
+  // The kernel cache timeout. Defaults to one second. This is the bound on staleness for a
+  // reader that re-reads on focus, which is most of them: content changes drop the kernel's
+  // cached copy immediately, but a content notification emits no inotify event, so an editor
+  // with the file open is not told to reload and no amount of polling changes that.
+  google.protobuf.Duration attr_timeout = 6;
+  // The directory-entry cache timeout. Defaults to one second.
+  google.protobuf.Duration entry_timeout = 7;
+  // The identity written into projected content's ownership marker, when a mount also drives a
+  // reconcile. Optional: a mount is a read path and needs no ownership.
+  string owner = 8;
+}
+
+// MountService mounts the whole-wiki projection as a read-only filesystem.
+//
+// Why this is an RPC rather than a command, and what it costs.
+//
+// A bundle is a thing you download; a filesystem is a thing you read, and for a person auditing
+// what a system believes that is the difference between looking and reading. Being able to
+// enable, disable and place a mount from the same tool that serves everything else is worth
+// having — one place to ask what a deployment knows, and one place to change how it is presented.
+//
+// The cost is the one stated on `MountStatus.mountpoint`: a mount exists in a filesystem
+// namespace, and an RPC creates one in the namespace of the process that serves it. A deployment
+// whose callers are on other machines gets a mount on the subsystem's host. This is correct for
+// the deployment it targets — the person auditing the base is on the machine running it — and it
+// is why `ExportWiki` remains the primary feature rather than this one: the mount is one way to
+// consume it, and nothing depends on it.
+service MountService {
+  // @toolbox.side-effects read_only
+  // GetMountStatus reports one mount, or every mount when no identifier is given.
+  rpc GetMountStatus(GetMountStatusRequest) returns (GetMountStatusResponse);
+
+  // @toolbox.side-effects create
+  // EnableMount starts mounting a base's projection at a mountpoint, and returns as soon as the
+  // mount is established rather than waiting for it to end.
+  //
+  // It reports `FAILED` with a named reason rather than an error when the host cannot mount: a
+  // missing `fusermount3`, a missing `/dev/fuse`, a path already mounted, or a build with no
+  // FUSE support. Each has a different fix, and collapsing them into one "unavailable" would
+  // throw away the diagnosis.
+  //
+  // Mounting is not a content operation, so this is not `FailedPrecondition` when it cannot
+  // start: the request was well formed and the host is not able to satisfy it, which is
+  // `Unavailable` with a reason attached.
+  rpc EnableMount(EnableMountRequest) returns (EnableMountResponse);
+
+  // @toolbox.side-effects delete
+  // DisableMount unmounts a mount and removes the mount record.
+  //
+  // It never leaves a stale mountpoint behind: the mount is detached and the record dropped, and
+  // a mountpoint that still has something mounted on it is reported rather than quietly reused.
+  rpc DisableMount(DisableMountRequest) returns (DisableMountResponse);
+}
+
+message GetMountStatusRequest {
+  // One mount, or all of them when empty.
+  string mount_id = 1;
+  // Restrict to mounts of this base.
+  string base_id = 2;
+}
+
+message GetMountStatusResponse {
+  // Every mount this deployment holds, or the one that was asked for.
+  repeated MountStatus mounts = 1;
+  // Whether this build can mount at all. False means the FUSE code was not compiled in, and
+  // every mount operation is `Unimplemented` with a message naming the build tag — so a caller
+  // can tell "not supported here" from "failed to start" without attempting it.
+  bool fuse_available = 2;
+  // Why it is unavailable, when it is. Names the build tag to use.
+  string fuse_unavailable_reason = 3;
+  // The negotiated change-notification capabilities of the running host, so a caller knows
+  // whether it will get inotify events for removals. Content changes are never signalled as
+  // inotify events whatever the host supports, which is a property of the notification API
+  // rather than a bug to work around.
+  repeated string notification_capabilities = 4;
+  // The staleness bound in force when notification is unavailable.
+  google.protobuf.Duration staleness_bound = 5;
+}
+
+message EnableMountRequest {
+  // What to mount and where. Required.
+  MountSpec spec = 1;
+  // An identifier for this mount, unique within the deployment. One is derived from the base and
+  // the mountpoint when absent, which is enough for the common case of one mount per base and
+  // not enough for two mounts of one base at two paths, so it is settable.
+  string mount_id = 2;
+  // Mount even if a mount already exists at the path. Off by default, because replacing a live
+  // mount would make a reader's open files point at a different projection with no indication.
+  bool replace_existing = 3;
+}
+
+message EnableMountResponse {
+  MountStatus status = 1;
+}
+
+message DisableMountRequest {
+  // The mount to stop. Required.
+  string mount_id = 1;
+  // Unmount even if the mount is busy. Off by default, and a busy mount reports what holds it
+  // rather than being detached underneath an open file.
+  bool force = 2;
+}
+
+message DisableMountResponse {
+  MountStatus status = 1;
+  // Files the kernel still had open, when a forced unmount left any.
+  repeated string busy_paths = 2;
+}
+
+// KnowledgeBaseService is administration: which bases exist and how they are configured.
+//
+// It is separate from the content surface because those are different questions. "What does this
+// base know" and "does this base exist, and is it configured sensibly" have different audiences,
+// different failure modes, and different reasons to be refused, and a service that answered both
+// would make every content read depend on configuration rights.
+service KnowledgeBaseService {
+  // @toolbox.side-effects read_only
+  // ListBases returns the bases this deployment can address, with their aliases and sizes.
+  rpc ListBases(ListBasesRequest) returns (ListBasesResponse);
+
+  // @toolbox.side-effects read_only
+  // GetBase returns one base, addressed by identifier or by alias.
+  rpc GetBase(GetBaseRequest) returns (GetBaseResponse);
+
+  // @toolbox.side-effects create
+  // CreateBase creates a base and returns it.
+  //
+  // It creates nothing else. A base holds knowledge; what goes into it is the corpus reconcile's
+  // business and a retained write's, and a base that came into existence already full would make
+  // "what did we put here" unanswerable.
+  rpc CreateBase(CreateBaseRequest) returns (CreateBaseResponse);
+
+  // @toolbox.side-effects update
+  // UpdateBase changes a base's name, description or the corpus it reconciles.
+  rpc UpdateBase(UpdateBaseRequest) returns (UpdateBaseResponse);
+
+  // @toolbox.side-effects delete
+  // DeleteBase deletes a base and reports what it destroyed.
+  //
+  // It destroys derived knowledge and nothing a person wrote: a corpus file lives in a
+  // repository, and a retained conversation is the deployment's to lose deliberately. The
+  // response says how much of each was involved, because a delete that reports nothing is a
+  // delete nobody can review.
+  rpc DeleteBase(DeleteBaseRequest) returns (DeleteBaseResponse);
+
+  // @toolbox.side-effects update
+  // ResetBaseConfig restores a base's configuration to the server's defaults, which is a
+  // different thing from overwriting it with something.
+  //
+  // The distinction is the whole point of the method. Setting every field to a known value is
+  // only the same as a reset while the defaults are those values, and the day they are not, a
+  // caller overwriting a field it did not know about has silently changed behaviour. A reset
+  // asks the server what it wants.
+  rpc ResetBaseConfig(ResetBaseConfigRequest) returns (ResetBaseConfigResponse);
+
+  // @toolbox.side-effects read_only
+  // GetBaseConfig reads a base's configuration.
+  rpc GetBaseConfig(GetBaseConfigRequest) returns (GetBaseConfigResponse);
+
+  // @toolbox.side-effects update
+  // UpdateBaseConfig changes a base's configuration.
+  //
+  // Every field is three-valued: absent leaves it, present-and-empty clears it. Getting that
+  // wrong is how a re-tag silently clears a field, and a caller that cannot tell "I did not
+  // mention it" from "I meant to empty it" will not attempt a partial update at all.
+  rpc UpdateBaseConfig(UpdateBaseConfigRequest) returns (UpdateBaseConfigResponse);
+
+  // @toolbox.side-effects read_only
+  // GetBaseStats reports a base's size and composition.
+  rpc GetBaseStats(GetBaseStatsRequest) returns (GetBaseStatsResponse);
+
+  // @toolbox.side-effects read_only
+  // GetBaseIngestionSeries reports how a base has grown over time, so an operator can see that it
+  // is growing and when it last changed.
+  rpc GetBaseIngestionSeries(GetBaseIngestionSeriesRequest) returns (GetBaseIngestionSeriesResponse);
+
+  // @toolbox.side-effects read_only
+  // ListBaseAliases returns a base's friendly names.
+  rpc ListBaseAliases(ListBaseAliasesRequest) returns (ListBaseAliasesResponse);
+
+  // @toolbox.side-effects create
+  // AddBaseAlias gives a base a friendly name, refused if it is taken.
+  rpc AddBaseAlias(AddBaseAliasRequest) returns (AddBaseAliasResponse);
+
+  // @toolbox.side-effects update
+  // SetPrimaryBaseAlias marks an alias as the one to display and to address by default.
+  rpc SetPrimaryBaseAlias(SetPrimaryBaseAliasRequest) returns (SetPrimaryBaseAliasResponse);
+
+  // @toolbox.side-effects delete
+  // RemoveBaseAlias removes a friendly name, refusing the primary one while others remain.
+  rpc RemoveBaseAlias(RemoveBaseAliasRequest) returns (RemoveBaseAliasResponse);
+}
+
+message BaseRef {
+  // The base identifier, or an alias. A deployment addresses a base by a friendly name far more
+  // often than by a generated identifier, and a contract that made it look up the alias first
+  // would push that into every caller.
+  string name = 1;
+}
+
+message Base {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // Whether this is the display name.
+  bool is_primary_alias = 5;
+  // The corpus roots this base reconciles, and the commit it last reconciled.
+  repeated CorpusRootSpec corpus_roots = 6;
+  string reconciled_commit = 7;
+  google.protobuf.Timestamp reconciled_at = 8;
+  int32 owned_documents = 9;
+  // Whether the backend's version matches what this provider was built against. Two independent
+  // facts, and the check is cheap: the client library is pinned to a commit rather than to a
+  // release, so nothing in the build says which backend it was written for.
+  string backend_version = 10;
+  string expected_backend_version = 11;
+  bool backend_version_matches = 12;
+}
+
+message ListBasesRequest {}
+
+message ListBasesResponse {
+  repeated Base bases = 1;
+}
+
+message GetBaseRequest {
+  BaseRef ref = 1;
+}
+
+message GetBaseResponse {
+  Base base = 1;
+}
+
+message CreateBaseRequest {
+  // The base's identifier, or empty to let the server choose one.
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  // The corpus this base reconciles from, configured at creation so a base is not created empty
+  // of purpose and left to be configured later.
+  repeated CorpusRootSpec corpus_roots = 4;
+  // Apply a configuration at creation, so a base does not have to be created and then configured
+  // as two steps with a window in between where it serves half-configured.
+  BaseConfig config = 5;
+}
+
+message CreateBaseResponse {
+  Base base = 1;
+}
+
+message UpdateBaseRequest {
+  BaseRef ref = 1;
+  optional string name = 2;
+  optional string description = 3;
+  // Replace the corpus roots. Absent leaves them.
+  repeated CorpusRootSpec corpus_roots = 4;
+}
+
+message UpdateBaseResponse {
+  Base base = 1;
+}
+
+message DeleteBaseRequest {
+  BaseRef ref = 1;
+}
+
+message DeleteBaseResponse {
+  bool deleted = 1;
+  // What the delete destroyed, so it can be reviewed rather than trusted.
+  DeleteImpact impact = 2;
+}
+
+message DeleteImpact {
+  int32 documents = 1;
+  int32 facts = 2;
+  int32 observations = 3;
+  int32 pages = 4;
+  int32 mental_models = 5;
+  int32 directives = 6;
+  // The corpus files this deployment indexed. They are **not** destroyed — they live in a
+  // repository — and this says how many there were, because a base deleted by mistake is
+  // recoverable only if somebody knew what it held.
+  int32 corpus_files_preserved = 7;
+  repeated string notes = 8;
+}
+
+message BaseConfig {
+  // What this base is for, in prose, which the reasoning step is told about.
+  optional string mission = 1;
+  // The behaviours the reasoning step should exhibit.
+  repeated string disposition_traits = 2;
+  // The entity vocabulary the base should resolve names against.
+  repeated string entity_vocabulary = 3;
+  // Which retrieval strategies to run and their relative weights.
+  map<string, int32> retrieval_weights = 4;
+  // Score floors, below which a strategy's contribution is discarded.
+  ScoreFloors score_floors = 5;
+  // The prompts and limits, as configuration rather than as prompt text.
+  BaseLimits limits = 6;
+  // Feature flags. Reported rather than assumed: a disabled capability must say so rather than
+  // behave differently with no explanation.
+  map<string, bool> features = 7;
+  // The extraction mode. The values exist in the backend's prose and not in its schema, so this
+  // contract names them as a string.
+  optional string extraction_mode = 8;
+  // `per_tag`, `combined` or `shared`. Chosen rather than inherited, because a corpus is mostly
+  // provenance tags and the default fragments observations according to them.
+  optional string observation_scope = 9;
+  // Whether names are resolved against entities already in the base.
+  optional bool resolve_entities = 10;
+}
+
+message ScoreFloors {
+  optional double semantic = 1;
+  optional double keyword = 2;
+  optional double entity = 3;
+  optional double temporal = 4;
+}
+
+message BaseLimits {
+  optional int32 max_tokens_per_query = 1;
+  optional int32 max_chunks_per_document = 2;
+  optional int32 max_facts_per_consolidation = 3;
+}
+
+message ResetBaseConfigRequest {
+  BaseRef ref = 1;
+}
+
+message ResetBaseConfigResponse {
+  // The configuration after the reset, which is the server's answer rather than this
+  // contract's idea of it.
+  BaseConfig config = 1;
+  // What the configuration was, so a caller can see what the reset undid before it confirms.
+  BaseConfig previous = 2;
+}
+
+message GetBaseConfigRequest {
+  BaseRef ref = 1;
+}
+
+message GetBaseConfigResponse {
+  BaseConfig config = 1;
+}
+
+message UpdateBaseConfigRequest {
+  BaseRef ref = 1;
+  // Every field is three-valued. `mission` and the maps are merged per key: a key absent here is
+  // left alone, a key present with an empty value is cleared.
+  optional BaseConfig config = 2;
+}
+
+message UpdateBaseConfigResponse {
+  BaseConfig config = 1;
+}
+
+message GetBaseStatsRequest {
+  BaseRef ref = 1;
+}
+
+message GetBaseStatsResponse {
+  BaseStats stats = 1;
+}
+
+message BaseStats {
+  int32 documents = 1;
+  int32 chunks = 2;
+  int32 facts = 3;
+  int32 observations = 4;
+  int32 mental_models = 5;
+  int32 pages = 6;
+  int32 entities = 7;
+  // Facts split by the world/experience distinction, because quoting an experience fact as a
+  // documented claim is a category error a reader cannot see.
+  int32 world_facts = 8;
+  int32 experience_facts = 9;
+  google.protobuf.Timestamp last_ingested_at = 10;
+  google.protobuf.Timestamp last_consolidated_at = 11;
+  int64 estimated_bytes = 12;
+}
+
+message GetBaseIngestionSeriesRequest {
+  BaseRef ref = 1;
+  // The bucket size. `hour` and `day` are the useful ones.
+  string granularity = 2;
+  // How many buckets back, ending now. Refused rather than defaulted to something large, because
+  // a base that has been running for a year and a base created an hour ago deserve different
+  // answers and the caller knows which it wants.
+  int32 buckets = 3;
+}
+
+message GetBaseIngestionSeriesResponse {
+  repeated IngestionBucket buckets = 1;
+  string granularity = 2;
+}
+
+message IngestionBucket {
+  google.protobuf.Timestamp start = 1;
+  int32 documents = 2;
+  int32 facts = 3;
+  int32 chunks = 4;
+}
+
+message ListBaseAliasesRequest {
+  BaseRef ref = 1;
+}
+
+message ListBaseAliasesResponse {
+  repeated BaseAlias aliases = 1;
+}
+
+message BaseAlias {
+  string id = 1;
+  string name = 2;
+  bool is_primary = 3;
+  string base_id = 4;
+}
+
+message AddBaseAliasRequest {
+  BaseRef ref = 1;
+  string name = 2;
+  // Make it the display name immediately.
+  bool primary = 3;
+}
+
+message AddBaseAliasResponse {
+  BaseAlias alias = 1;
+}
+
+message SetPrimaryBaseAliasRequest {
+  BaseRef ref = 1;
+  string alias_id = 2;
+}
+
+message SetPrimaryBaseAliasResponse {
+  BaseAlias alias = 1;
+}
+
+message RemoveBaseAliasRequest {
+  BaseRef ref = 1;
+  string alias_id = 2;
+}
+
+message RemoveBaseAliasResponse {
+  bool removed = 1;
+  // The alias that became primary as a result, so a caller showing the display name updates.
+  BaseAlias new_primary = 2;
+}
