@@ -142,12 +142,7 @@ is left is what the specification itself records as open.
       suggests the arguments are being re-serialised somewhere rather than passed through. That is
       `pkg/mcp`, and it is not this subsystem's code, so it is recorded rather than guessed at.
 - [ ] Decide the §15 open questions this implementation did not settle.
-- [ ] The 29 writes that a *default* policy denies are now covered by Go tests and by a granted
-      policy for the reconciler. The rest — page and mental-model CRUD, directive CRUD, import and
-      export, operation retry and cancel — are tested at the handler and through the stub, but no
-      harness has driven them through the gateway with a grant. The reconciler is the one that
-      mattered enough to build, because it is the longest path and the one a deployment runs
-      unattended.
+
 - [ ] The subsystem package is at 61%. Most of the remainder is the projection, the registry, the
       state store and the git plumbing, all of which the subsystem tests reach only indirectly.
       The domain underneath is at 90.9% with no function untested, so this is about which
