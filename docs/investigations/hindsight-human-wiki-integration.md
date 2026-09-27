@@ -1,21 +1,3 @@
-<!--
-Vendored from ~/Downloads/hindsight-human-wiki-integration.md
-on 2026-09-27, unmodified below this line.
-
-sha256: 20c7ee49eaf6d23099b59f4009a63487d951efcc3e637974612268a9a75c64db
-
-This is the integration design that `docs/knowledge.md` implements. It is an
-input, not a specification, and where the two differ the specification is right:
-it was written afterwards, with the backend's machine-readable API description
-open beside it, and it answers one question this document leaves open — what a
-repeated document identifier actually does. It is kept in the repository because
-the specification cites it, and a specification that cites a file in someone's
-Downloads folder is citing something that will not survive a reinstall.
-
-Do not edit the content. If the design changes, put the new version here and
-record what the specification changed to match.
--->
-
 # Human-Authored Markdown Wiki → Hindsight
 
 ## Goal

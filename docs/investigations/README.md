@@ -7,7 +7,7 @@ survives the decision being rewritten.
 | Document | What it is | Status |
 |---|---|---|
 | [`hindsight-knowledge-backend.md`](hindsight-knowledge-backend.md) | A survey of the memory backend's API and three candidate placements for it, plus the reasoning that the inverse of its filesystem projection cannot be "create a page with the body I typed". | Superseded by [`knowledge.md`](../knowledge.md), which is the specification. Kept for the evidence. |
-| [`hindsight-human-wiki-integration.md`](hindsight-human-wiki-integration.md) | An integration design for using a human-authored markdown wiki with the backend, written outside the project. | An **input** to [`knowledge.md`](../knowledge.md), vendored verbatim with a provenance header. Where the two differ, the specification is right. |
+| [`hindsight-human-wiki-integration.md`](hindsight-human-wiki-integration.md) | An integration design for using a human-authored markdown wiki with the backend, written outside the project. | An **input** to [`knowledge.md`](../knowledge.md). Where the two differ, the specification is right. |
 
 ## How they relate
 
@@ -38,10 +38,9 @@ specification is ahead of its inputs.
 
 ## A note on the vendored document
 
-`hindsight-human-wiki-integration.md` is byte-for-byte the file that was written
-elsewhere, with an HTML comment above it recording where it came from and its
-digest. The content is not edited, so the design can be read as it was written
-and the specification's disagreements with it are visible rather than smoothed
-over. If a new version of that design arrives, replace the file and record what
-the specification changed to match — that difference is usually the most useful
-thing in the repository.
+`hindsight-human-wiki-integration.md` is the file as it was written elsewhere,
+unedited. It is kept as it is so the design can be read as written and the
+specification's disagreements with it stay visible rather than smoothed over. If a
+new version of that design arrives, replace the file and record what the
+specification changed to match — that difference is usually the most useful thing
+in the repository.
