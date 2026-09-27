@@ -273,14 +273,14 @@ person owns. See §5 for the design.
 | W-2 | Corpus content is listed and read through the API with the same calls as any other content, so documentation is a first-class thing and not a filesystem an API consumer has to be given separately. (U) |
 | W-3 | The corpus is browsable as a tree, and its tree sits in the same walk as derived pages. (U) |
 | W-4 | **Reconcile is the unit of work**: plan what would change, report it, and apply only what the user confirmed. There is no unconditional write. (W) |
-| W-5 | A file's identity is declared, not inferred from where it happens to sit: the frontmatter `id` when the file has one, and a path-derived identifier otherwise. Both are computable from the file alone, so no state outside the base is required, and a **move** of a file that declares an id keeps its identity. (W) |
-| W-6 | An unchanged file costs nothing: the plan compares digests against the content's recorded digest. (W) |
-| W-7 | Each reconcile records which content it owns, and a prune only removes content that owner recorded. Two reconciles over one base cannot delete each other's work. (W) |
-| W-8 | Frontmatter becomes tags — path segments, dates, and the author's own tags — so scope is a filter retrieval already supports rather than a directory convention the API must learn. (W) |
-| W-9 | Authored text is ingested with entity resolution off, because a person writing a name means the name. (W) |
-| W-10 | Files with no event time are ingested as timeless. (W) |
+| W-5 | A file's identity is declared, not inferred from where it happens to sit: the frontmatter `id` when the file has one, and a path-derived identifier otherwise. Both are computable from the file alone, so no state outside the base is required, and a **move** of a file that declares an id keeps its identity. §5.10. (W) |
+| W-6 | An unchanged file costs nothing: the plan compares digests against the content's recorded digest, and an unchanged modification time skips the read entirely. The digest decides; the timestamp only avoids work. (W) |
+| W-7 | Each reconcile records which content it owns, and a prune only removes content that owner recorded — never by listing the base, which would surface content nobody owns. The ownership record is bound to the destination it was built for, and a record that does not match is **refused**, naming what differs. Two reconciles over one base cannot delete each other's work. (W) |
+| W-8 | Frontmatter becomes tags — path segments, dates, and the author's own tags — so scope is a filter retrieval already supports rather than a directory convention the API must learn. The **source path** goes in `metadata` rather than in a tag, because a citation needs a field to point at and a filter does not. (W) |
+| W-9 | Authored text is ingested with `resolve_entities` off, because a person writing a name means the name. The backend's default is **on**, and on means a name close to one already in the base may resolve to that one instead — so this is set explicitly on every ingest, never inherited. (W) |
+| W-10 | Files with no event time are ingested as timeless, with `timestamp: "unset"` — the one spelling the backend accepts for "this has no date", and the one no shipped client uses. (W) |
 | W-11 | The plan names every file it would create, change, leave alone and delete, with digests, so the user reads what is about to happen. (W) |
-| W-12 | Application is asynchronous, batched, and idempotent per batch, because a large corpus is thousands of extractions and cannot be a synchronous call. (W) |
+| W-12 | Application is asynchronous, batched, and idempotent per batch, because a large corpus is thousands of extractions and cannot be a synchronous call. The backend's asynchrony is a flag on the ingest request rather than a separate job API, so a batch is one request, and idempotence is a caller-supplied `operation_id` on it: re-sending one returns the original operation and does no work, and re-using one for a different operation is a `409`. (W) |
 | W-13 | Binary files under the corpus are ingested through the binary path. (W) |
 | W-14 | **The corpus remains the source of truth.** Deleting a base deletes derived knowledge, not the files. Deleting a page deletes a projection. Nothing in the base is the only copy of anything a person wrote. (W) |
 | W-15 | **The corpus is written by people, through their editor, and reviewed through Git.** Not through this API. An assistant never writes a corpus file, and neither does the subsystem on its own. A write that existed only in the base would be a second source of truth, and the next reconcile would delete it; a write that landed in the file behind somebody's editor would produce a conflict with their tooling. §10.2. (U) |
@@ -597,6 +597,19 @@ message Provenance {
 mechanism rather than two: ownership is a provenance tag, so pruning and
 provenance cannot disagree.
 
+**One constraint on what a citation may promise, because the backend does not
+make it easy.** A fact cited by a reasoning answer comes back as an identifier
+and its text, and **usually without the document it came from**; the document id
+is on the retrieval results inside the reasoning trace instead. So a cited fact
+cannot be resolved to a file from the citation alone — it takes a join against
+the trace, and the trace is only returned when the caller asks for it and is
+large when it is. This surface should therefore resolve citations itself and
+return `source` populated, rather than handing a caller an identifier and the
+obligation to reconstruct where it came from. It is also why there are two
+different questions to keep apart: *what the answer drew on* (the whole trace)
+and *what it cited* (the narrower, ordered, deduplicated set). A person wants
+the second; a reader debugging a wrong answer wants the first.
+
 ### 4.4 Why one type, concretely
 
 "One surface" is worth testing rather than asserting. Three consumers, one
@@ -828,13 +841,33 @@ The provenance chain a consumer walks is memory → document → path → commit
 markdown, and every link in it is a field rather than a lookup.
 
 **Diffing is by content digest, never by timestamp.** W-6. Filesystems lie about
-timestamps; digests do not, and the content already carries one.
+timestamps; digests do not, and the content already carries one. The
+implementation upstream keeps for this is two-stage and worth copying: an
+unchanged modification time skips the file without reading it, and a moved
+modification time with an identical digest refreshes the timestamp without
+re-ingesting. The timestamp is a free way to avoid work; the digest is what
+decides.
 
 **Ownership is recorded, and pruning respects it.** W-7. Each reconcile writes
 its own marker into the content metadata it creates, and a prune removes content
 only if that marker names the owner doing the pruning. Without this, reconciling
 a second directory into a base would delete the first one's documentation — the
 failure mode a two-reconciler deployment discovers by losing data.
+
+Two details in that are learned rather than invented, both from the shipped
+client in §5.10. **A prune walks the ownership record, never the base.** Listing
+what a base holds would also return the content nobody owns — a retained
+conversation, a second corpus — and a reconciler that deleted those would be
+indistinguishable from data loss. The cost is named rather than hidden: content
+orphaned by a lost ownership record is not pruned until its file is touched
+again. **And the record is bound to where it was built, and fails closed.** An
+ownership record is only valid for the backend, the base, the corpus root and the
+identifier namespace it was written for; reusing one across those would classify
+another target's files as already reconciled *and* authorise deleting content in
+a base this reconciler never wrote to. A record that does not match is therefore
+refused, naming each field that differs, rather than repaired. This is not
+defensive programming for its own sake: the same project shipped that bug and
+fixed it that way. See §5.10.
 
 **Frontmatter and path become tags.** W-8, W-9, W-10. Tags are what retrieval
 already filters on, so a directory convention becomes a scope without the
@@ -1031,50 +1064,131 @@ wiring is exercised by hand.
 small dependencies. `bazil.org/fuse` was the alternative and its last release
 predates this by three years.
 
-### 5.10 The upstream question, and what it is waiting on
+### 5.10 There is a shipped answer, and this design is the part of it that is not Obsidian
 
-This subsystem answers a question that has been asked of the backend's authors
-and **not yet answered**. It is recorded here as a pending dependency, because a
-design that rests on an assumption should say which assumption and who could
-contradict it.
+The obvious question about §5.1 through §5.5 is whether this is reinventing
+something that already exists. It partly is, and finding out is worth more than
+either answer would have been. The full survey — every source and test file of
+the client, and a requirement-by-requirement mapping — is
+[`investigations/hindsight-obsidian-integration.md`](investigations/hindsight-obsidian-integration.md).
 
-> ["integration of human authored documentation" — discussion #4830](https://github.com/vectorize-io/hindsight/discussions/4830),
-> asked 2026-09-27, category Q&A. **Status when this section was written:
-> *Unanswered*, "Replies: 0 comments", 1 participant.**
+**Hindsight ships a first-party client for exactly this**:
+[`@vectorize-io/hindsight-obsidian`](https://hindsight.vectorize.io/sdks/integrations/obsidian),
+source in
+[`hindsight-integrations/obsidian/`](https://github.com/vectorize-io/hindsight/tree/v0.10.1/hindsight-integrations/obsidian).
+It syncs a human-maintained markdown vault into a bank, one way, and its stated
+hard rule is *"Hindsight is never a second source of truth."* Version 0.3.0 was
+published to npm on **2026-09-25**, and its algorithm is the same three calls
+this design uses:
 
-The question asks how to get a human-maintained wiki into a Hindsight instance —
-"sync/import the 'human wiki' from time to time" — and asks what current users
-do. The full text and an analysis of it are in
-[`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md)
-§5.6.
+| Event | Call |
+|---|---|
+| note created / edited | `retain(document_id = note path)`, `update_mode: "replace"` |
+| note renamed | `deleteDocument(old)` + `retain(new)` |
+| note deleted | `deleteDocument(path)` |
+| "sync now" | reconcile: ingest drifted notes, prune orphans |
 
-**What this design already assumes, and would be unaffected by a hostile answer.**
-The corpus design in §5.2–§5.5 is the answer to that question: a Git directory as
-the authoritative half, reconciled into a base with a stable identifier per file,
-never written back (W-15), on merged content rather than on a timer (W-19). If
-the maintainers reply *"call `retain` with a stable `document_id`"*, that is this
-design, arrived at independently, and nothing here moves. It is the likely answer
-precisely because the question asks for a community pattern and not a feature.
+**It is not adopted as an implementation, and there are four reasons, in order
+of weight.** It is TypeScript against the Obsidian runtime, so a Go subsystem
+using it means a second, unmanaged writer to the base. Its ownership record is
+bound to the vault's **absolute path**, so a fresh clone anywhere else fails
+closed and forces a full re-extraction — and for a repository, whose whole point
+is that it is cloned to many paths, that alone is disqualifying. It cannot record
+which commit it reconciled (W-18) and cannot produce a plan for a person to
+confirm (W-4). And it has no notion of `authority`, `supersedes`, `status`,
+`owner` or `reviewed` — the frontmatter contract in §5.2 is most of what this
+subsystem is for.
 
-**What would move, and is worth watching:**
+**And it disagrees with W-19 outright, which is the one difference that is about
+what the system is rather than how it is built.** Its sync-on-edit defaults *on*
+and its live watch mode is a headline feature: it believes whatever is on disk
+within seconds. This design believes only merged commits, because a shared corpus
+is reviewed in Git precisely so that what the deployment believes was somebody's
+decision. Both are right for their own corpus — a personal vault has no review
+step, so waiting for a merge would mean never syncing — but they are not
+interchangeable, and it is the clearest evidence that the client is a client and
+not a smaller version of this.
 
-- **If a maintainer points at knowledge pages with `managed: false`, the answer
-  is wrong** and this document has the evidence: `KnowledgeNode.managed` occurs
-  exactly once in the API description, in a *response* schema, and in no request;
-  and no page request carries a body. §5.1 and §5.2 are built on that, and they
-  are right.
-- **If directives turn out to be the recommended home for authored procedures**,
-  `DirectiveService` stops being administrative and becomes load-bearing, which
-  changes §6.1 and probably §15 question 1.
-- **If upstream builds authored pages as a feature**, §5.2's premise — that the
-  only direction available is memory → disk — becomes false, and this design has
-  duplicated a backend capability. That is the one outcome that would make most
-  of §5 wrong, and it is the one to re-read the description for at a later
-  version rather than assume.
+**What it does remove is the invention.** §5.4 becomes a transcription of a
+design that has been in continuous use since 2026-06-08, and most of what
+follows are mechanisms this document had stated as a goal without one, or had
+not thought of at all. Adopted, each with the reason upstream gives:
 
-Until an answer exists, none of this is a reason to wait: the corpus half is
-Git and plain files, and the whole-wiki view is a bundle of markdown. Both work
-against a backend whose maintainers have never been asked.
+- **Prune by the local index, never by listing the base** (W-7). Listing would
+  surface content this subsystem does not own — a retained conversation, another
+  corpus — and delete it. The cost is stated rather than hidden: an orphan left
+  behind by a lost index is not pruned until the file is touched again.
+- **The index is bound to its destination and fails closed.** Identity is
+  `(api origin, base, corpus root, id namespace)`; a persisted index whose
+  binding does not match is **refused, naming each differing field**, because
+  reusing one across bases "could authorize prune DELETEs against a bank this
+  ingester never wrote to". Upstream shipped that as a data-deletion bug and fixed
+  it in 0.2.1 (2026-08-10) by adding the binding rather than a warning. W-7 is
+  the goal; this is the mechanism, and it is now written down instead of
+  implied.
+- **Timestamp as a free pre-filter, digest as the truth** (W-6). Identical
+  `mtime` skips without reading the file; `mtime` moved with an identical
+  `sha256` refreshes the timestamp and does not re-ingest.
+- **Provenance in `metadata`, scope in tags** (W-8). The source path goes in the
+  item's `metadata` because that is what a citation needs to point back at a
+  file; the scope dimensions go in tags because that is what filtering needs.
+  A `context` field on the item names the subsystem.
+- **Idempotence by key, not by hope** (W-12). The ingest request takes a
+  caller-supplied `operation_id`, and re-sending one returns the original
+  operation and does no work — a retry after a lost acknowledgement does not
+  enqueue a duplicate, and re-using an id for a different operation is a `409`.
+  The client sends none, so its retries duplicate; this design will not.
+- **Entity resolution off, explicitly** (W-9). `resolve_entities` defaults to
+  **on**, where on means a name close to one already in the base may resolve to
+  that one *instead of the one the author wrote*. The client never sets it, so an
+  authored runbook's "Acme Corp" can attach itself to a different "Acme" in the
+  same base. This is the clearest defect found in the survey and it is a
+  correctness bug for a corpus, not a tuning question.
+- **Consolidation scope chosen, not inherited** (W-8). `observation_scopes`
+  decides how many consolidation passes a tagged memory gets — one per tag, one
+  with all tags together, or one global untagged pass *"useful for deduplicating
+  across volatile per-call provenance tags"*. A corpus ingested with `vault:`,
+  `folder:` and date tags is mostly provenance tags, so the default is a decision
+  this design has to make on purpose rather than inherit.
+
+**And one deliberate divergence.** That client uses the path as identity,
+always, so a move is a delete and a fresh extraction. §5.2 keeps the frontmatter
+`id` — for the same reason its no-`id` case is already delete-and-create —
+because a corpus gets reorganised and a reorganisation should not silently
+re-extract everything and orphan every fact that referenced the old paths.
+
+Four further facts from reading it, which the contract relies on and none of
+which the client acts on:
+
+- `tags` and `tag_groups` are **mutually exclusive** server-side, and the grouped
+  form is a boolean tree rather than a list (§7.1).
+- Recall has **no hard date-range filter**, which is why dates are expressed as
+  bucket tags rather than a field (W-8).
+- `retain` takes `async: true` rather than a separate job API (W-12).
+- **A fact cited by a reasoning answer comes back without its document id**
+  (§4.3), so a citation cannot be resolved to a file without walking the
+  reasoning trace. This one changed a requirement: it is why this surface
+  resolves citations itself instead of handing a caller an identifier.
+
+**What still has no upstream analogue at all:** §5.5 confirmation, §5.6
+promotion, §5.7 contradiction handling, §5.8 the whole-wiki view, §5.9 the
+mount, and W-16's drift report. None of them is about getting text into a bank,
+which is the whole of what the client does.
+
+**So the honest accounting is: this removes the reconciliation design work and
+none of the composition.** The full survey — every source and test file, the
+version history, and the findings in its §9 that this document acts on — is
+[`investigations/hindsight-obsidian-integration.md`](investigations/hindsight-obsidian-integration.md);
+why the question went unanswered for months while the answer sat in the
+repository is §5.7 of
+[`investigations/hindsight-knowledge-backend.md`](investigations/hindsight-knowledge-backend.md).
+
+**One trap worth naming.** A user with a plain Git markdown corpus could point
+that CLI at it today and get most of §5.4 for free. This design should say so in
+its README rather than let someone discover it — while being clear about what the
+stopgap costs them: no plan to confirm, no record of which commit was
+reconciled, no authority metadata, and a per-clone-path index.
+
 ## 6. The contract
 
 ### 6.1 Services
@@ -1225,6 +1339,27 @@ conversation and a synthesized page are the same result type, ranked against
 each other (R-15), with origin on each. The backend's page-level search and its
 fact-level search are both reached through this, because the caller cannot and
 should not know they were two.
+
+Three constraints on filtering are worth carrying into the contract rather than
+discovering in a client. **Scope filters are grouped or flat, never both** — the
+backend documents `tags` and `tag_groups` as mutually exclusive, so this surface
+takes one shape and the provider sends the grouped one. **The grouped form is a
+boolean tree, not a list**: a list of groups is AND-ed, and each element is a
+tag leaf or an `and` / `or` / `not` over more of the same, recursively. A leaf
+carries `match` — `any`, `all`, `any_strict`, `all_strict` or `exact`, defaulting
+to `any_strict` — and optionally `resolve: fuzzy`, which matches its tags
+against the base's own tags by trigram similarity, so a misspelled filter still
+lands. A contract that flattened this to a list of tag sets would throw away the
+only part of it that is expressive. And **there is no date-range filter**: a
+caller asking for "last quarter" is asking for a set of tags, which is why W-8
+turns dates into bucket tags at ingest instead of leaving them as a field nobody
+can filter on.
+
+One more asymmetry worth knowing because it is invisible until it surprises: the
+two reasoning calls have **different default depths** — a recall defaults to
+`mid` and a reflect to `low`. A surface that exposes one "depth" setting has to
+decide which default it is overriding, and should say so rather than let the
+backend's answer differ per call.
 
 ### 7.2 Recall and Reflect
 
@@ -1667,9 +1802,10 @@ convenience rather than a capability.
 
 ## 15. Open questions
 
-Two of these were open in the previous revision and are now settled by the
-integration design, so they are recorded as decisions rather than questions. The
-rest are open, ordered by how much they change the contract's shape.
+Three of these were open in the previous revision and are now settled — two by
+the integration design, one by reading the backend's own shipped client — so they
+are recorded as decisions rather than questions. The rest are open, ordered by how
+much they change the contract's shape.
 
 **Settled — the corpus is not writable through the API** (W-15). A corpus file
 has an editor, hooks, a blame view and a review process, and a tool that wrote
@@ -1684,15 +1820,23 @@ a move would then be a delete and a create and every fact would be orphaned. The
 reconciler reports a moved file with no declared identity rather than treating it
 as two files, so the omission is visible.
 
-**Open, and not waiting on us — the backend's own answer to the authored-wiki
-question** (§5.10). Discussion
-[#4830](https://github.com/vectorize-io/hindsight/discussions/4830) asked on
-2026-09-27 and unanswered when this revision was written. It does not block
-anything here, and it is the cheapest of these nine to resolve: three of the four
-possible answers change nothing, one is wrong in a way this document can already
-prove, and only "they build authored pages" would move the design. Worth
-re-reading the description for a page body field before acting on any answer
-that suggests one.
+**Settled — the backend ships a client for this, and it changed five requirements**
+(§5.10, surveyed in
+[`investigations/hindsight-obsidian-integration.md`](investigations/hindsight-obsidian-integration.md)).
+The question was
+[asked upstream](https://github.com/vectorize-io/hindsight/discussions/4830) on
+2026-09-27 and is still unanswered, but it did not need an answer: the workflow
+ships as a first-party client, and it was published to npm two days before the
+question was asked. Reading its 42 files changed five requirements rather than
+the design: the ownership record is now bound to its destination and fails closed
+(W-7), change detection is two-stage with a timestamp pre-filter (W-6), dates and
+scopes are bucket tags with the path in `metadata` (W-8), batches are idempotent
+by `operation_id` (W-12), and `resolve_entities` is turned off explicitly because
+the backend's default resolves an author's name to somebody else's (W-9). It also
+produced one contract requirement the client gave no way to find: a cited fact
+comes back without its document id, so this surface resolves citations itself
+(§4.3). What it did **not** produce is a reason to adopt it: it syncs unreviewed
+edits, which W-19 refuses, and it records no commit.
 
 **Settled — the wiki is mounted by a command, not by an RPC** (§5.9). A FUSE
 mount exists in the filesystem namespace of the process that creates it, so an RPC
@@ -1752,11 +1896,14 @@ track the backend by hand for every one of the following twelve.
    content that did not come from the corpus, is unresolved — and it matters,
    because a base shared between a corpus and an assistant's conversation memory
    cannot be rebuilt without losing the second half.
-4. **Is a moved file without an `id` a warning or an error?** W-5 says the
-   reconciler reports it. Whether that is a note in the plan or a refusal is a
-   decision about how strict this framework is about its own frontmatter
-   contract, and the answer probably differs between a project that never moves
-   files and one that reorganises quarterly.
+4. **Is a moved file without an `id` a warning or an error?** Narrower than it
+   was: the *behaviour* is settled, because W-5 already specifies
+   delete-and-create and the shipped client does the same thing for every file
+   (a path is always its identity, so a rename is a delete plus a forced
+   ingest). What is still open is only whether the reconcile **reports** it as a
+   note in the plan or refuses — a decision about how strict this framework is
+   about its own frontmatter contract, and one that probably differs between a
+   project that never moves files and one that reorganises quarterly.
 5. **Where does `ClearBaseObservations` live** — `KnowledgeBaseService` or
    `ObservationService`? It clears derived knowledge from a base, so the base is
    the subject; it is also one of the observation operations. Pick one.
@@ -1764,10 +1911,22 @@ track the backend by hand for every one of the following twelve.
    different defaults and the distinction is invisible in the API. Two services
    is more faithful and costs a concept; one is cheaper and loses the distinction
    a reader of the contract may want.
-7. **Provenance tag namespace.** Reserved prefix and value spelling. It should be
-   a framework decision, because a deployment that guesses differently cannot
-   filter across two bases, which is the one capability the unified surface exists
-   to provide.
+7. **Provenance tag namespace — now only half open.** The *structural*
+   dimensions are settled by what a base already has to filter on, and reusing
+   their established spelling costs nothing: `vault:`, `folder:` (one per
+   ancestor, cumulative), `created:` and `updated:` as year and year-month
+   buckets. Buckets rather than a date field because the backend has no
+   date-range filter at all, so a filterable date has to be a tag. What is still
+   open is the **framework-reserved** half — which dimensions this framework
+   claims for itself (`corpus:`, `kind:`, `authority:`, `owner:`, the ownership
+   marker W-7 needs) and whether a namespace this framework did not invent should
+   be adopted wholesale so that a base written by the shipped client and a base
+   written by this one are filterable by the same expression. It should be a
+   framework decision rather than a deployment's, because a deployment that
+   guesses differently cannot filter across two bases, which is the one
+   capability the unified surface exists to provide. Note that a misspelled filter
+   is not fatal: a leaf may resolve its tags by trigram similarity, which softens
+   the cost of a wrong namespace without removing the reason to decide.
 8. **Should a base's own configuration be project configuration?** A base's
    missions and directives are authored material, and a project configuration
    file is where this framework puts authored material. If they merge, importing
@@ -1846,10 +2005,22 @@ real use.
   *"equivalent to `NotifyEntry`, but also sends an event to inotify watchers"*
   where the other two do not, and `fuse.EntryTimeout` / `fuse.AttrTimeout` for
   M-4. Read out of the module rather than from memory, which is how the
-  asymmetry in §5.9's table was found. §5.10 and investigation §5.6 cite
-  [discussion #4830](https://github.com/vectorize-io/hindsight/discussions/4830)
-  for its **status** — the question text and the fact that it is unanswered — and
-  for nothing else; no claim in either document rests on it.
+  asymmetry in §5.9's table was found.
+- [`investigations/hindsight-obsidian-integration.md`](investigations/hindsight-obsidian-integration.md)
+  — the full survey of the shipped client, and the requirement-by-requirement
+  mapping §5.10 and W-6/W-7/W-8/W-9/W-12 rest on. Every claim in it is cited to
+  a file in `hindsight-integrations/obsidian/` at `v0.10.1` or to the API
+  description. What this document acted on is its §9: **§9a–c are three backend
+  affordances the client leaves unused** — `resolve_entities` left on, no
+  `operation_id`, `observation_scopes` unchosen — and all three map onto
+  requirements already written here. **§9d records three state and documentation
+  defects** in the published artifact, one of them a shipped test whose name
+  contradicts its own body.
+- [Discussion #4830](https://github.com/vectorize-io/hindsight/discussions/4830)
+  is cited for its **status only** — that the question was asked on 2026-09-27
+  and remains unanswered. **No claim in any of these documents rests on it**,
+  because the workflow it asks about turned out to ship two days earlier as a
+  client rather than as a reply.
 
 ### One open question in the source design, answered here
 

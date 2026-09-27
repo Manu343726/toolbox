@@ -815,7 +815,7 @@ knowing before treating any of it as exotic.
 | "integrating the knowledge there into its **memory**, **banks**, **semantic graph**" | Three destinations that are not peers. *Memory* is `retain` (documents → facts). The *semantic graph* is built automatically during extraction and is not separately fed. *Banks* are the isolation unit, and a wiki maps to one base, or to several deliberately. An answer that treats them as one target will be wrong in an interesting way. |
 | "from time to time" | The cadence question, which is the actual design problem: what triggers a sync, and on what. §5.4's answer is the merge of a reviewed commit (W-19, W-18), not a timer. |
 | "**maintained by humans alone**" | Not a description — a **constraint**, stated by the requester. Never write back. Every candidate answer must respect it, and any future upstream two-way filesystem feature is the thing that would break it. |
-| "what **current users do**" | The requester is explicitly asking for a *community pattern*, not a feature. The most likely answer is therefore a script that walks a directory and calls `retain` with stable ids per file — which is §5.4's reconcile, and which the vendored design in [`hindsight-human-wiki-integration.md`](hindsight-human-wiki-integration.md) already proposes as a phase-one script. |
+| "what **current users do**" | The requester is explicitly asking for a *community pattern*, not a feature — so the answer is a synchroniser, not an endpoint. **This row was a prediction and it was right in the wrong way: §5.7 finds that the pattern already ships, as a first-party client, and has since June 2026.** |
 
 #### 5.6.3 What each possible answer would change
 
@@ -823,7 +823,7 @@ Recorded now so the answer can be checked rather than absorbed.
 
 | If the answer is… | Then | Check against |
 |---|---|---|
-| "`retain` with a stable `document_id`; here's a script" | §5.4 stands as designed, and **nothing upstream is coming** to be depended on. The most likely outcome. | `MemoryItem.document_id` semantics and `update_mode` (replace vs append) in `openapi.json` |
+| "`retain` with a stable `document_id`; here's a script" | §5.4 stands as designed, and **nothing upstream is coming** to be depended on. **This is what happened, as a shipped client rather than a sentence — see §5.7.** | `MemoryItem.document_id` semantics and `update_mode` (replace vs append) in `openapi.json` |
 | "Use knowledge pages with `managed: false`" | **It would be wrong**, and this investigation has the evidence: `KnowledgeNode.managed` appears exactly once in the description, in a *response* schema, and in no request; and no page request has a body field. `CreatePageRequest` takes `name`, `source_query`, `parent_id`, `tags`, `max_tokens`, `trigger` — nothing else. | `openapi.json`: `CreatePageRequest`, `UpdateNodeRequest`, `KnowledgeNode` |
 | "Use **directives** for procedures" | A real design input. Directives are the one authored artifact the engine natively understands, and §6.2's `DirectiveService` would need to be load-bearing rather than administrative. | `api_directives.go`; `CreateDirectiveRequest` / `UpdateDirectiveRequest` |
 | A maintainer treats it as a feature request and builds authored pages | §5.2's central finding — "the one direction that is not available" — becomes **wrong**, and the corpus design would be duplicated by the backend. | `openapi.json` at a later version, for a body field on a page request |
@@ -831,6 +831,189 @@ Recorded now so the answer can be checked rather than absorbed.
 The second row is the one to watch. A well-meaning maintainer pointing at
 `managed` is the most plausible wrong answer available, and it is checkable in
 one grep.
+
+**Resolved, one row at a time, in §5.7.** The first row turned out to be what
+happened — as a shipped, released client rather than a forum reply, published two
+days before the question was asked. The other three remain open, and the
+`managed` row remains the one to check.
+
+### 5.7 The answer that shipped instead of being posted
+
+§5.6 records the question asked on 2026-09-27 and still unanswered. The answer
+exists. It is not a reply — it is a shipped client.
+
+**`@vectorize-io/hindsight-obsidian`**, first-party, in
+[`hindsight-integrations/obsidian/`](https://github.com/vectorize-io/hindsight/tree/v0.10.1/hindsight-integrations/obsidian),
+documented at
+[`/sdks/integrations/obsidian`](https://hindsight.vectorize.io/sdks/integrations/obsidian).
+Version 0.3.0 on npm, published **2026-09-25** — two days before the question was
+asked. The changelog at
+[`/changelog/integrations/obsidian`](https://hindsight.vectorize.io/changelog/integrations/obsidian),
+with dates from the npm registry:
+
+| Version | Published | What |
+|---|---|---|
+| 0.1.0 | 2026-06-10 | The plugin. Note sync from day one. |
+| 0.2.0 | 2026-08-04 | Headless CLI `hindsight-obsidian-sync` (`93fa0b016`). |
+| 0.2.1 | 2026-08-10 | **"Fix sync index scoping so Obsidian syncs/reconciliation are isolated per memory bank and API target, preventing cross-target index conflicts"** (`ea81cf345`). |
+| 0.3.0 | 2026-09-25 | Observation scopes. |
+
+That 0.2.1 row is the important one, and §5.7.2 explains why it exists.
+
+#### 5.7.1 It is the same design, arrived at independently
+
+The plugin's own header states the invariant:
+
+> A hard rule of this plugin: **Hindsight is never a second source of truth.**
+> Sync is **one-way**: Obsidian → Hindsight.
+
+and its README gives the algorithm as a table:
+
+| Event | Call |
+|---|---|
+| note created / edited | `retain(documentId = note path)` — "upsert; replaces prior version" |
+| note renamed | `deleteDocument(old) + retain(new)` |
+| note deleted | `deleteDocument(path)` |
+| "Sync vault now" | "reconcile: ingest drifted notes, prune orphans" |
+| chat turn | `reflect(question)` over the whole bank |
+
+Concretely, from `src/client.ts`: `POST /v1/default/banks/{bank}/memories` with
+`{items: [{content, document_id, context, update_mode: "replace", tags, metadata, timestamp}], async: true}`,
+and `DELETE /v1/default/banks/{bank}/documents/{document_id:path}`.
+
+**This is §5.4's reconcile, arrived at separately, using the same three
+primitives and the same one-way invariant.** That is worth more than a
+corroborating sentence. The parts of §5.4 that were judgement calls are now
+decisions somebody else also made, and the one place they differ — identity — is
+now a choice with a known cost rather than an open question.
+
+#### 5.7.2 Six mechanisms worth copying, with the reasons it gives
+
+**1. Identity is the path. Always.** `docId(path)` is the note's path, optionally
+prefixed with the vault name for multi-vault banks. There is no frontmatter id.
+**A move is `deleteDocument(old)` then `ingestFile(new, { force: true })`**, and
+the test is named `rename = delete old document + ingest new path`. A
+reorganisation therefore costs a full re-extraction of the moved notes, and the
+plugin accepts that.
+
+**2. Prune by the local index, never by listing the server.** The comment gives
+the reason and the trade-off without hedging either:
+
+> Prune by local index, NOT by listing server documents. Listing would also
+> surface docs we don't own (e.g. opt-in conversation memory under
+> `conversation/…`, or notes from another tool sharing the bank) and we'd
+> wrongly delete them. The trade-off: orphans created while the local index was
+> lost (reinstall) aren't auto-pruned — re-deleting the note fixes that.
+
+The second sentence is the part most implementations get wrong. Choosing the safe
+direction costs a known, stated, recoverable gap instead of silent data loss.
+
+**3. The index is bound to its destination and fails closed.** `IndexIdentity` is
+`(apiOrigin, bankId, vaultPath, vaultName, prefixDocId)`; the filename carries a
+`sha256` fingerprint of exactly those; and `loadIndex` **throws** when the
+persisted identity differs, naming each field, because:
+
+> Reusing a vault-name-only index across banks/targets would silently classify
+> the old target's files as "already synced" against the new one (leaving it
+> incomplete) and could authorize prune DELETEs against a bank this ingester
+> never wrote to.
+
+An index with no `identity` — one written before the fix — is **refused** with
+instructions, not silently adopted. This is 0.2.1. The bug was a real
+data-deletion bug, and the fix is a binding rather than a warning. The code cites
+`issue #3257`.
+
+**4. Scope is deliberately *not* part of the binding**, and the reason is given:
+narrowing `--include`/`--exclude` on the *same* destination legitimately prunes
+documents this ingester owns there. Every harm the binding prevents requires a
+*destination* change. This is a line usually drawn in the wrong place, drawn
+correctly here.
+
+**5. Two-stage change detection.** Same mtime as the last sync → skip without
+reading the file. mtime moved but `sha256` identical → refresh the mtime, do not
+re-ingest. The test is `hash-gate: skips re-ingest when mtime moved but content
+is identical`. §5.4's rule is "diff by digest, never by timestamp"; this is the
+sharper form — **use the timestamp as a free pre-filter and the digest as the
+truth.**
+
+**6. Provenance rides on the item, not in a tag.** `context: "obsidian"` is a
+field on the memory item; `metadata` carries `{...frontmatter scalars, vault,
+path}`. Reflect's `include: {facts: {}}` returns `based_on`, and `metadata.path`
+is what turns a hit into "click to open the source note". **The path goes in
+`metadata` because that is what a citation needs, and the scope dimensions go in
+tags because that is what filtering needs.** Two jobs, two fields.
+
+Also established by reading the source, and worth having:
+
+- `tags` and `tag_groups` are **mutually exclusive** server-side; the client
+  prefers `tag_groups`.
+- Date scoping uses bucket tags (`created:2026`, `created:2026-03`) **because
+  "Recall has no hard date-range filter"** — a limitation stated in a comment.
+- The index lives outside the synced tree (`~/.hindsight/obsidian/…`) so a
+  file-sync tool never propagates it, and is written `tmp` + `rename` so it is
+  never half-written.
+- A corrupt index is **not** fatal: warn, start empty, and say that orphan
+  pruning cannot run until it is rebuilt — a full re-ingest that the hash gate
+  then makes nearly free.
+- Ingest runs at concurrency 3.
+- An empty body is skipped: `if (!note.body) return "skipped"; // nothing to
+  ground on`.
+- Chat turns are **not** retained by default, and the settings text says why:
+  "When on, chat turns are stored in Hindsight (creates memory outside your
+  vault)". That is the source-of-truth argument, made by the integration rather
+  than by us.
+
+#### 5.7.3 Why the question went unanswered, and where the workflow hides
+
+The workflow is documented — but at
+[`/sdks/integrations/obsidian`](https://hindsight.vectorize.io/sdks/integrations/obsidian),
+which reads as *an SDK page about Obsidian*, not as "how do I get my wiki in".
+The monorepo's own `hindsight-integrations/README.md` indexes **agent and
+framework** integrations and **does not mention obsidian at all** (checked at
+`v0.10.1`; 78 lines, no match for `obsidian`, `vault`, or `note`).
+
+So both places a reader looks fail to answer the wiki question: the repo's
+integrations index does not list it, and the docs page is only reachable by
+searching for the editor's name. **§5.6.1's finding survives and sharpens — the
+gap was real, and it is a discoverability gap, not a capability gap.** The same
+content, filed under "Obsidian", answers the question for a wiki that happens to
+be an Obsidian vault and for nobody else's.
+
+**And the published page is stale on precisely the thing that was a bug.** It
+says the index "defaults to `~/.hindsight/obsidian/<vault>.json`". The code says
+`<vault>-<bank>-<fingerprint>.json`, and `loadIndex` *fails closed* on an index
+with no `identity` — which is exactly what a file at the documented path, written
+before 0.2.1, is. A user who followed the docs page and then upgraded gets a hard
+error instructing them to delete the index and re-sync. The error is correct; the
+page that provokes it is not.
+
+#### 5.7.4 What it does not do, and why the design is still worth writing
+
+The plugin is a synchroniser. It has no notion of `authority`, `supersedes`,
+`status`, `owner` or `reviewed`; no commit correspondence; no plan/apply split, so
+nothing is ever confirmed before it is written; no reconcile over more than one
+corpus; no projection, no export, and no filesystem. It writes only forward into
+one bank from one directory.
+
+So the honest verdict on "would this save us the work": **it removes the
+invention, not the work.** §5.4's reconcile becomes a transcription of a
+battle-tested design instead of a proposal; the two mechanisms in §5.7.2 that we
+would probably have got wrong — pruning by listing, and an unbound index — are
+already right upstream. Everything in §5.5 through §5.9 — confirmation, promotion,
+contradiction handling, the whole-wiki view, the mount — has no upstream analogue
+at all, because none of it is about getting text into a bank.
+
+And it is not adoptable as an implementation regardless: it is TypeScript with an
+Obsidian runtime, its index is bound to a vault *path*, and a Go subsystem that
+shelled out to an npm CLI would have a second unmanaged writer to the base, no
+record of which commit it reconciled, and a per-clone-path index that fails closed
+and forces a full re-extraction whenever anyone clones to a different directory.
+
+**This section is a summary; the full survey is
+[`hindsight-obsidian-integration.md`](hindsight-obsidian-integration.md)** — all
+42 files, the mechanism-by-mechanism account, the edge-case
+catalogue the tests establish, and §7's requirement-by-requirement mapping.
+
 
 ---
 
