@@ -205,8 +205,20 @@ func (s *queryService) Reflect(ctx context.Context, req *connect.Request[knowled
 	if err != nil {
 		return nil, err
 	}
-	resolve := msg.GetResolveCitations()
-	reflected, err := s.p.client.Reflect(ctx, baseID, msg.GetQuery(), budget(msg.GetBudget(), true), resolve, msg.GetFollowDirectives())
+	// Three-valued, and the default is the expensive one. `resolve_citations` is documented as
+	// on unless the caller declines, and a plain `bool` cannot say that: absent and `false` both
+	// read as false, so a caller relying on the documented default would get unresolved
+	// citations and conclude the base has no sources. An explicit `false` is a decision and is
+	// honoured; absent is the default and resolves.
+	resolve := true
+	if msg.ResolveCitations != nil {
+		resolve = *msg.ResolveCitations
+	}
+	// Sent only when asked for, because the backend already applies directives scoped by tag and
+	// this ignores the scope. Sending `true` by default would widen every answer past what the
+	// base's own configuration says.
+	applyAll := msg.ApplyAllDirectives != nil && *msg.ApplyAllDirectives
+	reflected, err := s.p.client.Reflect(ctx, baseID, msg.GetQuery(), budget(msg.GetBudget(), true), resolve, applyAll)
 	if err != nil {
 		return nil, err
 	}

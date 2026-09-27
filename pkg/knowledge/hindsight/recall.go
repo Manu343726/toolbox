@@ -112,12 +112,20 @@ func recallResults(resp *hs.RecallResponse) []knowledge.RecallResult {
 // Both attempts are needed rather than one. Using only the document field would leave the
 // difficult citations unresolved; using only the trace would ask the backend for a large payload
 // on every call to resolve citations it had already given.
-func (c *Client) Reflect(ctx context.Context, baseID, query string, budget knowledge.Budget, resolve, followDirectives bool) (knowledge.Reflection, error) {
+func (c *Client) Reflect(ctx context.Context, baseID, query string, budget knowledge.Budget, resolve, applyAllDirectives bool) (knowledge.Reflection, error) {
 	body := hs.ReflectRequest{Query: query, Budget: budgetValue(budget)}
 	if resolve {
 		include := &hs.ReflectIncludeOptions{Facts: map[string]any{}}
 		include.SetToolCalls(hs.ToolCallsIncludeOptions{})
 		body.Include = include
+	}
+	// Sent explicitly rather than only when set. The backend's default is to apply directives
+	// *scoped by tag* — untagged ones always, tagged ones when the request's tags match — and
+	// this flag ignores that scope. Leaving it unset keeps the base's own configuration in
+	// charge, which is the respectful default and the one a caller who said nothing expects.
+	if applyAllDirectives {
+		yes := true
+		body.ApplyAllDirectives = &yes
 	}
 	resp, httpResp, err := c.api.MemoryAPI.Reflect(ctx, baseID).ReflectRequest(body).Execute()
 	if err != nil {

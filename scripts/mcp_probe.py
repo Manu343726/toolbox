@@ -16,9 +16,12 @@ BIN = os.path.join(ROOT, "cmd", "toolbox", "bin", "toolbox")
 
 
 class Gateway:
-    def __init__(self, *args):
+    def __init__(self, *args, policy=None):
+        argv = [BIN, "mcp", *args]
+        if policy:
+            argv += ["--policy", policy]
         self.p = subprocess.Popen(
-            [BIN, "mcp", *args],
+            argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1,
         )

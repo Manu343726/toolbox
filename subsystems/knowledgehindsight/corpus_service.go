@@ -336,8 +336,12 @@ func (s *corpusService) ReadCorpusFile(ctx context.Context, req *connect.Request
 
 // RebuildCorpus drops the base's derived knowledge and reconciles again.
 //
-// It is safe by construction rather than by promise: the corpus is the source of truth, so
-// dropping the base loses nothing a person wrote and reproduces from the repository.
+// **The corpus is authoritative for what it contains and silent about everything else**, so
+// this is not safe by construction — it is safe for the authored half and lossy for the rest. A
+// base also holds content nobody wrote in a repository: a document dropped in through the API, and
+// everything an assistant accumulated in it. A rebuild clears that and the corpus cannot bring it
+// back. An earlier version of this comment said the opposite, and the opposite was wrong in a way
+// that mattered, because it is the reason the method takes a confirmation at all.
 func (s *corpusService) RebuildCorpus(ctx context.Context, req *connect.Request[knowledgev1.RebuildCorpusRequest]) (*connect.Response[knowledgev1.RebuildCorpusResponse], error) {
 	msg := req.Msg
 	baseID, err := s.p.resolveBase(ctx, msg.GetBaseId())
@@ -373,6 +377,23 @@ func (s *corpusService) RebuildCorpus(ctx context.Context, req *connect.Request[
 			Message: "a rebuild that writes needs an owner, for the same reason a reconcile does",
 		}
 	}
+	// The confirmation, checked against the plan as recomputed, exactly as `ApplyReconcile`
+	// checks its own. Without it the one method that throws away the retained half would be the
+	// only destructive call here with nothing to make a person look.
+	if strings.TrimSpace(msg.GetConfirm()) == "" {
+		return nil, &api.Error{
+			Kind: api.KindInvalid,
+			Message: fmt.Sprintf(
+				"a rebuild needs the digest of the plan you read, which is %s: run it with dry_run = true first. The corpus can bring back what it contains and nothing else, and a base also holds documents nobody wrote in a repository",
+				plan.PlanDigest),
+		}
+	}
+	if msg.GetConfirm() != plan.PlanDigest {
+		return nil, &api.Error{
+			Kind:    api.KindInvalid,
+			Message: fmt.Sprintf("the plan confirmed is %s and the corpus now plans to %s; refusing rather than clearing against a plan nobody read", msg.GetConfirm(), plan.PlanDigest),
+		}
+	}
 	// The backend's own clear is what drops the derived knowledge; the reconcile that
 	// follows is the same code path an ordinary apply takes, so a rebuild cannot drift
 	// from a reconcile in how it ingests.
@@ -380,11 +401,39 @@ func (s *corpusService) RebuildCorpus(ctx context.Context, req *connect.Request[
 	if cerr != nil {
 		return nil, cerr
 	}
+	// What the corpus cannot bring back is counted before the clear, so the caller is told what
+	// went rather than being able to work it out afterwards.
+	documents, derr := s.p.client.ListDocuments(ctx, baseID)
+	unrecoverable := 0
+	owned := map[string]bool{}
+	for _, e := range plan.Created {
+		owned[e.ID] = true
+	}
+	for _, e := range plan.Updated {
+		owned[e.ID] = true
+	}
+	if derr == nil {
+		for _, doc := range documents {
+			// A document the corpus accounts for is re-ingested, so it is not a loss. One it
+			// does not is. A document with no id cannot be attributed either way, so it is
+			// counted: over-counting a loss is better than under-counting one.
+			if doc.ID == "" || !owned[doc.ID] {
+				unrecoverable++
+			}
+		}
+	}
+	warnings := append([]string{}, plan.Warnings...)
+	warnings = append(warnings,
+		"the derived knowledge was cleared and the plan above is what will be re-ingested; it is incremental, so content whose digest has not changed is not re-extracted")
+	if unrecoverable > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"%d document(s) in this base are not accounted for by the corpus and have not been re-ingested: a rebuild reproduces what the repository contains and nothing else, so these are gone", unrecoverable))
+	}
 	return connect.NewResponse(&knowledgev1.RebuildCorpusResponse{
-		ClearedFacts: cleared.Items,
-		Plan:         planMessage(plan, state),
-		Warnings: append(plan.Warnings,
-			"the derived knowledge was cleared and the plan above is what will be re-ingested; it is incremental, so content whose digest has not changed is not re-extracted"),
+		ClearedFacts:           cleared.Items,
+		Plan:                   planMessage(plan, state),
+		UnrecoverableDocuments: int32(unrecoverable),
+		Warnings:               warnings,
 	}), nil
 }
 

@@ -83,17 +83,26 @@ func newBackend(t *testing.T) *backend {
 		// specific `/memories/recall`. Matching in map order would make the test
 		// intermittent rather than wrong, which is worse: it fails sometimes and looks
 		// like a race in this package.
-		best, bestBody := "", "{}"
+		// Longest suffix wins, and a method-qualified key beats an unqualified one of the same
+		// length. The second rule is not a refinement: `DELETE /memories` and `/memories` are
+		// the same length, and without the rule which one answers is decided by map order —
+		// an intermittent failure that looks like a race in this package and is not one.
+		best, bestBody, bestQualified := "", "{}", false
 		for key, canned := range b.responses {
 			method, suffix := "", key
+			qualified := false
 			if m, rest, ok := strings.Cut(key, " "); ok {
-				method, suffix = m, rest
+				method, suffix, qualified = m, rest, true
 			}
 			if method != "" && method != r.Method {
 				continue
 			}
-			if strings.HasSuffix(r.URL.Path, suffix) && len(suffix) > len(best) {
-				best, bestBody = suffix, canned
+			if !strings.HasSuffix(r.URL.Path, suffix) {
+				continue
+			}
+			better := len(suffix) > len(best) || (qualified && !bestQualified && len(suffix) == len(best))
+			if better {
+				best, bestBody, bestQualified = suffix, canned, qualified
 			}
 		}
 		for suffix := range b.absent {

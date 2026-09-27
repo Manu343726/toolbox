@@ -16,12 +16,18 @@ BIN := bin/$(NAME)
 
 all: build
 
+# TAGS=fue compiles the FUSE mount in. Empty is the portable build, and the mount RPC still exists
+# in it: `EnableMount` returns `Unimplemented` naming the tag and `GetMountStatus` reports
+# `fuse_available` false. See M-6.
+TAGS ?=
+GO_TAGS := $(if $(TAGS),-tags $(TAGS),)
+
 build: proto
 	@mkdir -p $(dir $(BIN))
-	go build -o $(BIN) ./cmd/$(NAME)
+	go build $(GO_TAGS) -o $(BIN) ./cmd/$(NAME)
 
 test: proto
-	go test -count=1 ./...
+	go test -count=1 $(GO_TAGS) ./...
 
 test-short: proto
 	go test -short -count=1 ./...

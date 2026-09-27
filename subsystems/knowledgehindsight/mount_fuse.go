@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -390,9 +391,70 @@ func start(ctx context.Context, p *Provider, spec *knowledgev1.MountSpec, id str
 		NullPermissions: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("mounting at %s: %w", spec.GetMountpoint(), err)
+		// A failed mount can still leave the mountpoint in a state nothing can clean up.
+		//
+		// The library has connected to `/dev/fuse` and created the mount by the time it
+		// reports the failure — so the directory is a mount point with nothing serving it.
+		// That is the worst state a path can be in: `rm -r` on it fails with "Transport
+		// endpoint is not connected", `ls` on it hangs, and a caller that retried the mount
+		// would be told the path is already mounted. M-7 says a failed mount must never
+		// leave a stale mountpoint behind, and this is the line that has to do it.
+		cleanupFailedMount(spec.GetMountpoint())
+		return nil, fmt.Errorf("mounting at %s: %w (nothing is left mounted there)", spec.GetMountpoint(), err)
 	}
 	return &fuseMount{server: server, cache: cache, unmounted: make(chan struct{})}, nil
+}
+
+// cleanupFailedMount detaches a mountpoint the library created but could not serve.
+//
+// Best effort by design, and it reports what it managed rather than pretending. A lazy unmount is
+// used because a failed mount has no live server to talk to: `-u` asks nicely and `-z` detaches
+// regardless, and the combination is what leaves a directory usable again.
+//
+// The error is returned rather than swallowed because "the mount failed *and* the mountpoint could
+// not be cleaned up" is a different situation from "the mount failed", and a caller who retries
+// needs to know which they are in.
+func cleanupFailedMount(mountpoint string) error {
+	if mountpoint == "" {
+		return nil
+	}
+	bin, err := fuseMountBinary()
+	if err != nil {
+		return err
+	}
+	// Nothing to detach if the path is not a mount point, which is the common case for a failure
+	// that happened before the library connected.
+	if _, serr := os.Stat(mountpoint); serr != nil {
+		return nil
+	}
+	cmd := exec.Command(bin, "-u", "-z", mountpoint)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// The helper's wording for a path it never mounted, across the versions and locales in
+		// the wild. Getting this wrong turns a mount failure into a second, more confusing one
+		// about a cleanup — so the branch is deliberately generous about what counts as "there
+		// was nothing there".
+		benign := []string{
+			"not mounted", "no mount point", "not found in", "not a mountpoint",
+			"no such file or directory", "invalid argument",
+		}
+		for _, phrase := range benign {
+			if strings.Contains(string(out), phrase) {
+				return nil
+			}
+		}
+		return fmt.Errorf("detaching the failed mount at %s: %w: %s", mountpoint, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// fuseMountBinary is the helper this platform uses to mount and unmount.
+func fuseMountBinary() (string, error) {
+	for _, name := range []string{"fusermount3", "fusermount"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("neither fusermount3 nor fusermount is on PATH, so a failed mount cannot be cleaned up")
 }
 
 func (m *fuseMount) Files() int { return m.cache.source.Cache().FileCount() }

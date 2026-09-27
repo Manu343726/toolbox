@@ -862,10 +862,26 @@ message ReflectRequest {
   // Defaults to LOW.
   Budget budget = 4;
   // Resolve the cited facts to content, at the cost of making the backend return its reasoning
-  // trace. On by default; see the note on `Reflect`.
-  bool resolve_citations = 5;
-  // Follow the base's own directives, such as requiring an answer to cite its sources.
-  bool follow_directives = 6;
+  // trace. See the note on `Reflect`.
+  //
+  // `optional`, and **absent means on**. A plain `bool` cannot express that: an absent field and
+  // an explicit `false` both read as `false`, and the default this documents is the opposite. So
+  // the field is three-valued — absent is the documented default, `true` asks for the trace, and
+  // `false` declines it.
+  optional bool resolve_citations = 5;
+  // Apply every active directive **regardless of its tag scope**.
+  //
+  // The name matters, because the obvious one is wrong. The backend applies directives by
+  // default: an untagged directive always applies, and a tagged one applies when the request's
+  // own tags match it. This flag is the opposite of that — it ignores the scope and applies
+  // everything active, which is how you see what a base's rules say when the query's tags would
+  // otherwise have excluded most of them.
+  //
+  // A field called `follow_directives` would read as "use the base's rules", and setting it would
+  // have quietly *widened* the scope past what the base's own configuration says. A caller
+  // believing their answer was governed by the base when it had been governed by a wider set
+  // than intended is the worst available outcome, so the field says what it does.
+  optional bool apply_all_directives = 6;
 }
 
 message ReflectResponse {
@@ -1295,12 +1311,22 @@ message RebuildCorpusRequest {
   // The base to rebuild. Required.
   string base_id = 1;
   // Report what would be dropped without dropping it. A read, and the only safe way to find out
-  // how much a rebuild costs.
+  // how much a rebuild costs. It is a preview rather than a flag on a write because the answer is
+  // a plan, and the plan is what the confirmation below refers to.
   bool dry_run = 2;
   // The identity for the ownership marker. Required when anything is actually rebuilt.
   string owner = 3;
   // The commit to reconcile to. Defaults to the resolved `HEAD`.
   string commit = 4;
+  // The digest of the plan the caller read, which is `dry_run = true`'s `plan.plan_digest`.
+  //
+  // Required, and for the reason the other two destructive methods give: **a rebuild is not
+  // reversible from the corpus.** The corpus is authoritative for the files it contains and silent
+  // about everything else. A base also holds content nobody wrote in a repository — a document
+  // dropped in through the API, and everything an assistant accumulated in it — and a rebuild
+  // clears that and cannot bring it back. So the confirmation is what makes somebody look before
+  // the retained half goes.
+  string confirm = 5;
 }
 
 message RebuildCorpusResponse {
@@ -1312,6 +1338,13 @@ message RebuildCorpusResponse {
   ReconcilePlan plan = 4;
   repeated string operation_ids = 5;
   repeated string warnings = 6;
+  // Documents in the base that the corpus does not account for, and which a rebuild therefore
+  // did not bring back.
+  //
+  // Non-zero is the case where a rebuild was *not* safe by construction, and the caller is told
+  // so rather than working it out afterwards. It is counted before the clear, so the number is
+  // what was lost and not what is missing now.
+  int32 unrecoverable_documents = 7;
 }
 
 // MountState is whether a mount is running.

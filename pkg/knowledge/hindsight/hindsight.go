@@ -539,10 +539,30 @@ func Classify(err error, resp *http.Response, doing string) error {
 	// single character.
 	var apiErr *hs.GenericOpenAPIError
 	if errors.As(err, &apiErr) {
-		kind := kindForStatus(statusOf(resp, apiErr))
+		status := statusOf(resp, apiErr)
+		// A 2xx with a failure is a *decode* failure, and it is not the same thing as a
+		// rejection. The generated client wraps both in the same error type and puts the
+		// response body on it either way, so without this check a body that merely *contains*
+		// a field the generated model rejects — a document with a `title`, say — has that
+		// field's value quoted as the reason it failed. The result is an error reading
+		// "reading document doc-1: Restore", which asserts something false about the document
+		// and hides the only useful fact, which is that this build cannot read the shape.
+		//
+		// The decode error itself names the field, so quoting it is safe and is the whole of
+		// what a reader needs during a version skew.
+		if status >= 200 && status < 300 {
+			return &api.Error{
+				Kind: api.KindInternal,
+				Message: fmt.Sprintf(
+					"%s: the backend answered with %d, but this build could not read the response: %s. The endpoint's shape has changed, or the deployment is on a different API version than the one this client was generated from; the backend's own body is not quoted here because reading it wrongly is what produces a reason that is not one",
+					doing, status, truncate(apiErr.Error())),
+				Err: err,
+			}
+		}
 		return &api.Error{
-			Kind:    kind,
+			Kind:    kindForStatus(status),
 			Message: fmt.Sprintf("%s: %s", doing, firstLine(apiErr.Body(), apiErr.Error())),
+			Err:     err,
 		}
 	}
 
