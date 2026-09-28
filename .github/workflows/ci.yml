@@ -189,6 +189,20 @@ jobs:
           REPOCHECK_ROOT: ${{ matrix.module }}
         run: go test -count=1 ./internal/repocheck
 
+      - name: Its contract, which its own build also cannot see
+        # A contract states what invoking each method does, and a subsystem whose annotations
+        # never reach the framework serves operations no policy can classify. An unclassified
+        # operation is refused, which is the safe direction, so the deployment looks correct
+        # while an operation nobody can call sits in it — `subsystems/skillgit` had all seven of
+        # its methods in that state because it had no `docs_embed.go`.
+        #
+        # It is a separate package from `internal/repocheck` because it needs the generated code
+        # this job has and that job does not, and a check that cannot run on a bare checkout
+        # cannot be the one asserting that no file is skipped before anything is built.
+        env:
+          REPOCHECK_ROOT: ${{ matrix.module }}
+        run: go test -count=1 ./internal/contractcheck
+
   # A shared-state bug is a bug that only appears under load, and it is the class most likely
   # to be introduced by a change that looks like a refactor.
   race:

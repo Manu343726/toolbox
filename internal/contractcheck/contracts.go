@@ -1,4 +1,19 @@
-package repocheck
+// Package contractcheck holds the checks that run against a contract — what a subsystem declares
+// — rather than against the shape of a file.
+//
+// It is a separate package from `internal/repocheck` for one reason, and the reason is a
+// constraint rather than a preference. `repocheck` reads files and uses nothing but the standard
+// library, so it runs on a bare checkout: the CI job that asserts no Go file is one the
+// toolchain skips runs it before anything is generated, and that job is only cheap because the
+// check needs no build. A check that reads a contract's annotations needs `pkg/docs` to compile
+// the contract and `pkg/api` to interpret what it found, and both of those need generated
+// `.pb.go` — so importing them from `repocheck` would have made a job named *formatting and staged
+// files* depend on a full protobuf toolchain, and it would have failed on a package that has
+// nothing to do with formatting.
+//
+// The dividing line is the subject. `repocheck` asks whether the files in this tree are the files
+// they claim to be. This package asks whether a contract says what it means.
+package contractcheck
 
 import (
 	"fmt"
@@ -517,3 +532,18 @@ func shouldSkipTree(relative string) bool {
 	}
 	return false
 }
+
+// EnvRoot names the directory the checks should run against, relative to the repository root or
+// absolute. It exists for the same reason `repocheck` has one: the CI matrix tests every
+// subsystem on its own, and a subsystem whose contract is not classified should fail in the job
+// that asserts it stands alone rather than only in the workspace job.
+const EnvRoot = "REPOCHECK_ROOT"
+
+// narrowed reports whether the checks were pointed at one module rather than the repository.
+//
+// The two whole-repository judgements are skipped when they are. A row of the feature-document
+// table naming a subsystem that is not under the root being checked is not a defect — it is the
+// table being read from the wrong place — and a document describing a subsystem is not visible
+// from inside one module at all. Skipping is the honest answer; running them narrowed would report
+// green for the wrong reason, which is worse than reporting nothing.
+func narrowed() bool { return os.Getenv(EnvRoot) != "" }

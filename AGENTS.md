@@ -386,7 +386,9 @@ mistake nothing else reports:
   method that runs `git pull` which had therefore never been exercised. A contract
   read through `pkg/docs` also has to reach a document: a feature document that
   describes an operation in prose without naming it gives a reader no way to find
-  the method.
+  the method. These live in `internal/contractcheck`, separately from
+  `internal/repocheck`, because they need generated code and that package must run
+  on a bare checkout.
 
 Run `make check-repo` to run these on their own. `REPOCHECK_ROOT=subsystems/<name>`
 narrows them to one module, which is what the CI matrix job does so that a

@@ -16,13 +16,18 @@
 // of them was committed: 30MB of ELF at the repository root, in the repository
 // whose AGENTS.md says not to commit binaries.
 //
-// The rest are about a contract that exists and is not what it says it is, and
-// they are in `contracts.go` and `modules.go`. The one worth reading twice is the
-// pair that checks a contract's annotations reached the framework: a subsystem
-// with a contract and nothing embedding its source, or a method declaring no
-// effect, serves operations that no policy can classify, and an unclassified
-// operation is *refused* — so the deployment looks correct while an operation
-// nobody can call sits in it. `subsystems/skillgit` had all seven of its methods
-// unclassified for that reason, and a `read_only` misdeclaration underneath it had
-// never been exercised, because the classification never arrived.
+// The third is the CI matrix, in `modules.go`: a hand-written list, so a
+// subsystem that is not on it is tested on its own by nothing while every job
+// still reports green.
+//
+// Checks about a *contract* rather than a file are not here, and that is a
+// constraint rather than an omission. Reading a contract's annotations means
+// compiling it and interpreting what came back, which needs generated code — and
+// this package deliberately imports nothing but the standard library so that it
+// runs on a bare checkout, which is what lets the CI job named *formatting and
+// staged files* assert that no Go file is one the toolchain skips before anything
+// is built. Those checks are in `internal/contractcheck`, and the two packages
+// divide on their subject: this one asks whether the files in the tree are the
+// files they claim to be, and that one asks whether a contract says what it
+// means.
 package repocheck

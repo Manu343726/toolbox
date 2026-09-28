@@ -1,14 +1,34 @@
-package repocheck_test
+package contractcheck_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/Manu343726/toolbox/internal/repocheck"
+	"github.com/Manu343726/toolbox/internal/contractcheck"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// repositoryRoot returns the tree the checks should run against: the module named by
+// `REPOCHECK_ROOT`, or the repository root found by walking up to the workspace file so the
+// checks do not depend on where in the tree they were invoked from.
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	if named := os.Getenv(contractcheck.EnvRoot); named != "" {
+		resolved := named
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(root, resolved)
+		}
+		info, err := os.Stat(resolved)
+		require.NoError(t, err, "%s names a directory that does not exist", contractcheck.EnvRoot)
+		require.True(t, info.IsDir(), "%s must name a directory", contractcheck.EnvRoot)
+		return resolved
+	}
+	return root
+}
 
 // The three checks in `contracts.go` are each a claim about a repository, and this file is the
 // claim about the claims: on this tree, all three hold. They are asserted against the whole
@@ -29,7 +49,7 @@ import (
 // `echo.proto` is named in the message because it is the smallest contract in the tree and the
 // one a reader is most likely to check the rule against.
 func TestEveryContractIsEmbeddedBySomethingThatReadsItsAnnotations(t *testing.T) {
-	missing, err := repocheck.UnembeddedContracts(repositoryRoot(t))
+	missing, err := contractcheck.UnembeddedContracts(repositoryRoot(t))
 	require.NoError(t, err)
 	for _, contract := range missing {
 		t.Errorf("%s", contract.Error())
@@ -41,7 +61,7 @@ func TestEveryContractIsEmbeddedBySomethingThatReadsItsAnnotations(t *testing.T)
 // nothing reporting it. This is the check that caught `OperationExposure` in `apitools`, which
 // declared nothing and so withheld the one operation that reports what the policy permits.
 func TestEveryMethodDeclaresASideEffectTheFrameworkRecognises(t *testing.T) {
-	undeclared, err := repocheck.UndeclaredEffects(repositoryRoot(t))
+	undeclared, err := contractcheck.UndeclaredEffects(repositoryRoot(t))
 	require.NoError(t, err)
 	for _, method := range undeclared {
 		t.Errorf("%s", method.Error())
@@ -52,7 +72,11 @@ func TestEveryMethodDeclaresASideEffectTheFrameworkRecognises(t *testing.T) {
 // is not there, exempts that subsystem from being described. It is the same failure as a CI
 // matrix row naming no module, and it is checked for the same reason.
 func TestEveryFeatureDocumentRowDescribesSomething(t *testing.T) {
-	misplaced, err := repocheck.MisplacedFeatureDocuments(repositoryRoot(t))
+	if os.Getenv(contractcheck.EnvRoot) != "" {
+		t.Skip("a row of the feature-document table names a subsystem in the repository, which " +
+			"is not visible from inside one module")
+	}
+	misplaced, err := contractcheck.MisplacedFeatureDocuments(repositoryRoot(t))
 	require.NoError(t, err)
 	for _, row := range misplaced {
 		t.Errorf("%s", row.Error())
@@ -63,11 +87,11 @@ func TestEveryFeatureDocumentRowDescribesSomething(t *testing.T) {
 // the check that found `docs/skills.md` describing six catalog operations as "register a
 // catalog" and never naming `RegisterCatalog`.
 func TestEveryFeatureDocumentNamesEveryOperationItDescribes(t *testing.T) {
-	if os.Getenv(EnvRoot) != "" {
+	if os.Getenv(contractcheck.EnvRoot) != "" {
 		t.Skip("a document describing a subsystem is not visible from inside one module, so " +
 			"this check would pass for the wrong reason rather than run")
 	}
-	undocumented, err := repocheck.UndocumentedOperations(repositoryRoot(t))
+	undocumented, err := contractcheck.UndocumentedOperations(repositoryRoot(t))
 	require.NoError(t, err)
 	for _, operation := range undocumented {
 		t.Errorf("%s", operation.Error())
@@ -89,7 +113,7 @@ func TestAContractWithNothingEmbeddingItIsReported(t *testing.T) {
 	writeFile(t, filepath.Join(root, "subsystems", "gone", "docs_embed.go"),
 		"package gone\n\n//go:embed proto/renamed.proto\nvar source []byte\n")
 
-	missing, err := repocheck.UnembeddedContracts(root)
+	missing, err := contractcheck.UnembeddedContracts(root)
 	require.NoError(t, err)
 	require.Len(t, missing, 1)
 	assert.Equal(t, "subsystems/gone", missing[0].Subsystem)
@@ -107,7 +131,7 @@ func TestAContractThatEmbedsItsSourceIsNotReported(t *testing.T) {
 	writeFile(t, filepath.Join(root, "subsystems", "kept", "docs_embed.go"),
 		"package kept\n\n//go:embed proto/kept.proto\nvar source []byte\n")
 
-	missing, err := repocheck.UnembeddedContracts(root)
+	missing, err := contractcheck.UnembeddedContracts(root)
 	require.NoError(t, err)
 	assert.Empty(t, missing)
 }
@@ -127,7 +151,7 @@ message QuietRequest {}
 message QuietResponse {}
 `)
 
-	undeclared, err := repocheck.UndeclaredEffects(root)
+	undeclared, err := contractcheck.UndeclaredEffects(root)
 	require.NoError(t, err)
 	require.Len(t, undeclared, 1)
 	assert.Equal(t, "Quiet", undeclared[0].Method)
@@ -155,7 +179,7 @@ message NearRequest {}
 message NearResponse {}
 `)
 
-	undeclared, err := repocheck.UndeclaredEffects(root)
+	undeclared, err := contractcheck.UndeclaredEffects(root)
 	require.NoError(t, err)
 	require.Len(t, undeclared, 1)
 	message := undeclared[0].Error()
@@ -179,7 +203,7 @@ func TestAFeatureDocumentRowNamingNothingIsReported(t *testing.T) {
 		writeProto(t, root, "subsystems/"+subsystem+"/proto/"+subsystem+".proto", minimalContract)
 	}
 
-	misplaced, err := repocheck.MisplacedFeatureDocuments(root)
+	misplaced, err := contractcheck.MisplacedFeatureDocuments(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, misplaced, "and the check is not vacuous on a tree with no documents at all")
 	for _, row := range misplaced {

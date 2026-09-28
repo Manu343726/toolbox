@@ -111,8 +111,16 @@ test-short: check-tests proto subsystems-proto
 #
 # `make test` runs this too, because it is part of ./... . It is a target of its
 # own so that either check can be run on its own, and so that CI can name it.
-check-repo:
+# The repository's own shape, in two parts because they have different prerequisites.
+#
+# `repocheck` reads files and imports nothing but the standard library, so it runs on a bare
+# checkout — which is what lets a CI job assert that no Go file is one the toolchain skips before
+# anything is generated. `contractcheck` reads a contract's annotations, so it needs `pkg/docs` to
+# compile the contract and `pkg/api` to interpret it, and both need generated code. Running them
+# from one package would have made the bare job depend on a protobuf toolchain.
+check-repo: proto subsystems-proto
 	@go test -count=1 ./internal/repocheck
+	@go test -count=1 ./internal/contractcheck
 
 fmt:
 	@gofmt -w $$(find pkg -name '*.go' -not -name '*.pb.go' -not -name '*.connect.go')
