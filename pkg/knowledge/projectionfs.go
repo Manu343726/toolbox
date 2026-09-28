@@ -46,6 +46,25 @@ type ProjectionCache struct {
 	fetch    Fetcher
 	revision func(ctx context.Context) (ProjectionRevision, error)
 
+	// refresh serialises a check-and-refresh, and only a refresh.
+	//
+	// It is separate from `mu` on purpose. `mu` guards the served view, and a reader holding it
+	// must never wait on a fetch — a fetch reads a whole wiki, which is the slow thing this
+	// cache exists to avoid repeating. So the fetch runs with `mu` unlocked, which means the
+	// check-then-act in `RefreshIfChanged` is not atomic with respect to another refresher, and
+	// two of them interleaving is a lost update: one reads revision "r1", the other reads "r2"
+	// and fetches it, and then the first — holding a view fetched before the change — writes
+	// "r1" over the top. The cache then serves the older view indefinitely, because every later
+	// check now compares "r2" against a cached "r1", sees a difference, and is refused by a
+	// refresher that is already running. A stale view that never corrects itself is worse than
+	// one that is briefly wrong, and it is invisible: every reader sees a complete, coherent
+	// view, just not the newest one.
+	//
+	// One mutex over the whole operation fixes it, because then the second refresher re-reads
+	// the revision *after* the first has stored it and finds nothing to do. Readers never take
+	// it, so the hot path is unaffected.
+	refresh sync.Mutex
+
 	mu        sync.RWMutex
 	wiki      Wiki
 	have      bool
@@ -66,23 +85,58 @@ func NewProjectionCache(fetch Fetcher, revision func(ctx context.Context) (Proje
 func (c *ProjectionCache) Current(ctx context.Context) (Wiki, error) {
 	c.mu.RLock()
 	if c.have {
-		defer c.mu.RUnlock()
-		return c.wiki, nil
+		wiki := c.wiki
+		c.mu.RUnlock()
+		return wiki, nil
 	}
 	c.mu.RUnlock()
 
+	// The same lock a refresh takes, so populating and refreshing cannot interleave. One of
+	// them storing a view over the other's would leave a served view labelled with a revision
+	// that does not describe it, and the re-check below is what makes the wait worth taking:
+	// a reader that queued behind a refresh serves what that refresh stored rather than
+	// fetching a second copy of a view that is already there.
+	c.refresh.Lock()
+	defer c.refresh.Unlock()
+
+	c.mu.RLock()
+	if c.have {
+		wiki := c.wiki
+		c.mu.RUnlock()
+		return wiki, nil
+	}
+	c.mu.RUnlock()
+
+	// The revision is read **before** the fetch, and that direction is the whole point.
+	//
+	// A view and a revision read at different instants can disagree, and the disagreement has
+	// to resolve in one direction only. Recording the *newer* revision leaves a view labelled
+	// with a revision it does not have — and then every later check compares that revision
+	// against the source, finds them equal, and reports that there is nothing to do. The cache
+	// serves the stale view for the life of the process, with no error and no failed
+	// assertion anywhere: every reader sees a complete, coherent view, just not the newest
+	// one. Recording the older revision means the next check sees a difference and fetches
+	// again, which costs one redundant fetch. A refresh that turned out to be unnecessary is
+	// free; one that never happens is not.
+	var rev ProjectionRevision
+	resolved := false
+	if c.revision != nil {
+		// A revision that cannot be read is not a reason to refuse the bundle: a reader
+		// who cannot have the change signal can still have the content, and the
+		// alternative is showing somebody nothing because a status call failed.
+		if got, rerr := c.revision(ctx); rerr == nil {
+			rev, resolved = got, true
+		}
+	}
 	wiki, err := c.fetch(ctx)
 	if err != nil {
 		return Wiki{}, err
 	}
-	rev := ProjectionRevision{Value: wikiDigest(wiki)}
-	if c.revision != nil {
-		if got, rerr := c.revision(ctx); rerr == nil {
-			rev = got
-		}
-		// A revision that cannot be read is not a reason to refuse the bundle: a reader
-		// who cannot have the change signal can still have the content, and the alternative
-		// is showing somebody nothing because a status call failed.
+	if !resolved {
+		// There was no source to ask, or the one there was could not answer. The view's own
+		// digest describes it exactly, because it is computed from it — which is the only
+		// revision available that is certainly true of what is being served.
+		rev = ProjectionRevision{Value: wikiDigest(wiki)}
 	}
 	now := time.Now().UTC()
 	c.mu.Lock()
@@ -98,6 +152,16 @@ func (c *ProjectionCache) Current(ctx context.Context) (Wiki, error) {
 // the cheap thing to compute is "is this the same view" and the expensive thing to compute is "what
 // changed", and a client that re-reads does not need the second one.
 func (c *ProjectionCache) RefreshIfChanged(ctx context.Context) (bool, error) {
+	// Serialised for the whole operation, and the revision is read *inside* the lock rather
+	// than before it. Reading it outside is the bug this arrangement exists to remove: a
+	// revision observed before waiting is a revision that may already be stale by the time the
+	// fetch returns, and storing a view built from it is a lost update.
+	c.refresh.Lock()
+	defer c.refresh.Unlock()
+
+	c.mu.RLock()
+	previous := c.rev
+	c.mu.RUnlock()
 	if c.revision == nil {
 		return false, nil
 	}
@@ -105,9 +169,6 @@ func (c *ProjectionCache) RefreshIfChanged(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	c.mu.RLock()
-	previous := c.rev
-	c.mu.RUnlock()
 	if got.Value == previous.Value {
 		return false, nil
 	}

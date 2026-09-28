@@ -563,6 +563,16 @@ func TestTheCacheSurvivesConcurrentReadersAndOneRefresh(t *testing.T) {
 		},
 	)
 
+	// Populated before the goroutines start, so the test is about what its name says: a
+	// refresh landing while readers are reading. Left to the readers, whether a refresh was
+	// even *needed* would depend on which of them won the first fetch — one that fetched after
+	// the revision moved would already be serving the new view, the refresher would correctly
+	// do nothing, and `Refreshes` would be zero for a reason that has nothing to do with
+	// concurrency. Populating first makes the refresh necessary, and so makes it observable.
+	seed, err := c.Current(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "r1", seed.Commit)
+
 	// Readers, a refresher and the accessors all at once. The race detector is the assertion; the
 	// counts are there so the test still means something without it.
 	var wg sync.WaitGroup
@@ -769,4 +779,120 @@ func TestAnEntriesModTimeIsTheFetchTimeAndItCarriesNoPlatformData(t *testing.T) 
 	// `Sys` is nil rather than a half-populated struct, so a caller that type-asserts for platform
 	// data finds nothing rather than something empty and plausible.
 	assert.Nil(t, info.Sys())
+}
+
+// A view and the revision recorded beside it are read at two different instants, and the cache
+// has to be able to resolve that disagreement in one direction only.
+//
+// Reading the revision *after* the fetch records the newer revision beside the older view. Every
+// later check then compares that revision against the source, finds the two equal, and reports
+// that there is nothing to do — so the stale view is served for the life of the process, with no
+// error and no failed assertion anywhere. Every reader sees a complete, coherent view; it is
+// simply not the newest one, and nothing in the system is able to say so.
+//
+// The change landing *inside* the fetch is what makes it reproducible without a sleep, a goroutine
+// or a retry, which is the only kind of reproduction worth having for a bug that a race detector
+// cannot see: this one is a logic ordering, and it fails every time or not at all.
+func TestARefreshStillHappensWhenTheRevisionMovesWhileTheViewIsBeingFetched(t *testing.T) {
+	t.Parallel()
+	rev := "r1"
+	fetches := 0
+	c := NewProjectionCache(
+		func(context.Context) (Wiki, error) {
+			fetches++
+			w := wikiFixture()
+			if fetches == 1 {
+				w.Commit = "r1"
+				// The change lands mid-fetch: after the view was decided, before the
+				// caller records which revision that view belongs to.
+				rev = "r2"
+				return w, nil
+			}
+			w.Commit = "r2"
+			return w, nil
+		},
+		func(context.Context) (ProjectionRevision, error) {
+			return ProjectionRevision{Value: rev}, nil
+		},
+	)
+
+	wiki, err := c.Current(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "r1", wiki.Commit, "the first fetch is the view it was, and the cache says so")
+
+	refreshed, err := c.RefreshIfChanged(context.Background())
+	require.NoError(t, err)
+	assert.True(t, refreshed,
+		"the revision moved while the view was being fetched, so the recorded revision is the "+
+			"older one and this check finds work to do. Recording the newer one is the bug: "+
+			"every later check would agree there was nothing to do")
+
+	wiki, err = c.Current(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "r2", wiki.Commit, "and the newest view is the one now served")
+}
+
+// The recorded revision and the served view are one fact, and a reader that finds them
+// disagreeing has been handed a pair that cannot both be true.
+//
+// This is the invariant the lost update breaks, and it is stated over the served pair rather than
+// over a counter because a counter cannot distinguish "refreshed once" from "refreshed once and
+// then had a newer view written over it by a refresh that had started earlier".
+func TestTheServedViewAndTheRevisionRecordedBesideItAlwaysAgree(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	rev := "r1"
+	c := NewProjectionCache(
+		func(context.Context) (Wiki, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			w := wikiFixture()
+			w.Commit = rev
+			return w, nil
+		},
+		func(context.Context) (ProjectionRevision, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return ProjectionRevision{Value: rev}, nil
+		},
+	)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 40; j++ {
+				if i == 0 && j == 20 {
+					mu.Lock()
+					rev = "r2"
+					mu.Unlock()
+				}
+				if i%2 == 0 {
+					if _, err := c.RefreshIfChanged(context.Background()); err != nil {
+						t.Errorf("RefreshIfChanged: %v", err)
+						return
+					}
+					continue
+				}
+				if _, err := c.Current(context.Background()); err != nil {
+					t.Errorf("Current: %v", err)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Let the refreshers that were already inside a fetch land, then settle it: a refresher
+	// that observed the old revision and stores its view afterwards is the regression, and it
+	// is only visible once every in-flight refresh has finished.
+	_, err := c.RefreshIfChanged(context.Background())
+	require.NoError(t, err)
+
+	wiki, err := c.Current(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "r2", wiki.Commit, "the newest view is the one served once the dust settles")
+	assert.Equal(t, "r2", c.Revision().Value,
+		"and the revision recorded beside it describes that view rather than a newer one")
 }
