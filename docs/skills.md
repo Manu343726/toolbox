@@ -797,30 +797,58 @@ Three things hold it shut now, and the third is the one that generalises:
 
 ### Copying and moving between catalogs
 
-**These two operations are not built, and no contract declares them.** `CopySkill` and
-`MoveSkill` appear nowhere in this repository: not in `SkillCatalogService`, not in
-`pkg/skills/proto`, not in any implementation. This section is the design, written down so
-that whoever builds them does not have to reconstruct it, and it is here rather than in the
-executable specification precisely because nothing implements it.
+`SkillService` serves **`CopySkill`** and **`MoveSkill`**, and they are **two independent
+operations** — neither is defined in terms of the other, so neither acquires the other's
+failure cases. A copy that fails halfway has *duplicated* a skill: recoverable, and the
+source is still there to remove the duplicate from. A move that fails halfway has neither
+duplicated nor removed, which is its own state and its own reporting.
 
-The design is **two independent operations** — `copy` and `move` — and neither is defined
-in terms of the other, so neither acquires the other's failure cases. A `copy` that fails
-halfway has duplicated a skill, which is recoverable; a `move` that fails halfway has
-neither duplicated nor removed, which needs its own reporting.
+**They are on the aggregator, not on the catalog contract.** A copy and a move span two
+catalogs, and two catalogs need not share a provider — the git-backed host holds a checkout
+per remote, and a deployment may run two of them. The contract a catalog implements is about
+*one source of skills*, and a provider asked to move a skill between catalogs would have to
+resolve a catalog it does not hold, which is the coupling the provider pattern exists to
+avoid. Composed here out of what a catalog already serves — `GetSkill` and `ReadSkillFile` to
+read, `PutSkill` to write, `DeleteSkill` to remove — they work between catalogs held by
+different providers, and **every provider gains them without being changed**.
 
-Both are refused when the **target** cannot be written: a read-only catalog does not
-accept a skill, and saying so is the point of declaring one. That refusal is already
-implemented, in `PutSkill`, and it is what makes these two answerable rather than
-appearing to succeed. A `move` also needs a source it can remove from, which is its own
-condition rather than an inference from copying.
+**Both ends are checked before anything is fetched**, which is what `CatalogInfo.writable` is
+for: writability is *declared* rather than discovered by attempting a write, so a move that
+cannot happen costs a caller nothing and names the catalog that refused.
 
-**What they would be built from.** The contract's *shape* accommodates them and its
-*methods* do not express them: `PutSkill` already takes a whole skill with its content, and
-`DeleteSkill` already removes one, so a `copy` is a `GetSkill` followed by a `PutSkill` and a
-`move` is that plus a `DeleteSkill`. Adding two methods is therefore a small change to a
-contract and a real one to a subsystem — which is why they are listed under
-[Not built](#what-exists-today) rather than treated as pending work on something already
-half-done.
+| Refused when | Because |
+|---|---|
+| The target is read-only | The skill has nowhere to go. A catalog registered from elsewhere rather than created here is one this deployment will not write to |
+| The source is read-only | A move needs somewhere to remove the skill **from**. This is its own condition, not an inference from copying — a copy does not have it |
+
+**A removal that fails after the write is reported, not raised.** The skill is then in both
+catalogs, which is a duplicate and not a loss, and the response says so in
+`source_removed` and `source_problem`. A caller handed an error would look in the source,
+find the skill still there, and conclude something worse than a duplicate.
+
+**A move never overwrites; a copy may be asked to.** `CopySkill` carries `fail_if_exists`,
+because a caller choosing between two versions it can see is a decision it can make. A move
+has no such choice to offer: replacing would destroy whatever the target held, and the one
+thing a move is for is that the skill is **not** in two places. So `MoveSkill` has no such
+field, and a target that already holds the name is refused.
+
+**Both ends' names are required**, and the target's is not defaulted to the source's — a call
+that collides must fail on a collision the caller asked for. The same catalog on both ends is
+a **rename**, which is the move a deployment is most likely to want.
+
+**Every file is carried, and each is checked against the manifest** it was listed in, using
+the same `verifyFile` a served file goes through. A copy that carried bytes disagreeing with
+the manifest would write a skill whose pin describes something else, into a catalog where the
+mismatch is no longer visible. The **name** is stated to the target and the **manifest is
+not**: the name is what the catalog is being asked to call it and cannot be inferred from the
+files, while a manifest the target computes from the bytes it was given is the truth about
+what it holds.
+
+**Neither carries a `confirm` field**, which is deliberate. `AddSkill`, `EnableSkill` and
+`DisableSkill` do, because they write the *project's* configuration file, which a person
+wrote and reviews. A copy writes a *catalog*, which is a deployment's own storage and which
+the deployment decides who may write; asking the person who owns the project about a change
+to the deployment would be asking the wrong one.
 
 ## The catalog contract
 
@@ -1349,7 +1377,10 @@ reason rather than rediscovered:
 - **`pkg/skills/proto`** — the catalog contract, seven methods, in a root package because
   a *provider* implements it.
 - **`subsystems/skill`** — the aggregator. The implicit local catalog, resolution by
-  qualified reference, `skills.lock.yaml`, and `SkillService`.
+  qualified reference, `skills.lock.yaml`, and `SkillService`. It serves the project's own
+  skill set and, through `CopySkill` and `MoveSkill`, transfers a skill between catalogs —
+  including catalogs held by different providers, since a transfer is composed from reads and
+  writes a catalog already serves.
 - **`pkg/mcp`** — the extension. `skills/list`, `skills/get`, a `skill://` resource
   template, and the capability declaration. A deployment serving no skills declares
   nothing.
@@ -1368,13 +1399,10 @@ reason rather than rediscovered:
 
 **Not built, and a deployment is complete without them:**
 
-- **`copy` and `move`** between catalogs. **The contract does not declare them.**
-  `CopySkill` and `MoveSkill` are in no `.proto` and in no implementation, so this is two
-  absent methods rather than two unimplemented ones. The contract's shape accommodates them
-  — `PutSkill` takes a whole skill with its content and `DeleteSkill` removes one — and the
-  refusal that makes them answerable is implemented in `PutSkill`. What is missing is the
-  two methods and the operations behind them. See
-  [Copying and moving](#copying-and-moving-between-catalogs).
+- **Nothing.** Every operation described above is served. The entry that used to sit here —
+  `copy` and `move` between catalogs — has been built, and
+  [that section](#copying-and-moving-between-catalogs) now describes what they do rather than
+  what they would do.
 
 **What was there before, and is gone:** a versioned in-memory catalogue of skill
 *metadata* — an identifier, a version, a name, a description, instructions as a single

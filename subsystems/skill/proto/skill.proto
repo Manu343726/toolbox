@@ -2,6 +2,14 @@ syntax = "proto3";
 
 package toolbox.skill.v1;
 
+// The catalog contract, which is the source of the entries and references below.
+//
+// Types from it are named **fully qualified**, which is what every other cross-file reference in
+// this repository does — `google.protobuf.Struct` in the same file, and the framework's own
+// contracts. It is not a style preference: an unqualified name imported from another file is
+// rejected by the protoc this repository builds with, as `"SkillEntry" is not defined`, which
+// reads like a missing import rather than a missing qualifier. Verified against protoc 36.2,
+// which is the version CI pins and installs.
 import "toolbox/skills/v1/skill.proto";
 
 option go_package = "github.com/Manu343726/toolbox/subsystems/skill/skillv1;skillv1";
@@ -95,6 +103,37 @@ service SkillService {
   // consequence from changing one, and a deployment may reasonably allow the second without the
   // first. It writes the project's configuration file, subject to the same confirmation.
   rpc DisableSkill(DisableSkillRequest) returns (DisableSkillResponse);
+
+  // @toolbox.side-effects create
+  // CopySkill writes a skill into another catalog and leaves the source as it is.
+  //
+  // It is here rather than on the catalog contract because it spans two catalogs, and two
+  // catalogs need not share a provider. The contract a catalog implements is about one source
+  // of skills, and a provider asked to move a skill between catalogs would have to resolve a
+  // catalog it does not hold — which is the coupling the provider pattern exists to avoid.
+  // Composed here out of reads and writes a catalog already serves, it works between catalogs
+  // held by different providers, and every provider gains it without being changed.
+  //
+  // **No `confirm` field**, and that is deliberate rather than an omission. Its neighbours
+  // carry one because they write the project's configuration file, and a person wrote and
+  // reviews that file. A copy writes a catalog instead, which is a deployment's own storage
+  // and which a deployment decides who may write; asking the person who owns the *project*
+  // about a change to the *deployment* would be asking the wrong one.
+  rpc CopySkill(CopySkillRequest) returns (CopySkillResponse);
+
+  // @toolbox.side-effects create delete
+  // MoveSkill writes a skill into another catalog and removes it from this one.
+  //
+  // It is a separate operation rather than CopySkill with a flag, because a copy that fails
+  // halfway has duplicated a skill — recoverable, and the source is still there to remove it
+  // from — while a move that fails halfway has neither duplicated nor removed, and that needs
+  // its own reporting rather than a flag's.
+  //
+  // A move is refused up front when the source cannot be written, which is its own condition
+  // and not an inference from copying: a move needs somewhere to remove the skill *from*, and
+  // a source that will not accept a removal is a source this operation cannot complete. Both
+  // ends are checked before anything is fetched, so a move that cannot happen costs nothing.
+  rpc MoveSkill(MoveSkillRequest) returns (MoveSkillResponse);
 }
 
 // ProjectSkill is one skill of a project's effective set, as the project has it.
@@ -324,4 +363,75 @@ message DisableSkillResponse {
   bool applied = 3;
   // The project's skills as they now are.
   repeated string skills = 4;
+}
+
+// CopySkillRequest names a skill in one catalog and a name for it in another.
+message CopySkillRequest {
+  // Catalog the skill is read from.
+  //
+  // Empty is the local catalog, which every deployment has, so a copy out of a project's own
+  // skills is a call that does not have to know what the local catalog is called.
+  string source_catalog = 1;
+  // The skill's name within that catalog.
+  string source_name = 2;
+  // Catalog the skill is written to.
+  string target_catalog = 3;
+  // The skill's name within that catalog.
+  //
+  // Stated rather than defaulting to the source name, because the whole effect of the call is
+  // what it says, and an inferred name is a name the caller did not choose — so a copy that
+  // collides would fail on a collision the caller never asked for. Writing the same name is
+  // how a caller says "the same name", and it is how they learn that it is taken.
+  string target_name = 4;
+  // Refuse the copy when true and the target already holds that name.
+  //
+  // False replaces it, which destroys a version somebody may have pinned. A copy that
+  // overwrites silently is the one way this operation could lose work, so the caller states
+  // which of the two it means.
+  bool fail_if_exists = 5;
+}
+
+// CopySkillResponse is the skill as the target now holds it.
+message CopySkillResponse {
+  // The copied skill, read back from the target rather than echoed from the source, so the
+  // manifest is the one the target computed from the bytes it holds.
+  toolbox.skills.v1.SkillEntry entry = 1;
+  // Where the skill was read from, which is still there.
+  toolbox.skills.v1.SkillRef source = 2;
+}
+
+// MoveSkillRequest names a skill in one catalog and a name for it in another.
+message MoveSkillRequest {
+  // Catalog the skill is read from and then removed from.
+  string source_catalog = 1;
+  // The skill's name within that catalog.
+  string source_name = 2;
+  // Catalog the skill is written to.
+  string target_catalog = 3;
+  // The skill's name within that catalog.
+  //
+  // Required for the same reason a copy states it, and because a move within one catalog is
+  // the case where it does the most work: naming a catalog's own name under a new one is a
+  // rename, and a rename is the move a deployment is most likely to want.
+  string target_name = 4;
+}
+
+// MoveSkillResponse is the skill as the target now holds it, and where it came from.
+message MoveSkillResponse {
+  // The moved skill, read back from the target.
+  toolbox.skills.v1.SkillEntry entry = 1;
+  // Where the skill was, and is no longer.
+  toolbox.skills.v1.SkillRef source = 2;
+  // True when the source was cleared.
+  //
+  // False is reported rather than treated as a failure, because it means the skill is now in
+  // the target and still in the source — a duplicate rather than a loss, and a caller that
+  // knows can remove the one it does not want. Treating it as a failure would report the
+  // move as not having happened, which is the one thing it certainly did.
+  bool source_removed = 3;
+  // Why the source was not cleared, when it was not.
+  //
+  // Set whenever `source_removed` is false and the source held the skill, so a caller is told
+  // what to do about the duplicate rather than left to find it.
+  string source_problem = 4;
 }
