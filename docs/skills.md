@@ -554,27 +554,33 @@ three:
 
 An agent needs to *discover* skills, not only be handed the ones a project already
 names — otherwise a project cannot use the catalog it integrated until a human has read
-its index. The subsystem therefore exposes tools for:
+its index. `SkillService` therefore serves:
 
-| Tool | Does |
+| Method | Does |
 |---|---|
-| find a skill | Search the integrated catalogs for skills matching something an agent wants |
-| add a skill to the project | Add a qualified reference to the project's `skills:` list |
-| enable a skill | Add a reference that is present but not included |
-| disable a skill | Remove a reference from the project's `skills:` list |
+| `FindSkill` | Search the integrated catalogs for skills matching something an agent wants |
+| `AddSkill` | Add a qualified reference to the project's `skills:` list |
+| `EnableSkill` | Add a reference that is present but not included |
+| `DisableSkill` | Remove a reference from the project's `skills:` list |
+| `CheckPins` | Report whether the catalog still holds what `skills.lock.yaml` pinned |
+| `Validate` | Check the project's references against what its catalogs actually serve |
+
+`CheckPins` and `Validate` answer two questions a project otherwise cannot ask at all.
+`Validate` is what makes "a reference that resolves to nothing" a report rather than a
+silent absence, and `CheckPins` is what makes drift visible: the lockfile records a digest
+per pinned skill, and nothing re-reads those digests unless something asks.
 
 These are **not** the same thing as the `skills/*` MCP methods, and the difference
-matters. `skills/list` reports what the project may use; these tools change what that
-is, and a tool that changes state is governed by the framework's rules about side
+matters. `skills/list` reports what the project may use; these change what that
+is, and a method that changes state is governed by the framework's rules about side
 effects: each declares what invoking it does, and a policy decides whether an agent may
-invoke it. A tool that adds a remote skill to a project is `create`-shaped, and one that
-lists or finds is `read_only`.
+invoke it. `AddSkill` is `create`-shaped, and `FindSkill` and `CheckPins` are `read_only`.
 
 **`find` pushes the query to the catalogs.** A catalog is a provider and it answers its
 own query, so a large catalog is not shipped to be filtered here. This is part of the
 catalog contract in phase 3.
 
-The write tools are subject to the configuration-confirmation rule, so an agent adding a
+The write methods are subject to the configuration-confirmation rule, so an agent adding a
 skill is asked before the file changes.
 
 ### The `skills.sh` catalog
@@ -696,16 +702,27 @@ fact stated twice with nothing to catch a disagreement.
 
 ### Registering and creating catalogs
 
-The subsystem's tools manage the set of git-backed catalogs, not just the skills inside
-one:
+The subsystem's methods manage the set of git-backed catalogs, not just the skills inside
+one. `SkillGitService` is a separate service from the catalog contract, and the six
+registration methods are:
 
-| Operation | What it does |
-|---|---|
-| register a catalog | Take a git remote and a name, clone it, and serve it as a catalog under that name |
-| create a catalog | `git init` a new repository, commit it, and serve it — pushing only if a remote was given |
-| sync a catalog | `git pull --rebase` its remote |
-| unregister a catalog | Stop serving a registered remote. The clone stays on disk |
-| delete a catalog | Unregister it **and** remove the clone. A separate operation, named for what it does |
+| Method | Declares | What it does |
+|---|---|---|
+| `RegisterCatalog` | `create update` | Take a git remote and a name, clone it, and serve it as a catalog under that name |
+| `CreateCatalog` | `create update` | `git init` a new repository, commit it, and serve it — pushing only if a remote was given |
+| `SyncCatalog` | `update` | `git pull --rebase` its remote |
+| `PushCatalog` | `create update` | Send a checkout's commits to its remote |
+| `ListCheckouts` | `read_only` | Report which catalogs are registered and what commit each is on |
+| `UnregisterCatalog` | `delete` | Stop serving a registered remote. The clone stays on disk |
+| `DeleteCatalog` | `delete` | Unregister it **and** remove the clone. A separate operation, named for what it does |
+
+`SyncCatalog` declares `update` and not `read_only` because `git pull` moves the checkout's
+ref and rewrites its working tree: the catalog an agent reads afterwards is not the one it
+read before. It was declared `read_only` and the declaration was never exercised, because
+this subsystem did not embed its own contract and every method here therefore reached the
+policy layer unclassified — which the default policy withholds, so the misdeclaration
+changed nothing observable. See [What the default policy decides about
+these](#what-the-default-policy-decides-about-these).
 
 **Creating a catalog is local.** A new repository is made where the deployment runs and
 served from there, and it is pushed only when a remote is named. No forge is contacted
@@ -731,15 +748,79 @@ reboot would serve a different set of skills each time it came up — and the pr
 **Credentials are deployment configuration.** A clone may be private, and a project
 says which catalogs it wants while the deployment is what can reach them.
 
+### What the default policy decides about these
+
+The default policy is one line — `allow * read` — and it is deliberately the narrower
+half: *every read is granted, and nothing that changes state is*. Granting a write means
+naming the deployments and actors that may change something, which is a decision somebody
+has to make rather than a default somebody has to accept. So out of the two skills
+services:
+
+| | Granted by default | Withheld until a deployment opts in |
+|---|---|---|
+| `SkillService` | `ListSkills`, `GetSkill`, `FindSkill`, `ReadSkillFile`, `ListCatalogs`, `CheckPins`, `Validate` | `AddSkill`, `EnableSkill`, `DisableSkill` |
+| `SkillGitService` | `ListCheckouts` | `RegisterCatalog`, `CreateCatalog`, `SyncCatalog`, `PushCatalog`, `UnregisterCatalog`, `DeleteCatalog` |
+
+The split is not a matter of taste. Every withheld method writes **state that outlives the
+process**: a project's `skills:` list, or the deployment's set of registered catalogs. A
+deployment that forgot either on reboot would come up serving a different set of skills than
+it did yesterday, and a project would find its references resolving to nothing. The
+withheld methods are also the ones a person should agree to, and rule 17 is what makes them
+ask first when an agent calls them.
+
+**This was not a decision until now, and that is the part worth recording.** Every method in
+`SkillGitService` arrived in the policy layer as **unclassified** — not one of the seven was
+classified — because `subsystems/skillgit` had no `docs_embed.go`, and the
+`@toolbox.side-effects` annotations live in the proto *source*, which nothing was reading.
+An unclassified operation is refused, which is the safe direction, so the deployment looked
+correct: everything withheld, nothing reported. `ListCheckouts` declares `read_only`,
+changes nothing, and was still denied, because a deployment that could not be asked which
+catalogs it has is withholding information rather than authority.
+
+The annotations were right and the *reachability* was broken, which is why nothing
+questioned it: the contract was annotated, the service worked, the operations were listed,
+and the policy layer never saw any of it. The annotation above `SyncCatalog` was wrong in
+the same gap — it said `read_only` for a method that runs `git pull` — and had never been
+exercised, so correcting the reachability exposed a second defect underneath it.
+
+Three things hold it shut now, and the third is the one that generalises:
+
+1. `subsystems/skillgit/docs_embed.go` embeds the contract.
+2. `cmd/toolbox`'s policy test asserts the default policy's promise over *every* operation
+   in the deployment, in both directions — a read that is denied, and a write that is
+   granted.
+3. `internal/repocheck` requires every subsystem with a contract to embed its source, and
+   every method in every contract to declare an effect the framework recognises. The first
+   would have caught the missing file; the second is what caught `OperationExposure` in
+   `apitools`, which declared nothing and so withheld the one operation an agent needs in
+   order to find out what it is allowed to do.
+
 ### Copying and moving between catalogs
 
-The skills subsystem offers **two independent operations** — `copy` and `move` — and
-neither is defined in terms of the other, so neither acquires the other's failure cases.
+**These two operations are not built, and no contract declares them.** `CopySkill` and
+`MoveSkill` appear nowhere in this repository: not in `SkillCatalogService`, not in
+`pkg/skills/proto`, not in any implementation. This section is the design, written down so
+that whoever builds them does not have to reconstruct it, and it is here rather than in the
+executable specification precisely because nothing implements it.
+
+The design is **two independent operations** — `copy` and `move` — and neither is defined
+in terms of the other, so neither acquires the other's failure cases. A `copy` that fails
+halfway has duplicated a skill, which is recoverable; a `move` that fails halfway has
+neither duplicated nor removed, which needs its own reporting.
 
 Both are refused when the **target** cannot be written: a read-only catalog does not
-accept a skill, and saying so is the point of declaring one. A `move` also needs a
-source it can remove from, which is its own condition rather than an inference from
-copying.
+accept a skill, and saying so is the point of declaring one. That refusal is already
+implemented, in `PutSkill`, and it is what makes these two answerable rather than
+appearing to succeed. A `move` also needs a source it can remove from, which is its own
+condition rather than an inference from copying.
+
+**What they would be built from.** The contract's *shape* accommodates them and its
+*methods* do not express them: `PutSkill` already takes a whole skill with its content, and
+`DeleteSkill` already removes one, so a `copy` is a `GetSkill` followed by a `PutSkill` and a
+`move` is that plus a `DeleteSkill`. Adding two methods is therefore a small change to a
+contract and a real one to a subsystem — which is why they are listed under
+[Not built](#what-exists-today) rather than treated as pending work on something already
+half-done.
 
 ## The catalog contract
 
@@ -1287,9 +1368,13 @@ reason rather than rediscovered:
 
 **Not built, and a deployment is complete without them:**
 
-- **`copy` and `move`** between catalogs. The contract can express them, the read-only
-  refusal is implemented, and `PutSkill` takes a whole skill with its content — the two
-  operations themselves are not.
+- **`copy` and `move`** between catalogs. **The contract does not declare them.**
+  `CopySkill` and `MoveSkill` are in no `.proto` and in no implementation, so this is two
+  absent methods rather than two unimplemented ones. The contract's shape accommodates them
+  — `PutSkill` takes a whole skill with its content and `DeleteSkill` removes one — and the
+  refusal that makes them answerable is implemented in `PutSkill`. What is missing is the
+  two methods and the operations behind them. See
+  [Copying and moving](#copying-and-moving-between-catalogs).
 
 **What was there before, and is gone:** a versioned in-memory catalogue of skill
 *metadata* — an identifier, a version, a name, a description, instructions as a single

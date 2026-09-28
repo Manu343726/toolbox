@@ -375,6 +375,18 @@ mistake nothing else reports:
   reports a matrix row that names no module, which is the other way the list goes
   stale — a subsystem renamed or removed leaves a job that tests nothing and still
   reports green.
+- **A contract's annotations may never reach the framework, and nothing reports
+  it.** `@toolbox.side-effects` lives in the proto *source*, so a subsystem with
+  a contract and no `docs_embed.go` serves operations no policy can classify — and
+  an unclassified operation is *refused*, which is the safe direction, so the
+  deployment looks correct while an operation nobody can call sits in it. A method
+  that declares nothing is the same failure in one line, and a misspelled value is
+  the same failure wearing a disguise. `subsystems/skillgit` had all seven of its
+  methods unclassified for this reason, hiding a `read_only` misdeclaration on a
+  method that runs `git pull` which had therefore never been exercised. A contract
+  read through `pkg/docs` also has to reach a document: a feature document that
+  describes an operation in prose without naming it gives a reader no way to find
+  the method.
 
 Run `make check-repo` to run these on their own. `REPOCHECK_ROOT=subsystems/<name>`
 narrows them to one module, which is what the CI matrix job does so that a

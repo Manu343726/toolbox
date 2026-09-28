@@ -6,7 +6,13 @@ option go_package = "github.com/Manu343726/toolbox/subsystems/testecho/echov1;ec
 
 // EchoService is a small service used to exercise discovery and CLI generation.
 service EchoService {
+  // @toolbox.side-effects read_only
   // Echo returns a response containing the supplied message.
+  //
+  // It is `read_only` because the response is a function of the request: the mode and the
+  // uppercase flag transform the text and nothing is kept, so two calls with the same request
+  // answer the same. Undeclared, it was refused by the default policy — which is why a test
+  // service used to exercise the gateway had an operation the gateway would not offer.
   rpc Echo(EchoRequest) returns (EchoResponse);
   // @toolbox.side-effects external
   // StreamEcho demonstrates a server-streaming method.

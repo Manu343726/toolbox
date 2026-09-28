@@ -123,7 +123,11 @@ Three other sources state it, all in the same vocabulary:
 A policy decides what a deployment exposes. It is not per-actor authorization: it
 does not know who is calling. A decision about *whether this caller may do this
 now*, with the actor and the resource, is the policy subsystem's `Evaluate`, which
-is not wired into the gateway yet.
+is not wired into the gateway yet. `PolicyService` also serves `ListPolicies`, which
+returns the policy snapshots a deployment can decide against — a deployment choosing
+what to permit needs to see what there is to choose from, and the answer is the same
+document `cmd/toolbox/policy/toolbox.policy` states for the default. Both are
+`read_only`, so the default policy grants them.
 
 Exposure remains a separate, mutable decision on top of a policy. An agent can
 expose and hide operations at runtime through the gateway's `expose_feature` and

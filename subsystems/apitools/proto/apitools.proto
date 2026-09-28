@@ -96,8 +96,15 @@ service ApiToolsService {
   // HideOperation removes one operation from the exposed surface without
   // removing it from the catalog.
   rpc HideOperation(HideOperationRequest) returns (HideOperationResponse);
+  // @toolbox.side-effects read_only
   // OperationExposure reports the current footprint: allowed, exposed, hidden,
   // and denied operations.
+  //
+  // It is the one operation here that was left undeclared, and the omission cost the only
+  // operation an agent needs in order to find out what it may do: unclassified is not a read, so
+  // the default policy withheld the report of what the policy allows. A subsystem whose
+  // repository check requires every method to declare its effects is what keeps that from being
+  // a thing anybody has to notice.
   rpc OperationExposure(OperationExposureRequest) returns (OperationExposureResponse);
   // @toolbox.side-effects external
   // CallOperation executes one exposed operation through an adapter provider.

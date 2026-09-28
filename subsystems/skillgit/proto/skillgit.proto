@@ -53,8 +53,16 @@ service SkillGitService {
   // separate, deliberate act.
   rpc CreateCatalog(CreateCatalogRequest) returns (CreateCatalogResponse);
 
-  // @toolbox.side-effects read_only
+  // @toolbox.side-effects update
   // SyncCatalog updates a catalog from its remote.
+  //
+  // It is `update` and not `read_only`, because `git pull` moves the checkout's ref and rewrites
+  // its working tree: the catalog an agent reads afterwards is not the one it read before. This
+  // was declared `read_only` and the declaration was never exercised, because the subsystem did
+  // not embed its own source and every method here therefore reached the policy layer
+  // unclassified — which the default policy withholds, so the misdeclaration changed nothing
+  // observable. Adding the source exposed it: with the annotation corrected, a deployment that
+  // grants reads does not thereby grant the ability to change what a catalog contains.
   //
   // A sync that cannot be completed is reported with the repository's path and nothing is
   // resolved: a catalog that resolved its own conflicts would be choosing a side in somebody
